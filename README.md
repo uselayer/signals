@@ -158,7 +158,7 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   make one grouped message, edited in place as more buy. Big trades ($10,000 or more, from the SDK's big trades)
   in the markets someone picked (onboarding or the Feed's Change, saved to their account; Skip means none) alert them too.
   You get every trade of a trader you follow unless you choose fewer for them (on their page, or "Fewer alerts"):
-  only bets over an amount you pick, or one summary every 6 hours; a sale of something they alerted you about still
+  only trades over an amount you pick, or one summary every 6 hours; a sale of something they alerted you about still
   comes. Following a busy trader (over 20 alerts a day over the past week, read back once on the background budget)
   says so in Telegram and on their page, with an amount about 3 of their bets a day reached that week: an estimate,
   not a promise. At most 200 alerts per person per UTC day, as a safety limit; the message at the limit says when

@@ -89,7 +89,7 @@ behind Vercel (see README, "Hosting").
   it was never reached, or it said 429. When it may have (a 5xx, no answer once the request went out, the engine
   stopping mid-request) it's recorded as unknown, with why, never asked again. A refusal fails it, and a chat that
   blocked the bot is disconnected. Every trade of a trader you follow alerts unless you chose fewer for them
-  (`alert_for` in follows.json: only bets over an amount, or a summary every 6 hours; `_wants`), and a sale of
+  (`alert_for` in follows.json: only trades over an amount, or a summary every 6 hours; `_wants`), and a sale of
   something their alert told you about always comes. Following a busy trader (over 20 alerts a day over the past
   week: `_measure_pace`, kept in alerts.db `pace`) says so with an amount about 3 of their bets a day reached, worded
   as an estimate from last week, never a promise. At most 200 alerts per person per UTC day (a safety limit), then
