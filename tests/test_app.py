@@ -84,6 +84,42 @@ class _Score:
         return SCORE | {"wallet": "0xnew"}
 
 
+def test_the_backup_check_runs_once_a_day_and_check_again_keeps_its_hour(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old Worth following check is only the fallback and the way back from the directory: it runs again once
+    its result is a day old (it was 6 hours). Hosted "Check again" still starts one once the last is an hour old,
+    and validation still compares scores worked out within 6 hours of the check's."""
+    started: list[float] = []
+    age = {"s": 0.0}
+    monkeypatch.setattr(engine, "_worth_age_s", lambda: age["s"])
+    monkeypatch.setattr(engine, "worth_refresh", lambda: started.append(age["s"]))
+    monkeypatch.setattr(engine, "_worth", {"running": False, "done": 0, "total": 0, "error": None})
+
+    class OneRound:  # the loop's wait: one round, then stop
+        def __init__(self) -> None:
+            self.done = False
+
+        def is_set(self) -> bool:
+            return self.done
+
+        def wait(self, s: float) -> None:
+            self.done = True
+
+    for hours in (6, 23.9, 24, 30):
+        age["s"] = hours * 3600
+        monkeypatch.setattr(engine, "_worth_stop", OneRound())
+        engine._worth_loop()
+    assert started == [24 * 3600, 30 * 3600] and engine.WORTH_MAX_AGE_S == 24 * 3600
+    started.clear()
+    monkeypatch.setattr(engine, "HOSTED", True)
+    for hours in (0.5, 2):
+        age["s"] = hours * 3600
+        api.post("/api/worth/refresh")
+    assert started == [2 * 3600] and engine.WORTH_MIN_AGE_HOSTED_S == 3600  # unchanged
+    assert engine.DISCOVERY_APART_S == 6 * 3600  # its own number, not the check's cadence
+
+
 def test_worth_lists_the_last_check_without_bets_and_scores_new_wallets_on_demand(
     api: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
