@@ -318,3 +318,23 @@ def test_a_copy_status_is_one_of_four_words_everywhere(run_js: Any) -> None:
     assert got == ["Copyable", "Copy not proven", "Copy not proven"]  # never a word the engine doesn't say
     assert [engine._board(s | {"sample": []})["copy_label"] for s in (COPYABLE, SCORE | {"copyable": "no", "copy": losing})] == [
         "Copyable", "Costly to copy"]  # fmt: skip
+
+
+WIN = ("esc", "WIN_LABEL", "WIN_MIN", "winPct", "winCell", "winMeta")
+
+
+def test_the_traders_list_shows_a_win_rate_from_ten_settled_trades_as_the_sort_ranks(run_js: Any) -> None:
+    """ "54%" over "31 of 57", neutral; under the engine's WIN_MIN, a faint "—" over how many settled, so the cell
+    and the sort (win_low, from WIN_MIN) say the same thing; a phone card's meta line opens with it."""
+    got = run_js(WIN, """[{won: 31, settled: 57}, {won: 6, settled: 10}, {won: 1, settled: 1}, {won: 0, settled: 0}, {}]
+      .map((s) => [winCell(s), winMeta(s)]).concat([[WIN_MIN, WIN_LABEL]])""")
+    assert got[0] == ['<span class="lb-main">54%</span><span class="lb-sub">31 of 57</span>', "Won 54% (31 of 57)"]
+    assert got[1][0].startswith('<span class="lb-main">60%</span>')  # 10 settled: shown, as it ranks
+    assert got[2] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">only 1 settled</span>', "Win rate: only 1 settled"]
+    assert got[3] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">none settled yet</span>', "Win rate: none settled yet"]
+    assert got[4] == ['<span class="lb-none">—</span>', ""]  # not worked out: unknown, never 0
+    assert got[5] == [engine.WIN_MIN, "Win rate"]  # the page's minimum is the engine's
+    assert all("gain" not in c and "loss" not in c for c, _ in got[:5])  # never green or red
+    page = (engine.HERE / "static" / "index.html").read_text()
+    assert 'head("won", `${WIN_LABEL}<small>30 days</small>`)' in page and "Won, 30 days" not in page
+    assert "Close rates: more trades rank higher." in page and "settled · ${readDays(s)} days" not in page
