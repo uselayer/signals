@@ -891,15 +891,15 @@ const STATUS = {
   won: ["Won", "won"], lost: ["Lost", "lost"], closed: ["Closed", "done"],
 };
 const statusLine = (st) => STATUS[st] ? `<span class="status ${STATUS[st][1]}"><i></i>${STATUS[st][0]}</span>` : `<span class="status"><i></i>Price unknown</span>`;
-// For a trader copying isn't offered for, an open trade says only where the price is: no colour, nothing that
-// reads as a cue to buy. Settled trades say how they ended, as for anyone.
+// An open trade says only where the price is, for every trader: no colour, nothing that reads as a cue to buy.
+// Settled trades say how they ended.
 const OPEN = new Set(["in", "moved"]);
 const neutralStatus = (paid, now) => {
   if (now == null || paid == null) return `<span class="status"><i></i>Price unknown</span>`;
   const [p, n] = centsPair(paid, now);
   return `<span class="status"><i></i>Now ${n} · they paid ${p}</span>`;
 };
-const tradeStatus = (b, offered) => offered || !OPEN.has(b.status) ? statusLine(b.status) : neutralStatus(b.price, b.price_now);
+const tradeStatus = (b) => OPEN.has(b.status) ? neutralStatus(b.price, b.price_now) : statusLine(b.status);
 const SETTLED = new Set(["won", "lost", "closed"]);
 const GET_IN = 0.03; // at most 3¢ above (GET_IN in app.py), and at most 5¢ below (FELL_BY)
 function statusExplain(b) {
@@ -987,13 +987,9 @@ function buyButtons(b) {
 
 // ---- trade cards (feed, and a trader's open trades) ----
 let shown = []; // the trades on screen, so a card can open its sheet
-// How far the price has moved since they bought, for coloring "Now": 0 when it hasn't, or isn't known.
-const moveOf = (b) => b.price != null && b.price_now != null && Math.abs(b.price_now - b.price) >= 0.0005 ? b.price_now - b.price : 0;
 function tradeCard(b, i, { who = true } = {}) {
   const [paid, now] = centsPair(b.price, b.price_now);
-  // Copying offered (copy_ok): the price window in colour. Anyone else, including a trader page's open trades
-  // (no copy_ok there): where the price is, no colour, no "you can still get in". The market link stays for all.
-  const offered = b.copy_ok === true;
+  // The same for every trader: where the price is, no colour, no "you can still get in". The market link stays.
   const name = displayName(b.name, b.wallet);
   const top = who ? `<div class="trade-top">${avatar(b.wallet, 28)}<span class="who"><span class="name">${esc(name)}</span>${tier(b.segment, true)}</span>
       <span class="when">${[b.category, b.at ? ago(b.at) : ""].filter(Boolean).map(esc).join(" · ")}</span></div>` : "";
@@ -1004,9 +1000,9 @@ function tradeCard(b, i, { who = true } = {}) {
     <h3 class="trade-title">${esc(b.title || "Untitled market")}</h3>
     ${b.outcome || b.url ? `<div class="trade-tags">${b.outcome ? `<span class="chip">${esc(b.outcome)}</span>` : ""}${b.venue === "kalshi" ? marketLink(b.url, "Kalshi ↗") : marketLink(b.url)}</div>` : ""}
     ${b.venue === "kalshi" ? "" : venueNote(b.us)}
-    <div class="trade-nums"><span>Bought at <b>${paid}</b><span class="sep">·</span>Now <b>${offered ? pl(moveOf(b), now) : now}</b></span><span class="amt">${usd(b.usd)} in</span></div>
+    <div class="trade-nums"><span>Bought at <b>${paid}</b><span class="sep">·</span>Now <b>${now}</b></span><span class="amt">${usd(b.usd)} in</span></div>
     ${alsoBought(b)}
-    <div class="trade-foot">${tradeStatus(b, offered)}${act}</div>
+    <div class="trade-foot">${tradeStatus(b)}${act}</div>
   </article>`;
 }
 // A sell by a trader you follow (Following only): information, never a suggestion to sell and nothing to buy, so
@@ -1033,15 +1029,14 @@ function alsoBought(b, did = "bought") {
 }
 function tradeSheet(b) {
   const [paid, now] = centsPair(b.price, b.price_now);
-  const offered = b.copy_ok === true; // as on the card
   const name = displayName(b.name, b.wallet);
   const panel = sheet(`
     <h2>${esc(b.title || "Untitled market")}</h2>
     ${b.outcome ? `<div style="margin-top:10px"><span class="chip">${esc(b.outcome)}</span></div>` : ""}
-    <div style="margin-top:18px" id="sheetstatus">${!offered && OPEN.has(b.status) ? tradeStatus(b, false) : `${statusLine(b.status)}<p class="explain">${statusExplain(b)}</p>`}</div>
+    <div style="margin-top:18px" id="sheetstatus">${OPEN.has(b.status) ? tradeStatus(b) : `${statusLine(b.status)}<p class="explain">${statusExplain(b)}</p>`}</div>
     ${alsoBought(b)}
     <div class="kv">
-      <div><span>Trader paid</span><b>${paid}</b></div><div><span>Market price now</span><b>${offered ? pl(moveOf(b), now) : now}</b><small>Not a price you can buy at</small></div>
+      <div><span>Trader paid</span><b>${paid}</b></div><div><span>Market price now</span><b>${now}</b><small>Not a price you can buy at</small></div>
       <div><span>They put in</span><b>${usd(b.usd)}</b></div><div><span>Contracts</span><b>${b.size != null ? Math.round(b.size).toLocaleString() : "—"}</b></div>
       ${b.at || b.category ? `<div><span>When</span><b>${b.at ? ago(b.at) : "—"}</b></div><div><span>Category</span><b>${esc(b.category || "—")}</b></div>` : ""}
     </div>
@@ -1428,8 +1423,7 @@ setInterval(() => { const u = $("#updated"), at = feed[FEED_KEYS[feedView()][1]]
 // buy you can best still follow (you can still get in, then whoever bought first) and lists the others;
 // it sorts by the newest buy of the lot.
 const LEAD = { in: 0, moved: 1 };
-// Among buys you can still get into, one copying is offered for leads, so a neutral card never hides it.
-const leadOf = (b) => (LEAD[b.status] ?? 2) * 2 + (b.status === "in" && b.copy_ok === true ? 0 : 1);
+const leadOf = (b) => LEAD[b.status] ?? 2;
 function oneCardPerTrade(bets) {
   const by = new Map();
   for (const b of bets) {
@@ -2351,7 +2345,6 @@ function renderProfile() {
   // carries it, kept (stored_at) or not, so the header always says how old they are
   const checkedAt = s.stored_at ?? s.scored_at ?? null;
   const chart = pfChart(s, n);
-  const can = s.copy_ok === true;
   const period = s.periods ? `<div class="lb-period" role="group" aria-label="Period">${Object.keys(PF_PERIOD).map((p) => `<button type="button" data-pfperiod="${p}" aria-pressed="${n === p}">${p.toUpperCase()}</button>`).join("")}</div>` : "";
 
   // why they're here: the verdict (the engine's why_lines), the SDK's own warnings, and when
@@ -2367,7 +2360,7 @@ function renderProfile() {
       .filter((p) => !["won", "lost", "closed"].includes(p.status)) : null;
     const closedSdk = d && Array.isArray(d.closed) ? d.closed : null;
     const settled = (s.sample || []).filter((b) => b.payout != null).slice(0, 10);
-    const openRow = (p) => `<div class="pf-li"><div><div class="t">${esc(p.title)}</div><div class="s">${p.outcome ? `<span class="pf-oc">${esc(p.outcome)}</span>` : ""}${p.size != null ? `${Math.round(p.size).toLocaleString()} at ${cents(p.price)} · ${usd((p.price ?? 0) * p.size)}` : ""}${p.now != null ? ` · now ${cents(p.now)}` : ""}${p.url ? ` · ${marketLink(p.url)}` : ""}${usInline(p.us)}</div></div><div class="r">${tradeStatus({ status: p.status, price: p.price, price_now: p.now }, can)}</div></div>`;
+    const openRow = (p) => `<div class="pf-li"><div><div class="t">${esc(p.title)}</div><div class="s">${p.outcome ? `<span class="pf-oc">${esc(p.outcome)}</span>` : ""}${p.size != null ? `${Math.round(p.size).toLocaleString()} at ${cents(p.price)} · ${usd((p.price ?? 0) * p.size)}` : ""}${p.now != null ? ` · now ${cents(p.now)}` : ""}${p.url ? ` · ${marketLink(p.url)}` : ""}${usInline(p.us)}</div></div><div class="r">${tradeStatus({ status: p.status, price: p.price, price_now: p.now })}</div></div>`;
     const closedRow = (c) => {
       const sdk = "result" in c, when = c.closed_at || c.at;
       const bought = sdk ? `${c.size != null ? `${Math.round(c.size).toLocaleString()} ` : ""}${c.avg_price != null ? `at ${cents(c.avg_price)}` : "bought"}` : `bought at ${cents(c.price)}`;
