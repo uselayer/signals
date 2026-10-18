@@ -54,8 +54,13 @@ behind Vercel (see README, "Hosting").
   Polymarket's market status (the SDK's `preview_copy`), never from the price, and the amount is priced from
   the cheapest price for sale now, up to `BUY_LIMIT` (3¢) above it, a limit the page discloses. It shows the
   estimated cost, what's for sale within the limit, the fee, the estimated slippage and when the book was read
-  (and that their trade's time is when it was made on Polymarket). Their price is context ("They paid 37¢, 12m ago, for context"),
-  never a target. It's always an estimate: never imply a guaranteed fill (it may fill higher, in part, or not
+  (and that their trade's time is when it was made on Polymarket). Three prices, each with its own name every time: theirs is context, never a target
+  ("Your estimated price: 33¢ a contract (34.1¢ with the fee). Trader paid 31¢."), and the sheet's "Market price now"
+  (`price_now`, Polymarket's position price, never called the mid) is "Not a price you can buy at". Profit or loss
+  comes first, then the total back ("+$19.11 profit · $29.00 back in total", "−$9.89 loss · You get nothing back"),
+  uncoloured, with "Not spent" for what's left of the amount. International's button sits right under its estimate;
+  Polymarket US is one line after it ("US prices and fees differ. The estimate above doesn't apply.", "View US market
+  ↗"), with how the two may pay out differently in view and how they were matched folded ("Match details"). It's always an estimate: never imply a guaranteed fill (it may fill higher, in part, or not
   at all), and no green or "you can still get in" in it. A quote that fails shows no price: when the book moved
   between the reads (`price_changed`) it says "Price changed—refresh quote", never that nothing is for sale;
   "Only $X is for sale" is only for an amount bigger than the book holds within the limit. Transparency over a

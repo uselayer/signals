@@ -135,13 +135,16 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
     page = api.get("/").text
     for words in ('class="pf-verdict"', 'id="pfcopy"', 'class="pf-warn"', 'class="pf-facts"', "Their numbers", 'class="pf-grid"', 'class="pf-rows"',
                   "<dt>Last bought</dt>", "See activity", 'id="whycopy"', "Why?", "How we measure this",
-                  "What buying now costs", "An estimate, not a guaranteed fill", "is for sale within 3¢ of the cheapest price",
+                  "What buying now costs", "not a guaranteed fill", "is for sale within 3¢ of the cheapest price",
                   "Priced up to 3¢ above the cheapest price for sale", "Estimated slippage: your average fill",
-                  "Order book and market status read at", "for context."):  # fmt: skip
+                  "Order book and market status read at", "Your estimated price: ", "Market price now",
+                  "Not a price you can buy at", "Trader paid", "Not spent", "back in total", "You get nothing back",
+                  "Signals places no orders. You buy on the exchange yourself."):  # fmt: skip
         assert words in page, words
     for gone in ("<b>Lately</b>", "<b>Worth knowing</b>", "<b>Consistent</b>", "<b>Can you copy them</b>",
                  "What copying it costs", "within 3¢ of their price", 'class="pf-stats"', '["stats", "Stats"]', "Held until the market settles:", "Worst drop",
-                 "<b>Won:</b>", "<b>Resting orders:</b>"):  # the old lines
+                 "<b>Won:</b>", "<b>Resting orders:</b>", "for context.", "<span>Price now</span>", "You get ${money",
+                 "You lose ${money", "fills at ${c1"):  # the old lines
         assert gone not in page, gone
 
 
