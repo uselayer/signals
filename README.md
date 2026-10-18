@@ -82,8 +82,9 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
   - One bar: on the left the market chips (your onboarding choice) and **Copyable only**; on the right
     **Search name or wallet**, the period (7D / 30D / 90D, once the SDK provides it) and the sort: Recommended
     (the checks' order), Most consistent, Profit, Win rate, Most active, Copy result.
-  - Columns, grouped: **Track record** (12-week consistency, profit, trend, won X of Y settled in the last 30
-    days), **Style** (their usual trade over the last 30 days and how often they trade), **Copying** (what a copy a few minutes late made
+  - Columns, grouped: **Track record** (12-week consistency, profit, trend, and **Win rate** over 30 days: "54%"
+    over "31 of 57", neutral since 50% isn't break-even on Polymarket, shown, like its sort, from 10 settled trades,
+    else "only N settled" / "none settled yet"; sorting by it says "Close rates: more trades rank higher"), **Style** (their usual trade over the last 30 days and how often they trade), **Copying** (what a copy a few minutes late made
     after fees, as a share of what it paid). On a phone each trader is one card.
   - Weeks in profit, trend, 7D/90D and the "per $ traded" return come from the SDK's profit history (uselayer
     0.6). Until then they show "—" and **Most consistent** says "coming soon"; nothing is made up.
@@ -122,7 +123,8 @@ Every trader Signals follows trades on Polymarket International: that's where tr
 trades on Polymarket US, a separate exchange with its own markets, prices and fees. Every trade says so ("Traded on
 Polymarket International"), and the quote ("What buying now costs") is for International only.
 
-When a market has a verified twin on Polymarket US, the trade shows "View on Polymarket US ↗", says prices and
+When a market has a verified twin on Polymarket US, the trade card shows "View on Polymarket US ↗" (its sheet: one
+line under International's button, "Also on Polymarket US · US prices and fees differ", "View US market ↗"), says prices and
 liquidity there may differ, and lists every way the two may settle differently. Otherwise it says "No verified US
 match found" (which never means the market isn't listed there). Twins come from Layer (`signals/us_match.py`,
 needs `LAYER_API_KEY`): Layer matches each Polymarket to Kalshi, so a twin is the International market's Kalshi
@@ -158,7 +160,7 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   make one grouped message, edited in place as more buy. Big trades ($10,000 or more, from the SDK's big trades)
   in the markets someone picked (onboarding or the Feed's Change, saved to their account; Skip means none) alert them too.
   You get every trade of a trader you follow unless you choose fewer for them (on their page, or "Fewer alerts"):
-  only bets over an amount you pick, or one summary every 6 hours; a sale of something they alerted you about still
+  only trades over an amount you pick, or one summary every 6 hours; a sale of something they alerted you about still
   comes. Following a busy trader (over 20 alerts a day over the past week, read back once on the background budget)
   says so in Telegram and on their page, with an amount about 3 of their bets a day reached that week: an estimate,
   not a promise. At most 200 alerts per person per UTC day, as a safety limit; the message at the limit says when

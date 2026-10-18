@@ -324,7 +324,7 @@ def test_connecting_describes_the_alert_rules(api: TestClient, monkeypatch: pyte
                   "Not every trade gets its own message", "buys of one outcome within 30 minutes come as one",
                   "more buys of that outcome (or more sells of it) are left out for 6 hours", "two or more traders you follow buy the same thing",
                   "all but decided (2¢ or less, 98¢ or more)", "trades of $10,000 or more", "At most 200 alerts a day",
-                  "unless you choose fewer for them", "only bets over an amount you pick", "one summary every 6 hours",
+                  "unless you choose fewer for them", "only trades over an amount you pick", "one summary every 6 hours",
                   "Fewer alerts under any alert", "A sale of something they alerted you about still comes right away",
                   "Following: Sam"):  # fmt: skip
         assert words in text, words
@@ -1256,7 +1256,7 @@ def test_an_alerts_db_from_before_delivery_states_keeps_its_alerts_as_sent(api: 
     assert m["alerts"]["sent"] == 1 and m["alerts"]["delivery"]["sent"] == 1
 
 
-# ---- every trade by default; per trader: only bets over an amount, or a summary; busy traders get a warning ----
+# ---- every trade by default; per trader: only trades over an amount, or a summary; busy traders get a warning ----
 
 
 def _buys(w: str, n: int, start: int = 0) -> list[int]:
@@ -1470,11 +1470,11 @@ def test_following_a_busy_trader_says_so_with_an_estimate_not_a_promise(api: Tes
     engine._pace_after_follow("user_1", SAM)
     m = engine.tg.sent[-1]
     assert m["text"].startswith("<b>Sam</b> is a busy trader: about 103 alerts a day over the past week.")
-    assert "Based on their past week, bets of about $2,000 or more came roughly 3 times a day." in m["text"]
+    assert "Based on their past week, trades of about $2,000 or more came roughly 3 times a day." in m["text"]
     assert "That's an estimate from last week, not a promise of how many alerts you'll get." in m["text"]
     assert "At most 200 alerts a day in all." in m["text"]
     keys = [[(b["text"], b["callback_data"]) for b in row] for row in m["reply_markup"]["inline_keyboard"]]
-    assert keys == [[("Every trade", f"am:{SAM}:a"), ("Only bets over $2,000", f"am:{SAM}:o")],
+    assert keys == [[("Every trade", f"am:{SAM}:a"), ("Only trades over $2,000", f"am:{SAM}:o")],
                     [("A summary every 6 hours", f"am:{SAM}:s")]]  # fmt: skip
 
 
@@ -1511,7 +1511,7 @@ def test_fewer_alerts_under_an_alert_offers_the_choices_and_a_tap_saves_one(api:
     text = engine.tg.sent[-1]["text"]
     assert text.startswith("From <b>Sam</b> you get every trade.") and "about 103 alerts a day" in text and "not a promise" in text
     _tap(f"am:{SAM}:o")
-    assert engine.tg.sent[-1]["text"] == "Done: from <b>Sam</b> you'll get only bets of $2,000 or more."
+    assert engine.tg.sent[-1]["text"] == "Done: from <b>Sam</b> you'll get only trades of $2,000 or more."
     assert engine._choice(engine._load_follows()["users"]["user_1"], SAM) == ("over", 2000.0)
     _tap(f"am:{SAM}:s")
     assert engine._choice(engine._load_follows()["users"]["user_1"], SAM) == ("summary", None)
@@ -1532,7 +1532,7 @@ def test_a_trader_page_shows_the_choice_and_a_busy_traders_estimate(run_js: Any)
     }})()""")  # fmt: skip
     busy, quiet = got
     assert "They trade a lot: about 440 alerts a day over the past week." in busy
-    assert "bets of about $1,700 or more came roughly 3 times a day. That's an estimate from last week, not a promise." in busy
+    assert "trades of about $1,700 or more came roughly 3 times a day. That's an estimate from last week, not a promise." in busy
     assert 'value="over" selected' in busy and 'value="1700"' in busy and "A summary every 6 hours" in busy
-    assert 'data-over hidden' not in busy  # the amount shows with "only bets over"
+    assert 'data-over hidden' not in busy  # the amount shows with "only trades over"
     assert "They trade a lot" not in quiet and 'value="all" selected' in quiet and "data-over hidden" in quiet

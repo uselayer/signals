@@ -2546,7 +2546,7 @@ def cap_text(now: float | None = None) -> str:
 
 
 # What you get from each trader you follow (follows.json: "alert_for" {wallet: {"mode", "usd"}}): every trade (the
-# default), only bets of at least "usd" dollars, or a summary every SUMMARY_S. Trades you don't get are still in the
+# default), only trades of at least "usd" dollars, or a summary every SUMMARY_S. Trades you don't get are still in the
 # Feed. Whatever the choice, a sale of something their buy alert told you about (_told) still comes.
 ALERT_MODES = ("all", "over", "summary")
 SUMMARY_S = 6 * 3600  # "summary": their trades go out as one summary per person this long after the first was held
@@ -2735,11 +2735,11 @@ class AlertChoice(BaseModel):
 
 @app.put("/api/me/follows/{wallet}/alerts")
 def choose_alerts(wallet: str, req: AlertChoice, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
-    """What you get from a trader you follow: every trade ("all"), only bets of ``usd`` dollars or more ("over"), or
+    """What you get from a trader you follow: every trade ("all"), only trades of ``usd`` dollars or more ("over"), or
     a summary every SUMMARY_S ("summary")."""
     _private(response)
     if req.mode not in ALERT_MODES:
-        raise HTTPException(400, detail="Choose every trade, only bets over an amount, or a summary.")
+        raise HTTPException(400, detail="Choose every trade, only trades over an amount, or a summary.")
     if req.mode == "over" and not (req.usd and 0 < req.usd <= 10_000_000):
         raise HTTPException(400, detail="Enter an amount in dollars, more than $0.")
     u = _set_choice(uid, wallet.lower(), req.mode, req.usd)
@@ -2886,7 +2886,7 @@ CONNECTED = (
     "more traders you follow buy the same thing, one message lists them all and is updated as more buy. Nothing comes "
     "for a market that's all but decided (2¢ or less, 98¢ or more). If you've picked markets on Signals, trades of "
     f"${WHALE_USD:,.0f} or more there come too.\n\n"
-    "You get alerts for all of a trader's trades unless you choose fewer for them: only bets over an amount you pick, "
+    "You get alerts for all of a trader's trades unless you choose fewer for them: only trades over an amount you pick, "
     f"or one summary every {SUMMARY_S // 3600} hours. Choose on their page on Signals or with Fewer alerts under any "
     "alert. A sale of something they alerted you about still comes right away. At most "
     f"{DAILY_CAP} alerts a day, as a safety limit."
@@ -2912,7 +2912,7 @@ def _vote(chat: str, data: str) -> str | None:
 
 def _on_choice(chat: str, data: str) -> None:
     """"Fewer alerts" under an alert (``few:<wallet>``): what you get from that trader now, and the choices; a choice
-    (``am:<wallet>:a|o|s``: every trade, only bets over the suggested amount, a summary) saves it and says so. Only for
+    (``am:<wallet>:a|o|s``: every trade, only trades over the suggested amount, a summary) saves it and says so. Only for
     a trader the chat's account follows."""
     uid = _chat_owner(chat)
     w = data.split(":")[1] if data.count(":") >= 1 else ""
@@ -3538,9 +3538,9 @@ def _set_choice(uid: str, trader: str, mode: str, usd: float | None = None) -> d
 
 
 def _choice_words(mode: str, usd: float | None) -> str:
-    """A choice as the person reads it: "every trade", "only bets of $1,700 or more", "a summary every 6 hours"."""
+    """A choice as the person reads it: "every trade", "only trades of $1,700 or more", "a summary every 6 hours"."""
     if mode == "over":
-        return f"only bets of ${usd:,.0f} or more"
+        return f"only trades of ${usd:,.0f} or more"
     return f"a summary every {SUMMARY_S // 3600} hours" if mode == "summary" else "every trade"
 
 
@@ -3627,16 +3627,16 @@ def _about(usd: float) -> str:
 
 def _estimate_line(p: dict[str, Any]) -> str:
     """The suggested amount, said as what it is: an estimate from their past week, not a promise."""
-    return (f"Based on their past week, bets of about {_about(p['usd'])} or more came roughly {SUGGEST_PER_DAY} times a"
+    return (f"Based on their past week, trades of about {_about(p['usd'])} or more came roughly {SUGGEST_PER_DAY} times a"
             " day. That's an estimate from last week, not a promise of how many alerts you'll get.")  # fmt: skip
 
 
 def _choices_markup(trader: str, p: dict[str, Any] | None) -> dict[str, Any]:
-    """The choices for one trader, as Telegram buttons (``am:<wallet>:a|o|s``); "only bets over" when there's an
+    """The choices for one trader, as Telegram buttons (``am:<wallet>:a|o|s``); "only trades over" when there's an
     amount to suggest."""
     row = [{"text": "Every trade", "callback_data": f"am:{trader}:a"}]
     if p and p.get("usd"):
-        row.append({"text": f"Only bets over {_about(p['usd'])}", "callback_data": f"am:{trader}:o"})
+        row.append({"text": f"Only trades over {_about(p['usd'])}", "callback_data": f"am:{trader}:o"})
     return {"inline_keyboard": [row, [{"text": f"A summary every {SUMMARY_S // 3600} hours", "callback_data": f"am:{trader}:s"}]]}
 
 
