@@ -238,6 +238,7 @@
   .receipt span { color: var(--muted); }
   .receipt .total span, .receipt .total b { color: var(--fg); font-weight: 600; }
   .receipt .spare span, .receipt .spare b { font-size: 13.5px; font-weight: 400; color: var(--muted); }
+  .copybox p.even { color: var(--fg); font-variant-numeric: tabular-nums; }
   .copybox .qnote { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
   .copybox .qwarn { font-size: 14px; color: var(--fg); background: color-mix(in srgb, var(--fg) 5%, transparent); border-radius: 10px; padding: 10px 12px; }
   details.qmore { margin: 0 0 16px; border-top: 1px solid var(--line); }
@@ -1133,6 +1134,15 @@ function quoteFold(p, twin = false) {
 }
 // Money you put in or get back, to the cent: "$49.91", "+$42.09".
 const money = (x, signed = false) => x == null ? "—" : `${x < 0 ? "−" : signed && x > 0 ? "+" : ""}$${Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// Your break-even next to the trader's, as a count in 100: "Pays off if Yes happens more than 34 in 100 (NM-P:
+// about 31)". Yours is the total ÷ contracts (fee in); theirs their dollars ÷ contracts from the trade, always "about"
+// (their fee isn't known). A fact in neutral words and colour: never better or worse, never a reason to buy or not.
+function evenLine(p, b) {
+  if (!p.contracts || p.total == null) return "";
+  const what = !b.outcome ? "it wins" : yesNo(b.outcome) ? `${esc(b.outcome)} happens` : `${esc(b.outcome)} wins`;
+  const theirs = b.usd && b.size ? ` (${esc(displayName(b.name, b.wallet))}: about ${Math.round((100 * b.usd) / b.size)})` : "";
+  return `<p class="even">Pays off if ${what} more than ${Math.round((100 * p.total) / p.contracts)} in 100${theirs}</p>`;
+}
 // A quote that priced the amount: your price, the receipt (with what's left of the amount), then profit or loss
 // first and the total back second. Neutral: no colour on either, never "you can still get in".
 function quoteHtml(p, b, spend) {
@@ -1150,6 +1160,7 @@ function quoteHtml(p, b, spend) {
       <div><span>${ifWins(b.outcome)}</span><b>${money(profit, true)} profit</b><small>${money(p.payout)} back in total</small></div>
       <div><span>${ifLoses(b.outcome)}</span><b>${money(p.total == null ? null : -p.total)} loss</b><small>You get nothing back</small></div>
     </div>
+    ${evenLine(p, b)}
     ${!p.depth_checked ? `<p class="qwarn">${INTL}'s order book couldn't be read just now, so an order this size might fill higher.</p>` : ""}
     ${slippageLine(p)}${quoteNote(p)}${quoteFold(p, !!b.us?.found)}`;
 }
