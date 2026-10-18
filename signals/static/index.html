@@ -2250,16 +2250,24 @@ const WARN_ICON = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" st
 // hidden until fixed (the owner's call): the win record of checked trades ("won" is the outcome they bought paying
 // out, even when they sold first at a loss, and its count differs by where the score came from until #124; the
 // Traders list keeps it) and the resting-orders share (its comparison feed stops at 500 rows, so it can read high).
+const POSITIONS_READ = 50; // the trader read's open positions (/api/trader): the SDK's 50 biggest by value now
 function profileNumbers(s, d, acct, n) {
   const P = PF_PERIOD[n];
   const money = (x) => x == null ? null : pl(x, usd(x, true));
   const realized = s.periods?.[n]?.realized ?? (n === "30d" ? s.realized_window : null) ?? null; // the score's curve
   const started = s.pnl_since && Date.now() - new Date(s.pnl_since) < PERIOD_DAYS[n] * 864e5 ? s.pnl_since : null;
-  // Polymarket's own all-time figures, from the trader read (/api/trader): "…" while it loads, "—" if it failed.
-  // Never the score's 30-day change in open value in their place: that isn't what's open now.
+  // Polymarket's own all-time realized, from the trader read (/api/trader): "…" while it loads, "—" if it failed.
   const stats = d && !d.error ? d.stats || {} : null, loading = d == null;
-  const now = (k) => stats ? money(stats[k] ?? null) : loading ? "…" : null;
   const allRealized = stats?.realized_pnl ?? null;
+  // Open P&L: what the positions they still hold have made or lost so far, at today's prices: Polymarket's own
+  // figure for each (as its profile page shows them), added up from the positions this page reads. Never its
+  // summary figure, which can be hours or months old, and never the score's 30-day change in open value. The read
+  // is their POSITIONS_READ biggest by value now: when it's full and even the smallest is still worth something,
+  // an open one may be missing, so it says so rather than give part of a total. Unknown is "—", never $0.
+  const held = d && !d.error && Array.isArray(d.positions) ? d.positions : null;
+  const open = held ? held.filter((p) => !SETTLED.has(p.status)) : null;
+  const cut = held != null && held.length >= POSITIONS_READ && Math.min(...held.map((p) => p.value ?? 0)) > 0;
+  const openPnl = open && !cut && open.every((p) => p.pnl != null) ? open.reduce((a, p) => a + p.pnl, 0) : null;
   // Their wallet: cash (read on-chain) plus open positions, read now (else as the check read them), with when.
   // A total only when both parts were read: one part alone is said to be one part, never shown as the wallet.
   const cash = acct.cash_usd ?? null, inPositions = acct.positions_usd ?? null;
@@ -2273,11 +2281,16 @@ function profileNumbers(s, d, acct, n) {
   const perDay = s.trades_per_day, gap = s.edge_by_delay?.["60"]?.mean;
   const allTime = s.trading_pnl ?? null, without = allTime != null && s.biggest_win != null ? allTime - s.biggest_win : null;
   return {
+    // after fees, both: Polymarket's headline "Total PnL" is before them, so it reads higher than this
     hero: { k: `Realized P&L, ${P}`, v: money(realized),
       sub: `${started ? `taken since their first trade, ${ago(started)}` : `taken in the last ${P}`}${
-        allRealized != null ? ` · ${usd(allRealized, true)} all time` : loading ? " · all time …" : ""}` },
+        allRealized != null ? ` · ${usd(allRealized, true)} all time` : loading ? " · all time …" : ""} · after fees` },
     summary: [
-      { k: "Open P&L", v: now("unrealized_pnl"), sub: "on positions still open · Polymarket's figure" },
+      { k: "Open P&L", v: loading ? "…" : openPnl != null ? money(openPnl) ?? usd(0) : null,
+        sub: loading ? "reading their positions" : !held ? "their positions couldn't be read just now"
+          : cut ? `they hold over ${POSITIONS_READ} positions, too many to add up here`
+          : openPnl == null ? "couldn't be worked out from their positions"
+          : open.length ? `on ${plural(open.length, "position")} still open, at today's prices` : "no open positions" },
       { k: "Wallet", v: wallet != null ? usd(wallet) : reading ? "…" : null,
         sub: reading ? "reading their wallet" : wallet != null ? `cash ${usd(cash)} + open positions ${usd(inPositions)}, ${when}`
           : cash != null ? `cash ${usd(cash)}; open positions couldn't be read` : inPositions != null ? `open positions ${usd(inPositions)}; cash couldn't be read` : "couldn't be read just now" },
@@ -2330,7 +2343,7 @@ function renderProfile() {
   // they last bought. How they trade is in Their numbers, their recent markets in Activity.
   const why = s.why || {};
   const risks = (s.risks || []).map(sdkText);
-  const lastAt = lastBuyAt(s, d);
+  const lastAt = lastBuyAt(s, d); // the header's "active" too: one time, the freshest of their buys we've read
 
   // the tabs
   let body;
@@ -2362,7 +2375,7 @@ function renderProfile() {
 
   app.innerHTML = `${pf.from === "explore" ? `<a class="back" href="#/traders/explore">← Explore</a>` : `<a class="back" href="#/traders">← Traders</a>`}
     <div class="pf-head">${avatar(s.wallet, 64)}
-      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, s.last_buy ? `active ${ago(s.last_buy)}` : null, checkedAt ? `checked ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}${cats[0] || s.last_buy || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
+      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `checked ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div>${copyStatus}</div></div>
     <div class="pf-grid">
       <section class="pf-card pf-sum" aria-label="Their numbers">
