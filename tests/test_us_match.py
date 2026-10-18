@@ -346,7 +346,8 @@ def test_the_quote_folds_its_working_and_shows_slippage_only_when_there_is_some(
     assert slipped.startswith('<p class="qwarn">Estimated slippage: your average fill, 95.6¢, is 0.8¢ above')
 
 
-QUOTE_HTML = (*QUOTE_DEFS, "cents", "plural", "yesNo", "ifWins", "ifLoses", "priceLine", "quoteHtml")
+QUOTE_HTML = (*QUOTE_DEFS, "cents", "plural", "yesNo", "ifWins", "ifLoses", "priceLine", "ADDR", "SHORT_ADDR",
+              "displayName", "evenLine", "quoteHtml")
 GETAFE = {"ok": True, "depth_checked": True, "contracts": 29, "price": 0.33, "worst_price": 0.33, "best_price": 0.33,
           "cost": 9.57, "fee": 0.32, "total": 9.89, "payout": 29.0, "profit_if_win": 19.11, "limit": 0.36,
           "priced_at": None}  # fmt: skip
@@ -376,3 +377,20 @@ def test_the_quote_names_three_prices_says_what_isnt_spent_and_puts_profit_or_lo
     assert "Not spent" not in exact  # all of it spent: no row
     team = run_js(QUOTE_HTML, f"quoteHtml({json.dumps(GETAFE)}, {json.dumps({'outcome': 'Jets', 'price': 0.31})}, 10)")
     assert "<span>If Jets wins</span>" in team and "<span>If not</span>" in team
+
+
+def test_the_quote_puts_your_break_even_next_to_the_trader_s_as_a_neutral_fact(run_js: Any) -> None:
+    b = {"outcome": "Yes", "price": 0.31, "usd": 6.71, "size": 22, "name": "NM-P", "us": None}
+    html = run_js(QUOTE_HTML, f"quoteHtml({json.dumps(GETAFE)}, {json.dumps(b)}, 10)")
+    assert '<p class="even">Pays off if Yes happens more than 34 in 100 (NM-P: about 31)</p>' in html  # $9.89 ÷ 29
+    assert html.index("You get nothing back") < html.index("Pays off if")  # under profit and loss, inside the box
+    row = html.split('<p class="even">')[1].split("</p>")[0]
+    for word in ("better", "worse", "cheaper", "too late", "gain", "loss", "buy"):  # a fact, never a verdict
+        assert word not in row.lower(), word
+    nameless = run_js(QUOTE_HTML, f"evenLine({json.dumps(GETAFE)}, {json.dumps(b | {'name': None, 'wallet': '0x' + '9' * 38 + '76'})})")
+    assert "(Trader 0x99…76: about 31)" in nameless  # never a wallet address on screen
+    team = run_js(QUOTE_HTML, f"evenLine({json.dumps(GETAFE)}, {json.dumps(b | {'outcome': 'Rams'})})")
+    assert team.startswith('<p class="even">Pays off if Rams wins more than 34 in 100')
+    unknown = run_js(QUOTE_HTML, f"evenLine({json.dumps(GETAFE)}, {json.dumps({'outcome': 'Yes'})})")
+    assert unknown == '<p class="even">Pays off if Yes happens more than 34 in 100</p>'  # their numbers unknown: only yours
+    assert run_js(QUOTE_HTML, f"evenLine({json.dumps(GETAFE | {'contracts': 0})}, {json.dumps(b)})") == ""
