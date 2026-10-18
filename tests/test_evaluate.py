@@ -366,3 +366,26 @@ def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_o
     assert "Strong in" not in [r["k"] for r in one]  # one kind of market: it's the test itself
     none = run_js(PROFILE, "profileNumbers({pnl_weeks: [null, null]}, null, {}, '30d').groups[0].rows")
     assert [r["v"] for r in none if r["k"] in ("Best week", "Worst week")] == [None, None]  # unknown is "—", never $0
+
+
+def test_see_all_checked_traders_lists_recommended_first_and_says_what_it_is(run_js: Any) -> None:
+    from uselayer.whale_scores import SEGMENTS
+
+    order = run_js(("SEG_ORDER", "TIER_ORDER", "tierRank"), """["no_edge", "parlays", "rising", "big_profit", "proven",
+      "mystery", "quiet"].sort((a, b) => tierRank(a) - tierRank(b))""")
+    assert order == ["proven", "quiet", "rising", "big_profit", "parlays", "no_edge", "mystery"]  # never −1 first
+    assert run_js(("SEG_ORDER", "TIER_ORDER"), "TIER_ORDER") == [k for k in SEGMENTS if k != "too_fast"]  # the SDK's
+    foot = ("esc", "exploreOn", "SEG_ORDER", "TIER", "TIER_ORDER", "checkedFoot")
+    seg = ["proven"] * 14 + ["big_profit"] * 98 + ["parlays"] * 71 + ["lucky"] * 17
+    scores = json.dumps([{"segment": x} for x in seg])
+    cut = run_js(foot, f"(exploreOn = true, [checkedFoot({{scores: {scores}, considered: 9509}}, true), "
+                       f"checkedFoot({{scores: {scores}, considered: 9509}}, false)])")
+    assert cut[0].startswith("Showing 200 of 9,509 checked traders: the 14 we recommend, then the others in tier order "
+                             "until the list is full (Big profit, edge unproven 98 · Profit rests on one win 17 · "
+                             "Parlays: skill unmeasured 71). Market makers and arbitrage aren't listed.")
+    assert 'id="lbchecked">Every checked trader is in Explore</button>' in cut[0] and "Our price test didn't show skill" not in cut[0]
+    assert cut[1].startswith("9,495 other checked traders aren't recommended: our price test didn't show skill,")
+    assert 'id="lbrec">See 186 of them</button>' in cut[1]
+    whole = run_js(foot, f"[checkedFoot({{scores: {scores}}}, true), checkedFoot({{scores: {scores}}}, false)]")
+    assert whole[0].startswith("Showing every checked trader except market makers and arbitrage")  # the check's 200
+    assert 'id="lbrec">See all checked traders</button>' in whole[1] and "lbchecked" not in whole[1]
