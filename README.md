@@ -82,9 +82,11 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
   - One bar: on the left the market chips (your onboarding choice) and **Copyable only**; on the right
     **Search name or wallet**, the period (7D / 30D / 90D, once the SDK provides it) and the sort: Recommended
     (the checks' order), Most consistent, Profit, Win rate, Most active, Copy result.
-  - Columns, grouped: **Track record** (12-week consistency, profit, trend, and **Win rate** over 30 days: "54%"
-    over "31 of 57", neutral since 50% isn't break-even on Polymarket, shown, like its sort, from 10 settled trades,
-    else "only N settled" / "none settled yet"; sorting by it says "Close rates: more trades rank higher"), **Style** (their usual trade over the last 30 days and how often they trade), **Copying** (what a copy a few minutes late made
+  - Columns, grouped: **Track record** (Weeks up, last 12; Trading profit; trend; and **Picked the winner** over 30
+    days: "96%" over "52 of 54" and "prices implied 92%" (their average price on the settled ones: buying at 92¢ picks
+    the winner about 92% of the time by price alone), neutral since 50% isn't break-even on Polymarket, shown, like its
+    sort, from 10 settled trades, else "only N settled" / "none settled yet"; sorting by it says "Close rates: more
+    trades rank higher"), **Style** (their usual opening buy over the last 30 days and how often they trade), **Copying** (what a copy a few minutes late made
     after fees, as a share of what it paid). On a phone each trader is one card.
   - Weeks in profit, trend, 7D/90D and the "per $ traded" return come from the SDK's profit history (uselayer
     0.6). Until then they show "—" and **Most consistent** says "coming soon"; nothing is made up.
