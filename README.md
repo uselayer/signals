@@ -122,7 +122,8 @@ Every trader Signals follows trades on Polymarket International: that's where tr
 trades on Polymarket US, a separate exchange with its own markets, prices and fees. Every trade says so ("Traded on
 Polymarket International"), and the quote ("What buying now costs") is for International only.
 
-When a market has a verified twin on Polymarket US, the trade shows "View on Polymarket US ↗", says prices and
+When a market has a verified twin on Polymarket US, the trade card shows "View on Polymarket US ↗" (its sheet: one
+line under International's button, "Also on Polymarket US · US prices and fees differ", "View US market ↗"), says prices and
 liquidity there may differ, and lists every way the two may settle differently. Otherwise it says "No verified US
 match found" (which never means the market isn't listed there). Twins come from Layer (`signals/us_match.py`,
 needs `LAYER_API_KEY`): Layer matches each Polymarket to Kalshi, so a twin is the International market's Kalshi

@@ -262,33 +262,37 @@ def test_the_page_names_international_and_shows_the_us_twin_or_says_no_verified_
     assert "View on Polymarket US ↗" in rows[0] and rows[1] == " · No verified US match found" and rows[2:] == ["", ""]
 
 
-def test_the_trade_sheet_explains_the_twin_its_differences_and_that_their_price_is_international(run_js: Any) -> None:
-    box = run_js(PAGE_DEFS, f"usBox({{us: {json.dumps(TWIN)}}})")
-    assert "This trade was made on Polymarket International" in box and "doesn't see trades on Polymarket US" in box
-    assert "<b>Cavaliers</b>" in box and "prices and liquidity there may differ" in box
-    assert "this trader's price isn't one to expect there" in box
-    assert "Polymarket US sends a tie to &lt;manual&gt; review." in box  # Layer's words, escaped
-    assert "View on Polymarket US ↗" in box
+def test_the_trade_sheet_says_polymarket_us_in_one_line_with_payout_differences_in_view(run_js: Any) -> None:
+    box = run_js(PAGE_DEFS, f"usBox({{us: {json.dumps(TWIN)}}}, {{inQuote: true}})")
+    line = box.split("<details")[0]  # what's in view; "Match details" is folded
+    assert "<b>Also on Polymarket US</b> · US prices and fees differ. The estimate above doesn't apply." in line
+    assert "Polymarket US sends a tie to &lt;manual&gt; review." in line  # a payout difference stays in view, escaped
+    assert "View US market ↗" in line and "btn" not in line  # a link, not a button above International's numbers
+    fold = box.split("<summary>Match details</summary>")[1]
+    assert "Layer matched the same market on Polymarket US: <b>Cavaliers</b>, through Kalshi." in fold
+    assert "doesn't see trades on Polymarket US" in fold and "this trader's price isn't one to expect there" in fold
+    plain = run_js(PAGE_DEFS, f"usBox({{us: {json.dumps(TWIN | {'differences': []})}}})")  # no quote above it
+    assert "The estimate above" not in plain and "Layer lists no differences in how the two pay out." in plain
     none = run_js(PAGE_DEFS, "usBox({us: {found: false}})")
-    assert "No verified US match found." in none and "View on Polymarket US" not in none
+    assert "No verified US match found." in none and "polymarket.us" not in none
     assert "couldn't check" in run_js(PAGE_DEFS, "usBox({us: null})")
-    assert "View on Polymarket US" not in run_js(PAGE_DEFS, f"usBox({{us: {json.dumps(TWIN)}}}, {{button: false}})")
 
 
-def test_with_a_us_twin_the_sheet_leads_with_polymarket_us_and_international_comes_second(run_js: Any) -> None:
+def test_international_s_button_sits_right_under_its_estimate_and_polymarket_us_comes_after(run_js: Any) -> None:
     defs = (*PAGE_DEFS, "buyButtons")
     intl = "https://polymarket.com/event/cle-orl"
     both = run_js(defs, f"buyButtons({{url: {json.dumps(intl)}, us: {json.dumps(TWIN)}}})")
-    assert both.index("View on Polymarket US ↗") < both.index("Buy on Polymarket International ↗")
-    assert 'class="btn wide" id="buyus"' in both and 'class="btn ghost wide" id="buyon"' in both
-    assert "Buy on Polymarket US" not in both  # "View", never "Buy": the estimate is International's
-    assert "This estimate is for Polymarket International" in both and "Signals places no orders" in both
+    assert both.startswith('<a class="btn wide" id="buyon"')  # the estimate's own exchange, first
+    assert both.index("Buy on Polymarket International ↗") < both.index("Also on Polymarket US")
+    assert both.count("Signals places no orders") == 1 and "prices may differ" not in both  # said once, in the US line
+    assert "Buy on Polymarket US" not in both and "View US market ↗" in both  # "View", never "Buy"
     prop = TWIN | {"differences": [dict(us_match.SITS_OUT)]}
-    assert "if the player doesn't play" in run_js(defs, f"buyButtons({{url: {json.dumps(intl)}, us: {json.dumps(prop)}}})")
-    for us in ("{found: false}", "null"):  # no verified twin: International is the one button, as before
+    shown = run_js(defs, f"buyButtons({{url: {json.dumps(intl)}, us: {json.dumps(prop)}}})").split("<details")[0]
+    assert "doesn&#39;t play" in shown  # a player who doesn't play: in view, not folded
+    for us in ("{found: false}", "null"):  # no verified twin: International's button, then what we know of US
         only = run_js(defs, f"buyButtons({{url: {json.dumps(intl)}, us: {us}}})")
-        assert 'class="btn wide" id="buyon"' in only and "Polymarket US" not in only
-    assert run_js(defs, "buyButtons({us: null})") == ""
+        assert only.startswith('<a class="btn wide" id="buyon"') and "polymarket.us" not in only
+    assert "Buy on" not in run_js(defs, "buyButtons({us: null})")  # no market link: no button
 
 
 def test_a_player_prop_twin_says_first_that_the_two_can_pay_differently_if_the_player_sits_out() -> None:
@@ -336,7 +340,39 @@ def test_the_quote_folds_its_working_and_shows_slippage_only_when_there_is_some(
     assert fold.startswith('<details class="qmore"><summary>How this estimate works</summary>')
     for words in ("<dt>Best price for sale</dt><dd>94.8¢</dd>", "<dd>94.8¢ (no slippage)</dd>", "<dd>95¢</dd>",
                   "<dd>97.8¢ at most</dd>", "<dd>$440,282.83, fee included</dd>", "offers above 97.8¢ aren't counted",
-                  "An estimate, not a guaranteed fill", "Polymarket US has its own order book and fees"):  # fmt: skip
+                  "so it may fill higher, only in part, or not at all", "Polymarket US has its own order book and fees"):  # fmt: skip
         assert words in fold, words
     slipped = run_js(QUOTE_DEFS, f"slippageLine({json.dumps(p | {'price': 0.956})})")
     assert slipped.startswith('<p class="qwarn">Estimated slippage: your average fill, 95.6¢, is 0.8¢ above')
+
+
+QUOTE_HTML = (*QUOTE_DEFS, "cents", "plural", "yesNo", "ifWins", "ifLoses", "priceLine", "quoteHtml")
+GETAFE = {"ok": True, "depth_checked": True, "contracts": 29, "price": 0.33, "worst_price": 0.33, "best_price": 0.33,
+          "cost": 9.57, "fee": 0.32, "total": 9.89, "payout": 29.0, "profit_if_win": 19.11, "limit": 0.36,
+          "priced_at": None}  # fmt: skip
+
+
+def test_the_quote_names_three_prices_says_what_isnt_spent_and_puts_profit_or_loss_first(run_js: Any) -> None:
+    b = {"outcome": "Yes", "price": 0.31, "us": None}
+    html = run_js(QUOTE_HTML, f"quoteHtml({json.dumps(GETAFE)}, {json.dumps(b)}, 10)")
+    assert "<p>Your estimated price: 33¢ a contract (34.1¢ with the fee). Trader paid 31¢.</p>" in html
+    for row in ("<span>29 Yes contracts × 33¢</span><b>$9.57</b>", "<span>Fee</span><b>$0.32</b>",
+                '<div class="total"><span>Estimated total</span><b>$9.89</b>',
+                '<div class="spare"><span>Not spent</span><b>$0.11</b>'):  # fmt: skip
+        assert row in html, row
+    assert "<span>If Yes wins</span><b>+$19.11 profit</b><small>$29.00 back in total</small>" in html
+    assert "<span>If No wins</span><b>−$9.89 loss</b><small>You get nothing back</small>" in html
+    assert "You get $29" not in html and "gain" not in html and "loss-" not in html  # no colour classes on either
+    assert html.count("not a guaranteed fill") == 1 and "doesn't apply there" in html  # no twin: the fold says it
+    twin = run_js(QUOTE_HTML, f"quoteHtml({json.dumps(GETAFE)}, {json.dumps(b | {'us': {'found': True}})}, 10)")
+    assert "doesn't apply there" not in twin  # said once, in the Polymarket US line under the button
+    several = GETAFE | {"price": 0.342, "worst_price": 0.35, "total": 10.2, "contracts": 29}
+    assert "Your estimated price: 34.2¢ a contract on average (35.2¢ with the fee)." in run_js(
+        QUOTE_HTML, f"priceLine({json.dumps(several)}, {{}})")  # no trader price known: not said
+    unread = GETAFE | {"depth_checked": False}
+    assert "33¢ a contract, the cheapest price for sale now (34.1¢ with the fee)" in run_js(
+        QUOTE_HTML, f"quoteHtml({json.dumps(unread)}, {json.dumps(b)}, 9.89)")
+    exact = run_js(QUOTE_HTML, f"quoteHtml({json.dumps(GETAFE)}, {json.dumps(b)}, 9.89)")
+    assert "Not spent" not in exact  # all of it spent: no row
+    team = run_js(QUOTE_HTML, f"quoteHtml({json.dumps(GETAFE)}, {json.dumps({'outcome': 'Jets', 'price': 0.31})}, 10)")
+    assert "<span>If Jets wins</span>" in team and "<span>If not</span>" in team
