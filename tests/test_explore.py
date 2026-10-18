@@ -462,3 +462,92 @@ def test_passed_our_checks_holds_back_a_score_from_before_todays_scoring_as_reco
 
 def test_the_apps_directory_lists_passed_our_checks_from_todays_format(api: TestClient) -> None:
     assert engine.directory().passed_format == engine.WORTH_FORMAT
+
+
+
+# ---- how they trade, from what's stored (no reads) ----
+
+WINDOW = ["2026-09-18T00:00:00+00:00", "2026-10-18T00:00:00+00:00"]
+
+
+def styled(d: Directory) -> tuple[str, str, str]:
+    """Three scored wallets: a longshot buyer, a bot-like favourite buyer, and a market maker."""
+    long, fav, maker = ("0x" + c * 40 for c in "cde")
+    d.add([Seen(w, "market", "Sports", name=n) for w, n in ((long, "LongLu"), (fav, "FavFay"), (maker, "MakerMo"))], at=NOW - DAY)
+    d.keep_scores([score(long, "no_edge", avg_price=0.18, decisions=30, window=WINDOW, tags=[]),
+                   score(fav, "no_edge", avg_price=0.86, decisions=3000, window=WINDOW, tags=["bot"]),
+                   score(maker, "no_view", style="market_maker", avg_price=0.5, decisions=600, window=WINDOW, tags=["bot", "market maker"],
+                         trading_pnl_window=-120.0, income_window=2400.0)], "background", at=NOW)  # fmt: skip
+    return long, fav, maker
+
+
+def test_market_makers_and_arbitrage_have_their_own_group_and_search_finds_them(d: Directory) -> None:
+    _, _, maker = styled(d)
+    assert maker not in wallets(d.browse("checked"))  # never in the other groups' lists
+    assert wallets(d.browse("makers")) == [maker]
+    row = d.browse("makers")["rows"][0]
+    assert (row["style"], row["income_window"], row["trading_pnl_window"], row["bot"]) == ("market_maker", 2400.0, -120.0, 1)
+    assert maker in wallets(d.browse("checked", q="makermo"))  # a search finds them
+    assert d.explore_counts()["makers"] == 1
+
+
+def test_explore_filters_on_how_they_trade_from_a_full_check(d: Directory) -> None:
+    long, fav, _ = styled(d)
+    assert wallets(d.browse("checked", price="long")) == [long]
+    assert wallets(d.browse("checked", price="fav")) == [fav]
+    assert wallets(d.browse("checked", pace=100)) == [fav]  # 3,000 new positions over 30 days: 100 a day
+    assert set(wallets(d.browse("checked", pace=1))) == {long, fav}
+    assert wallets(d.browse("checked", bots="only")) == [fav]
+    assert fav not in wallets(d.browse("checked", bots="hide")) and long in wallets(d.browse("checked", bots="hide"))
+    assert DORM not in wallets(d.browse("checked", price="long"))  # a quick look doesn't say: never in a style filter
+
+
+def test_a_directory_from_before_fills_how_they_trade_from_each_kept_score_once(tmp_path: Any) -> None:
+    import sqlite3
+
+    path = tmp_path / "directory.db"
+    long, fav, maker = styled(Directory(path))
+    con = sqlite3.connect(path)
+    for col in ("avg_price", "per_day", "bot", "income_window"):  # as kept before these columns
+        con.execute(f"ALTER TABLE wallets DROP COLUMN {col}")
+    con.commit()
+    con.close()
+    d = Directory(path)  # the next launch: filled from the stored scores, no read, no new score
+    rows = {r["wallet"]: r for r in d.browse("checked")["rows"] + d.browse("makers")["rows"]}
+    assert (rows[long]["avg_price"], rows[long]["per_day"], rows[long]["bot"]) == (0.18, 1.0, 0)
+    assert (rows[fav]["per_day"], rows[fav]["bot"]) == (100.0, 1) and rows[maker]["income_window"] == 2400.0
+
+
+def test_a_traders_leaderboard_places_best_first(d: Directory) -> None:
+    d.add([Seen(SEL, "leaderboard", "PNL WEEK SPORTS", rank=23), Seen(SEL, "leaderboard", "VOL ALL OVERALL", rank=900)], at=NOW)
+    assert [(b["place"], b["rank"]) for b in d.boards(SEL)] == [("PNL WEEK SPORTS", 23), ("VOL ALL OVERALL", 900)]
+    assert [(b["place"], b["rank"]) for b in d.boards(NEW)] == [("VOL ALL OVERALL", 40)]
+    assert d.boards(DORM) == []  # never on a board
+
+
+def test_the_api_lists_makers_filters_by_style_and_a_trader_page_carries_its_boards(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine.reads, "whales", NoReads())
+    _, fav, maker = styled(engine.directory())
+    assert [r["wallet"] for r in api.get("/api/traders", params={"group": "makers"}).json()["rows"]] == [maker]
+    assert [r["wallet"] for r in api.get("/api/traders", params={"group": "checked", "bots": "only"}).json()["rows"]] == [fav]
+    for bad in ({"price": "cheap"}, {"pace": 5}, {"bots": "maybe"}):
+        assert api.get("/api/traders", params={"group": "checked", **bad}).status_code == 400
+    page = api.get(f"/api/worth/{NEW}", params={"score": 0}).json()
+    assert [(b["place"], b["rank"]) for b in page["boards"]] == [("VOL ALL OVERALL", 40)]
+
+
+STYLE_ROW = ("usd", "pl", "esc", "centsSigned", "ago", "exCount", "exStats", "STYLE", "botBadge", "tier", "TIER", "SEG_ORDER", "exBadges")
+
+
+def test_a_market_makers_row_says_what_they_are_and_what_trading_and_rewards_made_them(run_js: Any) -> None:
+    r = '{group: "checked", evidence: "scored", segment: "no_view", style: "arbitrage", bot: 1, trading_pnl_window: -120, income_window: 2400}'
+    got = run_js(STYLE_ROW, f"[exStats({r}), exBadges({r})]")
+    assert kv(got[0]) == [["Trading profit, 30d", "−$120", None], ["Rewards, 30d", "$2.4K", None], ["Last trade", "unknown", None]]
+    assert got[1] == '<span class="tier t3">Arbitrage</span><span class="tier t2">Bot-like</span>'
+    q = run_js(("ex", "exSearching", "exQuery"), """(() => { Object.assign(ex, { group: "checked", price: "fav", pace: 10, bots: "hide" });
+      return exQuery(); })()""")
+    assert "price=fav" in q and "pace=10" in q and "bots=hide" in q
+    rows = run_js(("esc", "ago", "boardText", "boardShort", "boardsRow"),
+                  '[boardsRow([{place: "PNL MONTH SPORTS", rank: 12, seen_at: 1760000000}, {place: "VOL ALL OVERALL", rank: 340, seen_at: 1760000000}]), boardsRow([])]')
+    assert rows[0][0]["k"] == "Leaderboards" and rows[0][0]["v"] == "#12 monthly profit, Sports<br>#340 all-time volume"
+    assert rows[1] == []

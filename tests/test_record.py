@@ -115,3 +115,19 @@ def test_the_page_says_its_a_record_not_a_skill_test_and_unknown_stays_a_dash(ru
     assert "not a test of skill" in got[2] and "buying after them" in got[2]
     assert dict(got[3]) == {"Profit from trading": "—", "Contracts traded": "—", "Biggest win": "—",
                             "Open now": "No positions over 1 contract", "Markets": "—"}  # fmt: skip
+
+
+def test_the_records_open_profit_is_added_up_from_their_positions_never_the_summary(
+    api: tuple[TestClient, FakeChecker], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Polymarket's summary of open profit can be months old: the record adds up each position's own figure, as
+    the scored profile does. One without a figure, or none listed, leaves it unknown, never $0."""
+    client, fake = api
+    held = [WhalePosition("0xa:0", "A", "Yes", 100.0, 0.4, 0.5, 50.0, 12.5), WhalePosition("0xb:1", "B", "No", 10.0, 0.6, 0.3, 3.0, -3.0)]
+    monkeypatch.setattr(fake, "trader", lambda *a, **k: SimpleNamespace(trader=SimpleNamespace(name="Rec"), joined=None, stats=STATS,
+                                                                       positions=held, trades=[]))  # fmt: skip
+    assert client.get(f"/api/record/{W}").json()["open"]["pnl"] == 9.5
+    engine._cache.clear()
+    monkeypatch.setattr(fake, "trader", lambda *a, **k: SimpleNamespace(trader=SimpleNamespace(name="Rec"), joined=None, stats=STATS,
+                                                                       positions=[], trades=[]))  # fmt: skip
+    assert client.get(f"/api/record/{W}").json()["open"]["pnl"] is None
