@@ -444,3 +444,21 @@ def test_explore_says_what_each_figure_counts_never_bet() -> None:
     said = [w for w in words if re.search(r"\b[Bb]et(s|tors?)?\b", w.replace("/api/bet", ""))]
     assert said == []
     assert not any(re.search(r"\bbets?\b", t) for t in directory.REASON_LABELS.values())
+
+
+def test_passed_our_checks_holds_back_a_score_from_before_todays_scoring_as_recommended_does(tmp_path: Any) -> None:
+    """Explore's "Passed our checks" lists a recommended score only when it's of today's format (the app's
+    WORTH_FORMAT), as Recommended does (app.py's _consistent): an older one waits to be rescored, so the two never
+    say 125 against 14. Search still finds it (its tier is still the one it was given)."""
+    d = Directory(tmp_path / "directory.db", passed_format=10)
+    old, new = "0x" + "a" * 40, "0x" + "b" * 40
+    d.add([Seen(old, "market", "Politics", name="OldOtto"), Seen(new, "market", "Politics", name="NewNina")], at=NOW - DAY)
+    d.keep_scores([score(old, "proven", format=9), score(new, "proven", format=10)], "background", at=NOW)
+    assert wallets(d.browse("passed", now=NOW)) == [new]
+    assert d.explore_counts(now=NOW)["passed"] == 1
+    assert old in wallets(d.browse("limited", q="otto", now=NOW))  # search finds them both
+    assert Directory(tmp_path / "directory.db").passed_format == 0  # a directory opened on its own lists any format
+
+
+def test_the_apps_directory_lists_passed_our_checks_from_todays_format(api: TestClient) -> None:
+    assert engine.directory().passed_format == engine.WORTH_FORMAT

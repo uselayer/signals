@@ -454,7 +454,7 @@ _directory_writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="direct
 def directory() -> Directory:
     path = STORE_DIR / "directory.db"
     if path not in _directories:
-        _directories[path] = Directory(path)
+        _directories[path] = Directory(path, passed_format=WORTH_FORMAT)  # "Passed our checks" as Recommended holds back
     return _directories[path]
 
 
