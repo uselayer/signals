@@ -739,6 +739,21 @@ class Directory:
                  "main": cats[w][0][0] if cats.get(w) else None, "strong": [c for c, s in cats.get(w, []) if s]}
                 for w, seg, z, f, at, via in rows]  # fmt: skip
 
+    def rescore_soon(self, wallets: Iterable[str], now: float | None = None) -> int:
+        """Makes these wallets due now (``next_check``), so the evaluation scores them again next; one already due
+        sooner keeps its place. How many were changed."""
+        now = time.time() if now is None else now
+        ws = sorted({w.lower() for w in wallets})
+        changed = 0
+        with self._db() as con:
+            for i in range(0, len(ws), 500):  # SQLite's limit on ? in one statement
+                part = ws[i : i + 500]
+                changed += con.execute(
+                    f"UPDATE wallets SET next_check = ? WHERE wallet IN ({', '.join('?' * len(part))}) "
+                    "AND (next_check IS NULL OR next_check > ?)", [now, *part, now],
+                ).rowcount  # fmt: skip
+        return changed
+
     def scores_of(self, wallets: Iterable[str]) -> dict[str, dict[str, Any]]:
         """The latest score of each of these wallets, as ``score`` gives it, by wallet. A score without the trader's
         Polymarket username takes the one the directory has seen them under."""

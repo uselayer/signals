@@ -45,6 +45,7 @@ from uselayer.whale_scores import (
     COPY_BETS,
     RECOMMENDED,
     SEGMENTS,
+    Score,
     Stat,
     category_of,
     copyable_verdict,
@@ -298,7 +299,13 @@ def links(venue: str, trader_id: str) -> dict[str, Any]:
 WORTH_WALLETS = int(os.environ.get("SIGNALS_WORTH_WALLETS", "200"))
 WORTH_MAX_AGE_S = 6 * 3600
 WORTH_RETRY_S = 30 * 60  # after a failed check
-WORTH_FORMAT = 9  # bump when the kept result gains fields; an older one is re-checked on launch (8: uselayer 0.10, tiers; 9: 0.11, edge_verdict, parlays and edge_losing)
+# Before format 10 every buy's edge counted from the price paid, so a resting order's half spread read as skill;
+# a kept score can't be corrected (it has no record of which buys rested), so a recommended one waits to be rescored.
+RESTING_FORMAT = 10
+# 10 only once the installed uselayer has the correction (0.13: its scores carry ``edge_at_fill``), so a deploy before
+# the lock bump can't stamp an uncorrected score as corrected.
+_RESTING = "edge_at_fill" in getattr(Score, "__dataclass_fields__", {})
+WORTH_FORMAT = RESTING_FORMAT if _RESTING else 9  # bump when the kept result gains fields; an older one is re-checked on launch (8: uselayer 0.10, tiers; 9: 0.11, edge_verdict, parlays and edge_losing; 10: 0.13, resting buys count from the middle of the book)
 WORTH_MIN_AGE_HOSTED_S = 3600  # hosted: "Check again" only starts a new check once the last is this old
 WORTH_ONE_KEEP = 500  # wallets scored on demand, kept until the next check
 _worth_stop = threading.Event()
@@ -884,11 +891,16 @@ def _consistent(d: Directory, rows: list[dict[str, Any]]) -> list[dict[str, Any]
     """The scores whose tier is the same wherever it's read. One worked out by today's scoring (WORTH_FORMAT)
     always is. An older one is kept only when today's rules (``_upgraded``, as the check's own file is judged) give
     it the tier the directory stored, which Explore and the evaluation's schedule read; otherwise it's left out
-    until the wallet is scored again, so Traders never says one tier while the rest of Signals says another."""
+    until the wallet is scored again, so Traders never says one tier while the rest of Signals says another.
+    A recommended one from before RESTING_FORMAT is left out too, whatever today's rules say, and is due again
+    now: its edge counted a resting order's half spread as skill, and nothing kept can take it off."""
     by = {r["wallet"]: r for r in rows}
     old = [w for w, r in by.items() if (r["format"] or 0) < WORTH_FORMAT]
     differs = {w for w, s in d.scores_of(old).items() if _upgraded(s)["segment"] != by[w]["segment"]} if old else set()
-    return [r for r in rows if r["wallet"] not in differs]
+    spread = {w for w in old if (by[w]["format"] or 0) < RESTING_FORMAT and by[w]["segment"] in RECOMMENDED}
+    if spread:
+        _directory_later(lambda d: d.rescore_soon(spread))
+    return [r for r in rows if r["wallet"] not in differs | spread]
 
 
 def _in_markets(row: dict[str, Any], interests: tuple[str, ...]) -> bool:
