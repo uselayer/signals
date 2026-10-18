@@ -26,7 +26,8 @@ behind Vercel (see README, "Hosting").
   style facts (average price, new positions a day, bot-like, rewards) and its "Market makers and arbitrage" group come
   from stored scores only, never a read; the resting-orders and held-to-settlement shares stay out of it while the
   profile hides them. The check keeps
-  running beside it, so going back is one switch; `/api/discovery` compares the two (the owner's). Keeping a score
+  running beside it, once a day (`WORTH_MAX_AGE_S`: it's only the fallback and the way back now), so going back is
+  one switch, to a list up to a day old; `/api/discovery` compares the two (the owner's). Keeping a score
   costs no reads: it's written where a score is already made (`_worth_run`, `_score_of`, the launch import), and
   a score never replaces a newer one. It keeps wallets only (a follow keeps the wallet, never who follows). Its
   sweep reads through the SDK (`find_wallets`) at `DIRECTORY_RATE`, below the per-host limit with room for the
@@ -51,8 +52,8 @@ behind Vercel (see README, "Hosting").
   "What buying now costs", then "Buy on Polymarket ↗", where the user buys it themselves. A session never
   places a real-money order, not even a test one.
 - "What buying now costs" (`/api/trade/preview`, the page's `costBox`) is on every trade with a market,
-  whoever made it: a quote only, never an order. Whether copying a trader is offered (`copy_offer`) is a separate
-  record shown beside it, never a gate on it, and pricing a trade reads no score. The engine reads everything it
+  whoever made it: a quote only, never an order. Pricing a trade reads no score, and no copy estimate is shown
+  beside it (below). The engine reads everything it
   shows, never trusting a price from the page: whether the market is closed or not taking orders comes from
   Polymarket's market status (the SDK's `preview_copy`), never from the price, and the amount is priced from
   the cheapest price for sale now, up to `BUY_LIMIT` (3¢) above it, a limit the page discloses. It shows the
@@ -80,9 +81,8 @@ behind Vercel (see README, "Hosting").
   at the average price). Every alert gives the same facts for every trader (`_trade_text`): who bought which
   outcome at what price and for how much, the market, the price now, and when they traded with how long before
   the alert that was, measured ("Traded 14:02 UTC, 6 min before this alert."), never "just now" or "live".
-  Outside the "can still get in" range it says "Now 60¢, price already moved.", whoever the trader. Copying comes
-  after the facts, in one italic line (`COPY_LINE`), only for a trader copying is offered for (`copy_ok`) and
-  only while the price is still in range; never a cost in the alert: costs, the fill, liquidity and risks are the
+  Outside the "can still get in" range it says "Now 60¢, price already moved.", whoever the trader. Nothing about
+  copying (no copy line: the copy estimate isn't shown anywhere) and never a cost in the alert: costs, the fill, liquidity and risks are the
   trade page's. Every alert links "Check current price" (`#/check/<wallet>/<market>`, the trade's own page,
   neutral for every trader), and "Buy on Polymarket", which only opens the market. Sells by a trader you follow
   alert too, whatever the amount (`_sell_text`): who sold which outcome at what price and for how much, the market
@@ -108,8 +108,7 @@ behind Vercel (see README, "Hosting").
   markets alert you whoever the trader, with the same facts, at most 5
   a day within the daily cap. Only a choice made where the page asks (onboarding, or the Feed's "Your markets · Change")
   is kept on the account (per account like follows); Traders' chips only filter the view, and nothing saved or []
-  (Skip, all markets) means no big-trade alerts. For a trader copying isn't offered for, an alert is never
-  "you can still get in" and never green.
+  (Skip, all markets) means no big-trade alerts. An alert is never "you can still get in" and never green.
   Every alert and trade card keeps the link to the market, whoever the trader. Every alert, and the Feed, says
   how late it can be for where its trades come from, never a blanket figure and never "instant": a trader you
   follow is read on their own about every 30 seconds (Polymarket returns their trades there within seconds), so
@@ -129,37 +128,26 @@ behind Vercel (see README, "Hosting").
     Crypto, Esports; Skip means all markets). Nothing else: no budget, goals or signup. The choice is kept in
     localStorage (and, when picked here or with the Feed's Change, on the account for big-trade alerts), every read and write in try/catch; if storage is blocked it holds for the visit, and no one is
     ever stuck on that screen.
-  - Three separate readings, never merged: profit (track record), skill (the tier) and copying (copy status).
-    The tier is skill and track record only (uselayer 0.10's `segment`; a kept older result is re-tiered with the
-    SDK's `segment_of`): copying never moves a trader into, out of or between tiers or sections. A trader can be
-    worth following for research when copying them doesn't pay, but nothing may present a trader's activity as a
-    tested way to make money: following and the Feed are for learning what traders do, not a signal to buy
-    (`NOT_A_TIP`).
-  - Copying in plain words, for someone who has never heard of copy trading: say "buying after them" (what
-    would you have made if you'd bought the same thing after them?), never "copies" as a thing that keeps,
-    loses or gets in, and no "95% range", "ask" or "estimate" jargon on the page ("range", "the price you'd
-    actually pay"). The four status names stay as they are.
+  - Two separate readings, never merged: profit (track record) and skill (the tier). The tier is skill and track
+    record only (uselayer 0.10's `segment`; a kept older result is re-tiered with the SDK's `segment_of`). Nothing
+    may present a trader's activity as a tested way to make money: following and the Feed are for learning what
+    traders do, not a signal to buy (`NOT_A_TIP`).
+  - No copy estimate on the page or in alerts (the owner, 18 Oct: it isn't reliable yet). The engine still works
+    out a copy status (`copy_status`, `copy_offer`; `copy_label`, `copy_ok`, `copy_why`, `copy_return…` in the API)
+    from the SDK's `copyable`, but nothing anyone sees shows it or follows it: no copy status, figure, range,
+    column, sort, filter, "Copying is paused" callout, How-we-pick tab, copy line in an alert, the SDK's
+    "Copyable" check on a trader page, or colour (an open trade reads the same for every trader). A guard test
+    keeps the page's words free of "Copy", "Copyable" and "Copying". Bringing it back is the owner's call.
   - Traders lists the traders we recommend (Proven sharp, Quiet sharp, Rising) in two sections by tier, from the
     engine's `section_of`: **Sharps** (Proven and Quiet) and **Rising**. Each section has the same columns, its
-    own ranks and "Show more"; "Copyable only" filters on copy status (greyed out, with the "Copying is paused"
-    callout above the list, while nobody is Copyable), and "See all checked traders" is one flat list. A
-    trader's copy status is one of four words, the same everywhere (the engine's `copy_status`, carried as
-    `copy_label` with `copy_ok`, and the page's `copyLabel`): **Copyable** (a recommended tier, and copies
-    reliably above zero after fees), **Costly to copy** (the whole 95% range of what copies kept is below
-    zero), **Copy not proven** (it isn't reliably above zero, or too few to tell) or **Not offered** (copies
-    kept money, but the trader's own record doesn't pass the checks); a reason reads "Costly to copy: …". A
-    trader who isn't Copyable gets no copy
-    cue anywhere: their status in grey in the Copying column, and an open trade of theirs (their page, a Feed
-    card, a trader page) says only "Now 52¢ · they paid 49¢", never green or "you can still get in". The
-    "Buy on Polymarket" link, which only opens the market, "Check your price" and "What buying now costs" stay
-    for everyone: neutral market data, not a copy cue. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; consistency is 12 weeks,
+    own ranks and "Show more", and "See all checked traders" is one flat list. An open trade (their page, a Feed
+    card, a trader page) says only "Now 52¢ · they paid 49¢", for every trader, never green or "you can still
+    get in". The "Buy on Polymarket" link, which only opens the market, "Check your price" and "What buying now
+    costs" stay for everyone: neutral market data. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; consistency is 12 weeks,
     win record and usual trade the last 30 days. Consistency is "X of N weeks up", where a week counts profit
-    taken plus the change in value of trades still open. A copy estimate prices the copy at the ask (uselayer
-    0.8.1's `copy_entry`), never the middle price. A positive copy estimate that isn't reliably above zero says so
-    ("If you'd bought after them: +0.7% after fees (range −1.2% to +2.6%), but we can't tell that from luck"),
-    never shown as a gain.
-    One bar: filters on the left (market chips = the onboarding choice, Copyable only), how you view the list on
-    the right (search name or wallet, period, sort). Columns are grouped as Track record, Style and Copying.
+    taken plus the change in value of trades still open.
+    One bar: filters on the left (market chips = the onboarding choice), how you view the list on
+    the right (search name or wallet, period, sort). Columns are grouped as Track record and Style.
     Recommendations never include Big profit, edge unproven; Profit rests on one win (big profit that's a loss
     without their biggest win: the only tier that says luck); Our price test didn't show skill (the SDK's "Edge not
     proven"); Not enough data (too few trades could be checked: never shown as a verdict on skill); or Market maker or
@@ -167,14 +155,13 @@ behind Vercel (see README, "Hosting").
     fill the list: an empty result says so and names the interests that had no one. "See all checked traders" may
     show the rest, each marked.
   - Never a made-up number for a real trader on the hosted app. A figure the data doesn't have yet shows "—";
-    sample values (`SIGNALS_MOCK=1`) are for reviewing the page locally only. "Copyable" is plain text: green
-    stays for "you can still get in". The SDK's per-dollar figure is a return per dollar traded, never "ROI".
+    sample values (`SIGNALS_MOCK=1`) are for reviewing the page locally only. The SDK's per-dollar figure is a return per dollar traded, never "ROI".
   - Words: say "trade", never "bet"; never "sandbox" or "paper". Every trade with a market has "Check your
     price", which opens what buying now costs; there is no "Copy trader". Following a trader (alerts) is how you
     hear about their next trades.
   - One idea per card. The market title is the biggest text; status is one line with a dot.
-  - Color means something: green = you can still get in, grey = moved away, neutral = settled. Nothing else is
-    colored.
+  - Color means something: green and red are gains and losses (a profit, Won, Lost); an open trade's status
+    (where the price is) is neutral for every trader. Nothing else is colored.
   - Plain words, sentence case, one font (Host Grotesk, as on Layer's site), tabular numbers, whole cents (tenths
     only under 1¢ or when two prices would look equal). No UPPERCASE headers, no tooltip-on-header help.
   - Methodology (tests, z-scores, margins) stays out of the main view: in "How we pick traders" or a Details fold.
@@ -185,7 +172,7 @@ behind Vercel (see README, "Hosting").
     empty and error states.
   - The Feed has two parts. **Following** (`#/`, the default, `/api/me/feed`): every trade from the last day of
     the traders you follow, whoever they are (following is also research). **Recommended** (`#/recommended`, `/api/live`): trades of $1,000 or more (`RECOMMENDED_MIN_USD`) from
-    the traders in Sharps and Rising, with neutral cards for anyone not copy_ok. Recommended
+    the traders in Sharps and Rising, with the same neutral cards as Following. Recommended
     stays quiet (fewer, bigger trades) and never more prominent than Following: second in the switch, never the
     default. Both keep the switch "Only trades I can still get into", one card per outcome with "Also bought
     by", and the delay line. Big trades (`#/big`) is linked from the foot of Recommended. Traders' trades come from

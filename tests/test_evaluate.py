@@ -133,15 +133,16 @@ def test_a_score_made_on_a_traders_page_says_when_and_the_page_shows_it(monkeypa
 
 def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient) -> None:
     page = api.get("/").text
-    for words in ('class="pf-verdict"', 'id="pfcopy"', 'class="pf-warn"', 'class="pf-facts"', "Their numbers", 'class="pf-grid"', 'class="pf-rows"',
-                  "<dt>Last bought</dt>", "See activity", 'id="whycopy"', "Why?", "How we measure this",
+    for words in ('class="pf-verdict"', 'class="pf-warn"', 'class="pf-facts"', "Their numbers", 'class="pf-grid"', 'class="pf-rows"',
+                  "<dt>Last bought</dt>", "See activity", "How we measure this",
                   "What buying now costs", "not a guaranteed fill", "is for sale within 3¢ of the cheapest price",
                   "Priced up to 3¢ above the cheapest price for sale", "Estimated slippage: your average fill",
                   "Order book and market status read at", "Your estimated price: ", "Market price now",
                   "Not a price you can buy at", "Trader paid", "Not spent", "back in total", "You get nothing back",
                   "Signals places no orders. You buy on the exchange yourself."):  # fmt: skip
         assert words in page, words
-    for gone in ("<b>Lately</b>", "<b>Worth knowing</b>", "<b>Consistent</b>", "<b>Can you copy them</b>",
+    for gone in ("<b>Lately</b>", "<b>Worth knowing</b>", "<b>Consistent</b>", "<b>Can you copy them</b>", 'id="pfcopy"', 'id="whycopy"',
+                 "est. ${lbPct(s.copy_return)} after fees",
                  "What copying it costs", "within 3¢ of their price", 'class="pf-stats"', '["stats", "Stats"]', "Held until the market settles:", "Worst drop",
                  "<b>Won:</b>", "<b>Resting orders:</b>", "for context.", "<span>Price now</span>", "You get ${money",
                  "You lose ${money", "fills at ${c1"):  # the old lines
@@ -302,20 +303,16 @@ def test_last_bought_is_their_newest_buy_from_any_source(run_js: Any) -> None:
     assert run_js(("lastBuyAt",), "lastBuyAt({recent: []}, null)") is None
 
 
-def test_a_copy_status_is_one_of_four_words_everywhere(run_js: Any) -> None:
-    deps = ("isCopyable", "COPY_LABELS", "copyLabel", "esc", "boldStatus")
+def test_the_engine_still_works_out_a_copy_status_in_one_of_four_words(run_js: Any) -> None:
+    """The page no longer shows it (the copy estimate isn't reliable yet), but the engine keeps working it out, in
+    its four words, each reason starting with its status."""
     losing = {"mean": -0.026, "margin": 0.022, "n": 53, "z": -2.4}
-    # the engine's words, which the page shows as they come (copy_label) and with the status in bold
     for s in ({"segment": "proven", "copyable": "no", "copy": losing}, {"segment": "proven", "copyable": "unknown"},
               {"segment": "quiet", "copyable": "no"}, {"segment": "lucky", "copyable": "yes"},
               {"segment": "inactive", "copyable": "yes"}):  # fmt: skip
         b = engine._board(s | {"sample": []})
         why = b["copy_why"] or ""
-        label = run_js(deps, f"copyLabel({{copy_ok: false, copy_label: {b['copy_label']!r}}})")
-        assert label == b["copy_label"] and why.startswith(f"{label}: "), (s, why)
-        assert run_js(deps, f"boldStatus({why!r})").startswith(f"<b>{label}</b>: ")
-    got = run_js(deps, "[copyLabel({copy_ok: true}), copyLabel({copy_ok: false}), copyLabel({copy_label: 'Lucky'})]")
-    assert got == ["Copyable", "Copy not proven", "Copy not proven"]  # never a word the engine doesn't say
+        assert b["copy_label"] in ("Copy not proven", "Costly to copy", "Not offered") and why.startswith(f"{b['copy_label']}: "), (s, why)
     assert [engine._board(s | {"sample": []})["copy_label"] for s in (COPYABLE, SCORE | {"copyable": "no", "copy": losing})] == [
         "Copyable", "Costly to copy"]  # fmt: skip
 

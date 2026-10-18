@@ -217,7 +217,6 @@ def test_a_feed_bet_carries_its_twin_and_none_while_layer_cant_be_read(api: Test
 
 
 def test_an_alert_says_where_they_traded_and_links_the_us_twin_through_go(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(engine, "_copy_offered", lambda wallet: False)
     monkeypatch.setattr(engine, "_who", lambda wallet: "Sam")
     at = datetime(2026, 10, 13, 14, 2, tzinfo=UTC).timestamp()
     text = engine._alert_text("0xabc", poly(f"{GAME}:0", "tok-cle", "Cleveland"), 0.4, 0.41, 40, at, at + 60, aid="a1")

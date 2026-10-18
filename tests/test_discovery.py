@@ -160,7 +160,7 @@ def test_the_same_score_gets_the_same_tier_section_and_copy_status_from_either(a
         assert {k for k in served[w] if served[w][k] != check[w].get(k)} <= {"scored_at", "via", "format"}
     assert (served[AMY]["section"], served[AMY]["copy_label"], served[BEN]["section"]) == ("sharp", "Copyable", None)
     assert api.get(f"/api/worth/{AMY}").json()["why"] == page["why"]
-    assert engine._copy_offered(AMY) is True
+    assert engine.copy_offer(served[AMY])[0] is True
 
 
 def test_the_latest_score_is_shown_whoever_worked_it_out(api: TestClient) -> None:
@@ -258,7 +258,7 @@ def test_the_feed_and_alerts_follow_the_directorys_traders(api: TestClient) -> N
     ran_check(score(AMY, "no_edge"))
     scored(score(BEN, "proven", copyable="yes", copy={"mean": 0.02, "margin": 0.01, "n": 38, "z": 3.0, "low": 0.01,
                                                       "high": 0.03}))  # fmt: skip
-    assert engine._scored(BEN) and engine._copy_offered(BEN)
+    assert engine._scored(BEN)
     rec = [s["wallet"] for s in (engine._worth_load() or {})["scores"] if s["segment"] in engine.FEED_SEGMENTS]
     assert rec == [BEN]
 

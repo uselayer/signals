@@ -84,6 +84,42 @@ class _Score:
         return SCORE | {"wallet": "0xnew"}
 
 
+def test_the_backup_check_runs_once_a_day_and_check_again_keeps_its_hour(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The old Worth following check is only the fallback and the way back from the directory: it runs again once
+    its result is a day old (it was 6 hours). Hosted "Check again" still starts one once the last is an hour old,
+    and validation still compares scores worked out within 6 hours of the check's."""
+    started: list[float] = []
+    age = {"s": 0.0}
+    monkeypatch.setattr(engine, "_worth_age_s", lambda: age["s"])
+    monkeypatch.setattr(engine, "worth_refresh", lambda: started.append(age["s"]))
+    monkeypatch.setattr(engine, "_worth", {"running": False, "done": 0, "total": 0, "error": None})
+
+    class OneRound:  # the loop's wait: one round, then stop
+        def __init__(self) -> None:
+            self.done = False
+
+        def is_set(self) -> bool:
+            return self.done
+
+        def wait(self, s: float) -> None:
+            self.done = True
+
+    for hours in (6, 23.9, 24, 30):
+        age["s"] = hours * 3600
+        monkeypatch.setattr(engine, "_worth_stop", OneRound())
+        engine._worth_loop()
+    assert started == [24 * 3600, 30 * 3600] and engine.WORTH_MAX_AGE_S == 24 * 3600
+    started.clear()
+    monkeypatch.setattr(engine, "HOSTED", True)
+    for hours in (0.5, 2):
+        age["s"] = hours * 3600
+        api.post("/api/worth/refresh")
+    assert started == [2 * 3600] and engine.WORTH_MIN_AGE_HOSTED_S == 3600  # unchanged
+    assert engine.DISCOVERY_APART_S == 6 * 3600  # its own number, not the check's cadence
+
+
 def test_worth_lists_the_last_check_without_bets_and_scores_new_wallets_on_demand(
     api: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -589,21 +625,21 @@ def test_the_traders_list_carries_each_traders_section(api: TestClient, monkeypa
     assert got == {"0xabc": "sharp", "0xf": "sharp", "0xr": "rising", "0xl": None}
 
 
-def test_the_page_has_the_sections_and_no_copy_cue_for_traders_copying_isnt_offered_for(api: TestClient) -> None:
+def test_the_page_has_the_sections_and_no_copy_cue(api: TestClient) -> None:
     page = api.get("/").text
-    for words in ('"Sharps"', '"Rising"', "Lately, buying after any of these traders hasn't clearly made money after fees.",
-                  "Copying never moves it: a Proven sharp can be costly to copy.",
-                  '"Copy not proven"', '"Costly to copy"', '"Not offered"', '"Big profit, edge unproven"',
+    for words in ('"Sharps"', '"Rising"', '"Big profit, edge unproven"',
                   '"Profit rests on one win"', '"Limited evidence"', '"Our price test didn\'t show skill"',
                   '"Market maker or arbitrage"', '"Checked, not recommended"',
                   "not as a signal to buy: we haven't found that buying after them makes money.",
-                  "Could you make money buying what they buy?", "If you'd bought after them: ",
-                  "How we work out the price",
                   "they paid", "Buy on ${INTL} ↗", "weeks up",
                   "A week counts profit taken plus the change in value of trades still open.",
-                  "the price you'd actually pay, which is a bit higher than the price on Polymarket's chart",
                   "when it was made on Polymarket, not when Signals saw it"):  # fmt: skip
         assert words in page, words
+    # the copy estimate is gone from the page (the owner: not reliable yet): no status, figure, filter or callout
+    for gone in ('"Copy not proven"', '"Costly to copy"', '"Not offered"', "Copyable only", "Copy estimate",
+                 "Copying is paused", "If you'd bought after them: ", "Could you make money buying what they buy?",
+                 "How we work out the price", "Copying, after fees", '["copying", "Copying"]', 'id="whycopy"'):  # fmt: skip
+        assert gone not in page, gone
     assert "weeks profitable" not in page
     for gone in ("Worth copying", "Worth watching", "Lucky", "No clear edge", "You can copy it.", "too_fast"):
         assert gone not in page, gone  # copying is no tier, section or check; no label claims luck it can't show
@@ -613,6 +649,26 @@ def test_the_page_has_the_sections_and_no_copy_cue_for_traders_copying_isnt_offe
     for jargon in ("Copies kept", "Copies lost", "What copies", "a copy gets in", "Estimated copy return", "95% range",
                    "price a copy", "at the ask", "trader's copies", "a copy a few minutes late"):  # fmt: skip
         assert jargon not in shown, jargon  # plain words for someone who has never heard of copy trading
+
+
+def test_the_page_never_says_copy() -> None:
+    """The copy estimate is gone from everything people see (the owner: it isn't reliable yet): no "Copyable",
+    "Copy not proven", "Costly to copy", "Copy estimate" or "Copying" in the words the page shows (the text of its
+    strings and its HTML, not its code: a lone lowercase name like "copyable" or a route is code). As #126's "never
+    bet" guard, over the page's own strings."""
+    import re
+
+    page = "\n".join(ln for ln in (engine.HERE / "static" / "index.html").read_text().splitlines()
+                     if not ln.lstrip().startswith("//"))  # fmt: skip
+    words = [re.sub(r"\$\{[^}]*\}", " ", m) for m in re.findall(r'"[^"\n]*"|`[^`\n]*`', page)]
+    words += re.findall(r'"[^"\n]*"', page)  # again on their own: a "…" inside a `…${ }…` is text too
+    code = re.compile(r'^["`][#/a-z_-]*["`]$')  # "copyable", "#/copied": a name or a route, never shown
+    copy = re.compile(r"\b[Cc]op(y|ying|yable|ies|ied|ier|iers)\b")
+    said = [w for w in words if copy.search(w) and not code.match(w)]
+    said += re.findall(r">[^<>`\"]*\b[Cc]op(?:y|ying|yable|ies|ied)\b[^<>`\"]*<", page)  # plain HTML text
+    assert said == []
+    for status in ("Copyable", "Copy not proven", "Costly to copy", "Not offered", "Copy estimate", "Copying is paused"):
+        assert status not in page, status
 
 
 # ---- a wallet's account: when it was read, and never part of it shown as all of it ----

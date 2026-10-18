@@ -467,10 +467,11 @@ def test_the_feed_page_rules(run_js: Any) -> None:
       const cards = oneCardPerTrade([
         { token: "t", status: "in", copy_ok: false, at: "2026-10-13T10:00:00Z", wallet: "0xa", name: "A" },
         { token: "t", status: "in", copy_ok: true, at: "2026-10-13T11:00:00Z", wallet: "0xb", name: "B" },
-        { token: "t", status: "moved", copy_ok: true, at: "2026-10-13T09:00:00Z", wallet: "0xc", name: "C" }]);
+        { token: "t", status: "moved", copy_ok: true, at: "2026-10-13T08:00:00Z", wallet: "0xc", name: "C" }]);
       return [same, other, out, cards[0].wallet, cards[0].also.map((x) => x.wallet)];
     })()""")
-    assert got == [True, True, True, "0xb", ["0xa", "0xc"]]
+    # one you can still get into leads, then whoever bought first; copy_ok (the copy estimate) never decides it
+    assert got == [True, True, True, "0xa", ["0xb", "0xc"]]
 
 
 def test_analytics_knows_a_signed_in_person_by_their_clerk_id_only(run_js: Any) -> None:
@@ -499,3 +500,14 @@ def test_one_polling_loop_however_often_the_feed_is_loaded(run_js: Any) -> None:
       return [timers, !!feed.data.stale];
     })()""")
     assert got == [1, False]  # one timer, and the stale answer was dropped
+
+
+def test_an_open_trade_reads_the_same_for_every_trader(run_js: Any) -> None:
+    """The copy estimate isn't shown, so it can't colour a card either: an open trade says where the price is, with
+    no colour and no "You can still get in", whatever copy_ok says; a settled one says how it ended."""
+    deps = ("STATUS", "statusLine", "OPEN", "cents", "centsPair", "neutralStatus", "tradeStatus")
+    got = run_js(deps, """[{status: "in", copy_ok: true}, {status: "in", copy_ok: false}, {status: "moved", copy_ok: true},
+      {status: "won", copy_ok: true}].map((b) => tradeStatus({ price: 0.49, price_now: 0.5, ...b }))""")
+    assert got[0] == got[1] == '<span class="status"><i></i>Now 50¢ · they paid 49¢</span>'
+    assert "get in" not in got[2] and 'class="status"' in got[2]
+    assert got[3] == '<span class="status won"><i></i>Won</span>'
