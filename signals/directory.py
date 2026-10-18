@@ -38,7 +38,8 @@ Each wallet's evaluation (phases 2 and 3), on its row in ``wallets``:
 - ``scored_at``: when its latest score was worked out; ``tried_at``: the last try, whatever came of it.
 - ``next_check``: when it's due to be looked at again (``next_check_at``); ``failures``: tries failed in a row.
 - ``seen_category``: the category it was first seen in, so the evaluation can take each category in turn before
-  a wallet has a score (``category``) of its own.
+  a wallet has a score (``category``) of its own. Where a wallet was found says little about what it trades (a
+  Tech board lists people who mostly trade Sports), so a page names it only as where they were found.
 - ``last_active``: their latest trade whose time we know: a Feed trade, the last buy a score saw, or the latest
   trade a quick check read. A leaderboard or market sighting has no trade time, so it never sets this.
 - ``segment`` and ``category`` (where most of their checked bets were), from the latest score.
@@ -193,8 +194,11 @@ CHECK_CATEGORIES = ("SPORTS", "CRYPTO", "POLITICS", "ECONOMICS", "CULTURE", "WEA
 CHECK_BOARDS = (("PNL", "MONTH", None, 1000), ("PNL", "WEEK", None, 50), ("PNL", "ALL", None, 50),
                 ("VOL", "MONTH", None, 50), *(("PNL", "MONTH", c, 50) for c in CHECK_CATEGORIES))  # fmt: skip
 _CHECK_BOARDS = ("PNL WEEK OVERALL", "PNL ALL OVERALL", "VOL MONTH OVERALL", *(f"PNL MONTH {c}" for c in CHECK_CATEGORIES))
+# The unary + keeps SQLite off sightings_by_source (source, last_seen) for this check, so it looks up the wallet's own
+# sightings by the primary key. Without it, production's SQLite (3.46, no ANALYZE) walked every recent leaderboard
+# sighting (~765K) for each wallet in the queue: 13 s a round under the directory's lock (0.7 s with it, 2026-10-16).
 _LISTED = f"""EXISTS (SELECT 1 FROM sightings s WHERE s.wallet = q.wallet AND s.source = 'leaderboard'
-  AND s.last_seen >= ? AND ((s.place = 'PNL MONTH OVERALL' AND s.rank <= 1000)
+  AND +s.last_seen >= ? AND ((s.place = 'PNL MONTH OVERALL' AND s.rank <= 1000)
   OR (s.place IN ({", ".join(f"'{b}'" for b in _CHECK_BOARDS)}) AND s.rank <= 50)))"""
 
 
@@ -323,8 +327,11 @@ SORTS = {
 # Explore's "what we checked" filter: ``full``, wallets whose latest look is a full check (a score), not a quick look
 EVIDENCE = {"full": "(w.scored_at IS NOT NULL AND w.status != 'checked')"}
 _WALLETISH = re.compile(r"0x[0-9a-f]{2,40}")
-_ROW = """w.wallet, w.name, COALESCE(w.category, w.seen_category) AS category, w.last_active, w.status, w.not_recommended,
-  w.segment, w.scored_at, w.tried_at, w.buys_30d, w.buys_90d, w.last_buy, w.market_usd, w.evidence_cut, w.typical_usd,
+# A wallet's category: its score's (what they trade), else where it was first seen; ``category_from`` says which
+# ("score", "seen"), so a page names a "seen" one as where they were found, never as what they trade.
+_CATEGORY_FROM = "CASE WHEN w.category IS NOT NULL THEN 'score' WHEN w.seen_category IS NOT NULL THEN 'seen' END"
+_ROW = f"w.wallet, w.name, COALESCE(w.category, w.seen_category) AS category, {_CATEGORY_FROM} AS category_from, " + """
+  w.last_active, w.status, w.not_recommended, w.segment, w.scored_at, w.tried_at, w.buys_30d, w.buys_90d, w.last_buy, w.market_usd, w.evidence_cut, w.typical_usd,
   w.first_seen, w.first_source, sc.bets AS bets_checked, sc.format AS score_format, sc.skill, sc.copyable,
   sc.edge, sc.edge_z, sc.copy AS copy_mean, sc.copy_low, sc.trading_pnl_window, sc.window_end,
   (SELECT b.place || '|' || b.rank FROM sightings b WHERE b.wallet = w.wallet AND b.source = 'leaderboard'

@@ -154,9 +154,15 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   now, and when they traded with how long before the alert that was. A trader copying is offered for gets one more
   line while the price is still near theirs; costs stay on the trade's page, which "Check current price" opens.
   A sell says whether they still hold some (then the price now) or none, and is never a suggestion to sell.
-  Every alert has "Useful / Not useful" and a "Stop alerts from …" button. Two or more followed traders buying the same outcome
+  Every alert has "Useful / Not useful", "Stop alerts from …" and "Fewer alerts". Two or more followed traders buying the same outcome
   make one grouped message, edited in place as more buy. Big trades ($10,000 or more, from the SDK's big trades)
-  in the markets someone picked (onboarding or the Feed's Change, saved to their account; Skip means none) alert them too. At most 20 alerts per person per UTC day. What
+  in the markets someone picked (onboarding or the Feed's Change, saved to their account; Skip means none) alert them too.
+  You get every trade of a trader you follow unless you choose fewer for them (on their page, or "Fewer alerts"):
+  only trades over an amount you pick, or one summary every 6 hours; a sale of something they alerted you about still
+  comes. Following a busy trader (over 20 alerts a day over the past week, read back once on the background budget)
+  says so in Telegram and on their page, with an amount about 3 of their bets a day reached that week: an estimate,
+  not a promise. At most 200 alerts per person per UTC day, as a safety limit; the message at the limit says when
+  alerts resume. What
   was sent, the buys behind grouped alerts and the votes are kept in `/data/alerts.db` (SQLite). In the chat,
   `/list` shows who you follow and `/stop` turns alerts off. The bot uses long polling: no webhook to set up.
 - **Trader directory** (phase 1: finding; phase 2: keeping scores): every Polymarket wallet Signals finds, and
@@ -177,7 +183,8 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   Each wallet also has its evaluation: a status (found, never scored; scored; or failed, the last try failed, an
   earlier score kept), when it was last scored and last tried, its last activity (the latest trade of theirs
   whose time we know: a Feed trade, or the last buy a score saw; a leaderboard or market sighting never sets
-  it), and the latest score's segment and main category. Every score worked out is kept, at no extra reads: the
+  it), and the latest score's segment and main category. A wallet without a score has only where it was first
+  seen, which Explore and its page name as "found in Tech", never as what they trade: a score says that. Every score worked out is kept, at no extra reads: the
   Worth following check's 200, a wallet scored on its page, and a try that failed. The latest score is kept whole
   (compressed, 30 checked bets, about 6 KB a wallet), every score's headline figures stay in its history, and the
   latest score's price test in each category in its own table. A score never replaces a newer one, so a wallet a
