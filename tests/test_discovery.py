@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from uselayer.whale_scores import segment_of
+from uselayer.whale_scores import RECOMMENDED, segment_of
 
 from signals import app as engine
 from signals.directory import Directory
@@ -175,13 +175,50 @@ def test_an_older_score_is_shown_only_when_todays_rules_give_it_the_tier_the_dir
     # proven": left out until it's scored again, so both always say the same
     differs = score(AMY, "no_edge", format=7)
     assert segment_of(differs) != "no_edge"
-    agrees = score(CAL, "no_edge", format=8)
+    agrees = score(CAL, "no_edge", z=0.2, skill="no", format=8)
     agrees["segment"] = segment_of(agrees)  # an older score today's rules tier the same: shown as it is
+    assert agrees["segment"] == "no_edge"  # (a recommended one from before format 10 waits to be rescored: below)
     scored(differs, agrees, score(BEN, "proven", z=3.0))
     assert wallets(api) == [BEN, CAL]
     assert api.get("/api/discovery").json()["pool"]["tier_differs_left_out"] == 1
     scored(score(AMY, "no_edge"), at=NOW - 60)  # the evaluation scores it again
     assert AMY in wallets(api) and next(s for s in result(api)["scores"] if s["wallet"] == AMY)["segment"] == "no_edge"
+
+
+@pytest.mark.skipif(engine.WORTH_FORMAT < engine.RESTING_FORMAT, reason="needs uselayer 0.13 (the lock bump)")
+def test_a_recommended_score_from_before_resting_buys_counted_from_the_middle_waits_to_be_rescored(
+    api: TestClient,
+) -> None:
+    # Before format 10 a resting order's half spread read as skill, and a kept score can't be corrected: a
+    # recommended one is left out even when today's rules give it the same tier, and is due again now.
+    old_rec = score(AMY, "rising", format=9)
+    old_rec["segment"] = segment_of(old_rec)
+    assert old_rec["segment"] in RECOMMENDED  # today's rules would keep it recommended: it's left out anyway
+    old_other = score(CAL, "no_edge", z=0.2, skill="no", format=9)
+    old_other["segment"] = segment_of(old_other)  # not recommended: judged as before, shown as it is
+    scored(old_rec, old_other, score(BEN, "proven", z=3.0))
+    with engine.directory()._db() as con:
+        con.execute("UPDATE wallets SET next_check = ? WHERE wallet = ?", (NOW + 10**6, AMY))
+    assert wallets(api) == [BEN, CAL]
+    engine._directory_writer.submit(lambda: None).result()  # rescore_soon runs on the directory's writer thread
+    with engine.directory()._db() as con:
+        (due,) = con.execute("SELECT next_check FROM wallets WHERE wallet = ?", (AMY,)).fetchone()
+    assert due <= time.time()
+    scored(score(AMY, "rising"), at=NOW - 60)  # rescored with today's scoring: back
+    assert AMY in wallets(api)
+
+
+def test_rescore_soon_brings_a_wallet_forward_and_leaves_one_due_sooner(tmp_path: Any) -> None:
+    from signals.directory import Seen
+
+    d = Directory(tmp_path / "directory.db")
+    d.add([Seen(AMY, "leaderboard", "PNL MONTH OVERALL", rank=1), Seen(BEN, "leaderboard", "PNL MONTH OVERALL", rank=2)])
+    with d._db() as con:
+        con.executemany("UPDATE wallets SET next_check = ? WHERE wallet = ?", [(NOW + 3600, AMY), (NOW - 3600, BEN)])
+    assert d.rescore_soon([AMY, BEN], now=NOW) == 1
+    with d._db() as con:
+        got = dict(con.execute("SELECT wallet, next_check FROM wallets"))
+    assert got == {AMY: NOW, BEN: NOW - 3600}
 
 
 def test_a_trader_without_a_username_takes_the_one_the_directory_saw(api: TestClient) -> None:
@@ -306,3 +343,10 @@ def test_the_owner_sees_how_the_feeds_poller_keeps_up(api: TestClient, monkeypat
     f = api.get("/api/discovery").json()["feed"]
     assert f["rounds"] == 2 and f["rate_limited_rounds"] == 1 and f["last"]["recommended"] == 29
     assert f["oldest_followed_s"] == {"median": 31, "max": 31} and f["round_s"]["max"] == 12.5
+
+
+def test_format_10_is_stamped_only_with_a_uselayer_that_has_the_resting_correction() -> None:
+    from uselayer.whale_scores import Score
+
+    corrected = "edge_at_fill" in Score.__dataclass_fields__
+    assert engine.WORTH_FORMAT == (engine.RESTING_FORMAT if corrected else 9)
