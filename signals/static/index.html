@@ -1629,6 +1629,10 @@ function onboardingPage() {
 // Profit history (weeks in profit, trend, 7D/90D) comes from the SDK's next release; until then those columns
 // show "—" and "Most consistent" waits. Never a made-up number for a real trader (sample data is local-only).
 const SEG_ORDER = ["proven", "quiet", "rising"]; // the tiers we recommend, in order
+// Every tier, in the SDK's order (uselayer's SEGMENTS, as the engine picks and sorts "See all checked traders"): the
+// recommended ones first, then the rest. A tier it doesn't know goes last, never ahead of a recommended one.
+const TIER_ORDER = [...SEG_ORDER, "big_profit", "lucky", "parlays", "too_few", "edge_losing", "no_view", "inactive", "no_edge"];
+const tierRank = (seg) => { const i = TIER_ORDER.indexOf(seg); return i < 0 ? TIER_ORDER.length : i; };
 const RANKED = 25;
 let worthTimer = null, worthLast = null;
 const topOpts = { venue: "all", by: "pnl" };
@@ -1726,7 +1730,7 @@ const lbPct = (x) => {
   return `${Number(v) === 0 ? "" : x > 0 ? "+" : "−"}${v}%`; // rounds to zero: no sign
 };
 const LB_SORTS = {
-  recommended: ["Recommended", (a, b) => SEG_ORDER.indexOf(a.segment) - SEG_ORDER.indexOf(b.segment) || (b.edge?.z ?? -99) - (a.edge?.z ?? -99)],
+  recommended: ["Recommended", (a, b) => tierRank(a.segment) - tierRank(b.segment) || (b.edge?.z ?? -99) - (a.edge?.z ?? -99)],
   consistent: ["Most consistent", (a, b) => (b.consistency_low ?? -1) - (a.consistency_low ?? -1) || (profitOf(b, "30d") ?? 0) - (profitOf(a, "30d") ?? 0)],
   profit: ["Profit", byDesc((s) => profitOf(s, lb.period))],
   won: [WIN_LABEL, byDesc(winRateOf)],
@@ -1740,6 +1744,24 @@ function lbSpark(s, days, w = 76, h = 26) {
   const xy = ys.map((v, i) => [2 + (i / (ys.length - 1)) * (w - 4), h - 2 - ((v - lo) / span) * (h - 4)]);
   const [lx, ly] = xy[xy.length - 1], end = ys[ys.length - 1];
   return `<svg class="${end > 0 ? "gain" : end < 0 ? "loss" : ""}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="Profit trend"><polyline points="${xy.map((p) => p.map((v) => v.toFixed(1)).join(",")).join(" ")}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity=".85"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.2" fill="currentColor"/></svg>`;
+}
+
+// The foot's line about the traders we don't recommend, saying what "See all checked traders" really is. The check
+// scores ~200 and all of them are listed; the directory has thousands of fresh scores (``considered``) and serves
+// the first ~200 in tier order: everyone recommended, then the others as far as the list goes (so "Edge not
+// proven", the most common result and last in the order, rarely fits). Then it says how many of which, and that
+// Explore's Checked has every one, never that this list has them all.
+function checkedFoot(res, all) {
+  const scores = res.scores || [], rec = scores.filter((s) => SEG_ORDER.includes(s.segment)).length;
+  const considered = Math.max(res.considered ?? scores.length, scores.length), partial = considered > scores.length;
+  const toExplore = exploreOn ? ` · <button class="link" id="lbchecked">Every checked trader is in Explore</button>` : "";
+  if (!all) {
+    const others = considered - rec;
+    return others ? `${others.toLocaleString("en-US")} other checked trader${others === 1 ? " isn't" : "s aren't"} recommended: edge not proven, an edge but losing lately, parlays (skill unmeasured), limited evidence, big profit with the edge unproven or resting on one win, not trading lately, market makers and arbitrage · <button class="link" id="lbrec">${partial ? `See ${(scores.length - rec).toLocaleString("en-US")} of them` : "See all checked traders"}</button>${partial ? toExplore : ""}` : "";
+  }
+  if (!partial) return `Showing every checked trader except market makers and arbitrage · <button class="link" id="lbrec">Recommended only</button>`;
+  const tiers = TIER_ORDER.filter((t) => !SEG_ORDER.includes(t) && t !== "no_view").map((t) => [t, scores.filter((s) => s.segment === t).length]).filter(([, n]) => n);
+  return `Showing ${scores.length.toLocaleString("en-US")} of ${considered.toLocaleString("en-US")} checked traders: the ${rec.toLocaleString("en-US")} we recommend, then the others in tier order until the list is full${tiers.length ? ` (${tiers.map(([t, n]) => `${esc(TIER[t]?.[0] || t)} ${n.toLocaleString("en-US")}`).join(" · ")})` : ""}. Market makers and arbitrage aren't listed.${toExplore} · <button class="link" id="lbrec">Recommended only</button>`;
 }
 
 function renderWorth() {
@@ -1822,7 +1844,6 @@ function renderWorth() {
     body = emptyState(lb.copyOnly ? "No copyable trader this time" : "No trader passed the checks this time", "We don't loosen the checks to fill this list.");
   }
 
-  const left = scores.length - recommended.length;
   const sample = scores.some((s) => s.sample_data);
   box.innerHTML = `
     <div class="lb-toolbar">
@@ -1850,7 +1871,7 @@ function renderWorth() {
       ${sort === "copying" ? " · Copy estimate ranks by the bottom of its range, from 8 trades" : ""}
       ${periods ? " · 7D/30D/90D changes profit and trend only: consistency always covers the last 12 weeks, wins and usual trade the last 30 days" : ""}
       ${history ? "" : " · Weeks in profit, trend and 7D/90D arrive with the next data update"}
-      <br>${lb.all ? `Showing every checked trader except market makers and arbitrage · <button class="link" id="lbrec">Recommended only</button>` : `${left ? `${left} left out: an edge but losing lately, edge not proven, parlays (skill unmeasured), limited evidence, big profit with the edge unproven or resting on one win, market makers and arbitrage ·<button class="link" id="lbrec">See all checked traders</button>` : ""}`}
+      <br>${checkedFoot(res, lb.all)}
       · <a class="link" href="#/traders/top">Top profit</a>
       ${st.error ? ` · <span style="color:var(--danger)">Last check failed: ${esc(st.error)}</span>` : ""}</p>`;
 
@@ -1868,6 +1889,7 @@ function renderWorth() {
   const clear = $("#lbclear"); if (clear) clear.onclick = () => { lb.q = ""; renderWorth(); };
   const all = $("#lball"); if (all) all.onclick = () => { setInterests([]); renderWorth(); worthView(); };
   const rec = $("#lbrec"); if (rec) rec.onclick = () => { lb.all = !lb.all; renderWorth(); };
+  const toChecked = $("#lbchecked"); if (toChecked) toChecked.onclick = () => { exPick("checked"); location.hash = "#/traders/explore"; };
   $("#how").onclick = () => howSheet();
   const again = $("#wrefresh"); if (again) again.onclick = async () => { await api("/api/worth/refresh", { method: "POST" }); worthView(); };
 }

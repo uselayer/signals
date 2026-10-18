@@ -308,8 +308,11 @@ _GROUPS = {
     # looked at, with something to say, short of a recommended tier: a score's verdict, or a quick check's (dormant,
     # paused). Recommended tiers are the Recommended tab's: Explore's search finds them, its lists leave them out.
     "checked": f"((w.scored_at IS NOT NULL OR w.status = 'checked') AND NOT {_LIMITED} AND NOT {_TIERED})",
-    # a recommended tier from the last PASSED_FRESH_S ("Passed our checks"; ``:passed_after``), and any (search)
-    "passed": f"({_TIERED} AND w.scored_at >= {{passed_after}})",
+    # a recommended tier from the last PASSED_FRESH_S ("Passed our checks"; ``:passed_after``), scored by today's
+    # scoring (``passed_format``: the app's WORTH_FORMAT, as Recommended holds an older one back until it's rescored,
+    # app.py's _consistent), and any (search)
+    "passed": (f"({_TIERED} AND w.scored_at >= {{passed_after}} AND COALESCE((SELECT f.format FROM scores f "
+               "WHERE f.wallet = w.wallet), 0) >= {passed_format})"),
     "recommended": _TIERED,
     # found, never looked at: nothing about them has been measured
     "unchecked": "(w.scored_at IS NULL AND w.status IN ('found', 'failed'))",
@@ -341,9 +344,10 @@ _ROW = f"w.wallet, w.name, COALESCE(w.category, w.seen_category) AS category, {_
   """ + _PUBLIC + " AS public"
 
 
-def _group(g: str, now: float) -> str:
-    """A group's SQL as of ``now`` (the passed group's cutoff is a number worked out here, never anyone's input)."""
-    return _GROUPS[g].replace("{passed_after}", f"{now - PASSED_FRESH_S:.3f}")
+def _group(g: str, now: float, passed_format: int = 0) -> str:
+    """A group's SQL as of ``now`` (the passed group's cutoff and format are numbers worked out here, never anyone's
+    input)."""
+    return _GROUPS[g].replace("{passed_after}", f"{now - PASSED_FRESH_S:.3f}").replace("{passed_format}", str(int(passed_format)))
 
 
 def _like(q: str) -> str:
@@ -471,8 +475,10 @@ ON CONFLICT (wallet, source, place) DO UPDATE SET last_seen = excluded.last_seen
 class Directory:
     """The directory in one SQLite file. Safe to share between threads: one connection at a time."""
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, passed_format: int = 0) -> None:
         self.path = path
+        # "Passed our checks" lists a recommended score only from this format up (the app's WORTH_FORMAT)
+        self.passed_format = passed_format
         self._lock = threading.Lock()
         self._upgraded = False
 
@@ -992,9 +998,9 @@ class Directory:
             else:
                 where.append("w.name LIKE ? ESCAPE '\\'")
                 args.append("%" + _like(q) + "%")
-            where.append("(" + " OR ".join(_group(g, now) for g in search_in) + ")")
+            where.append("(" + " OR ".join(_group(g, now, self.passed_format) for g in search_in) + ")")
         else:
-            where.append(_group(group, now))
+            where.append(_group(group, now, self.passed_format))
         if category:
             where.append("COALESCE(w.category, w.seen_category) = ?")
             args.append(category)
@@ -1025,7 +1031,7 @@ class Directory:
         """How many wallets each Explore group lists (public ones only). Every whale is in one of the other groups
         too; they're counted as listed, market makers left out (``browse``'s ``makers``)."""
         now = time.time() if now is None else now
-        case = " ".join(f"WHEN {_group(g, now)} THEN '{g}'" for g in CHECK_GROUPS)
+        case = " ".join(f"WHEN {_group(g, now, self.passed_format)} THEN '{g}'" for g in CHECK_GROUPS)
         with self._db() as con:
             got = dict(con.execute(f"SELECT CASE {case} END, COUNT(*) FROM wallets w WHERE {_PUBLIC} GROUP BY 1"))
             got["whales"] = con.execute(f"SELECT COUNT(*) FROM wallets w WHERE {_PUBLIC} AND {_group('whales', now)} "
