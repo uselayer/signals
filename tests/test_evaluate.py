@@ -3,6 +3,7 @@ SDK's reads are fixed answers."""
 
 from __future__ import annotations
 
+import json
 import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -95,6 +96,26 @@ def test_a_traders_page_carries_the_why_lines(api: TestClient) -> None:
     assert set(why) == {"trades", "how", "listed", "copying"} and why["copying"].startswith("Copyable: ")
 
 
+def test_open_pnl_is_added_up_from_their_open_positions_and_unknown_is_never_zero(run_js: Any) -> None:
+    """Open P&L is the sum of Polymarket's own figure for each position still open, never its summary figure; a
+    read that failed, or one cut off at POSITIONS_READ while even the smallest is still worth something, is unknown
+    ("—" and why), never $0. No open positions is a real $0, and says so."""
+    s = {"periods": {"30d": {"realized": 1.0}}}
+    pos = lambda n, value=10.0, pnl=1.0: [{"status": "in", "pnl": pnl, "value": value}] * n  # noqa: E731
+    cases = {"none": {"stats": {"unrealized_pnl": 5400}, "positions": [{"status": "lost", "pnl": -50.0, "value": 0}]},
+             "full": {"stats": {}, "positions": pos(50)},
+             "full_but_settled_last": {"stats": {}, "positions": pos(49, pnl=2.0) + [{"status": "lost", "pnl": -9.0, "value": 0}]},
+             "missing_figure": {"stats": {}, "positions": pos(1, pnl=None)},
+             "failed": {"error": "x"}}  # fmt: skip
+    got = run_js(NUMBERS, "(() => { pf.account = {}; const c = " + json.dumps(cases) + "; return Object.fromEntries("
+                 f"Object.entries(c).map(([k, d]) => [k, profileNumbers({s}, d, {{}}, '30d').summary[0]])); }})()")
+    assert (got["none"]["v"], got["none"]["sub"]) == ("$0.00", "no open positions")  # a real $0, not the summary's 5,400
+    assert got["full"]["v"] is None and got["full"]["sub"] == "they hold over 50 positions, too many to add up here"
+    assert "+$98" in got["full_but_settled_last"]["v"]  # every open one was read: the last is a settled loser
+    assert got["missing_figure"]["v"] is None and got["missing_figure"]["sub"] == "couldn't be worked out from their positions"
+    assert got["failed"]["v"] is None and got["failed"]["sub"] == "their positions couldn't be read just now"
+
+
 def test_a_score_made_on_a_traders_page_says_when_and_the_page_shows_it(monkeypatch: pytest.MonkeyPatch, api: TestClient) -> None:
     """Users see how old a profile's figures are: a score worked out on the spot (kept until the next check)
     carries when, as kept ones do, and the header's "checked X ago" reads either."""
@@ -104,7 +125,10 @@ def test_a_score_made_on_a_traders_page_says_when_and_the_page_shows_it(monkeypa
     before = time.time()
     s = engine._score_of(w)
     assert before <= s["scored_at"] <= time.time() and engine._score_of(w)["scored_at"] == s["scored_at"]  # kept, with when
-    assert "const checkedAt = s.stored_at ?? s.scored_at ?? null;" in api.get("/").text
+    page = api.get("/").text
+    assert "const checkedAt = s.stored_at ?? s.scored_at ?? null;" in page
+    # one "last active" time: the header's "active" is the same freshest buy as "Last bought", not the score's
+    assert "lastAt ? `active ${ago(lastAt)}` : null" in page and "s.last_buy ? `active ${ago(s.last_buy)}` : null, checkedAt" not in page
 
 
 def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient) -> None:
@@ -122,7 +146,7 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
 
 
 NUMBERS = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "lbPct", "readDays", "readPeriod", "weeksUp",
-           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "pf", "pfChart", "profileNumbers")  # fmt: skip
+           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "profileNumbers")  # fmt: skip
 
 
 def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_slot(run_js: Any) -> None:
@@ -134,7 +158,11 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
          "unrealized_window": 999, "trading_pnl": 900000, "biggest_win": 120000, "weeks_up": 4, "weeks_known": 6,
          "pnl_weeks": [1, -1, -2, 3, 4, 5], "won": 30, "settled": 58, "typical_usd": 24800, "trades_per_day": 2.4,
          "held_share": 1, "price_band": [0.35, 0.54], "categories": [{"category": "Sports", "bets": 41}, {"category": "Tennis", "bets": 1}]}
-    detail = {"stats": {"realized_pnl": 3100000, "unrealized_pnl": 5400}, "positions": [], "closed": [{"result": "won"}]}
+    # OhWhenTheReds, 18 Oct: two positions still open (Polymarket's page: +$718.81 and +$180.62), a settled loser
+    # never redeemed, and Polymarket's summary figure from the night before saying $0
+    open_ = [{"status": "in", "pnl": 718.81, "value": 49879.61}, {"status": "moved", "pnl": 180.62, "value": 6199.68},
+             {"status": "lost", "pnl": -67161.70, "value": 0}]  # fmt: skip
+    detail = {"stats": {"realized_pnl": 3100000, "unrealized_pnl": 0.0}, "positions": open_, "closed": [{"result": "won"}]}
     got = run_js(NUMBERS, f"(() => {{ pf.account = {{}}; return ["
                           f"profileNumbers({s}, {detail}, {{cash_usd: 800000, positions_usd: 300000}}, '30d'),"
                           f"profileNumbers({s}, null, {{cash_usd: 5}}, '7d'),"
@@ -146,9 +174,9 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
 
     m = rows(month)
     assert month["hero"]["k"] == "Realized P&L, 30 days" and "+$336K" in month["hero"]["v"]
-    assert month["hero"]["sub"] == "taken in the last 30 days · +$3.1M all time"
+    assert month["hero"]["sub"] == "taken in the last 30 days · +$3.1M all time · after fees"  # Polymarket's headline is before fees
     assert [r["k"] for r in month["summary"]] == ["Open P&L", "Wallet", "Made money on"]
-    assert "+$5.4K" in m["Open P&L"]["v"] and m["Open P&L"]["sub"] == "on positions still open · Polymarket's figure"
+    assert "+$899" in m["Open P&L"]["v"] and m["Open P&L"]["sub"] == "on 2 positions still open, at today's prices"  # not the stale $0
     assert m["Wallet"]["v"] == "$1.1M" and m["Wallet"]["sub"].startswith("cash $800K + open positions $300K")
     assert m["Made money on"]["v"] is None  # "—" until the SDK reads every settled position
     assert [g["title"] for g in month["groups"]] == ["Record", "How they trade"]
@@ -167,12 +195,12 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     assert "closed positions" not in shown.lower() and "settles" not in shown and "Held" not in shown
     # 7D moves realized P&L only; the trader read still loading is "…"; a wallet read in part isn't the wallet
     w = rows(week)
-    assert week["hero"]["k"] == "Realized P&L, 7 days" and "−$20" in week["hero"]["v"] and week["hero"]["sub"].endswith("all time …")
+    assert week["hero"]["k"] == "Realized P&L, 7 days" and "−$20" in week["hero"]["v"] and week["hero"]["sub"].endswith("all time … · after fees")
     assert w["Open P&L"]["v"] == "…" and w["Usual opening buy"]["v"] == "$24.8K"
     assert w["Wallet"]["v"] is None and w["Wallet"]["sub"] == "cash $5.00; open positions couldn't be read"
     # the trader read failed: "—", never the score's change in open value over 30 days
     f = rows(failed)
-    assert f["Open P&L"]["v"] is None and failed["hero"]["sub"] == "taken in the last 30 days"
+    assert f["Open P&L"]["v"] is None and failed["hero"]["sub"] == "taken in the last 30 days · after fees"
 
 
 # ---- the price check ----
