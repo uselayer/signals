@@ -338,10 +338,11 @@ def kv(stats: list[dict[str, Any]]) -> list[list[Any]]:
     return [[x["k"], x["v"], x.get("sub")] for x in stats]
 
 
-def test_a_passed_row_keeps_profit_the_price_move_and_copying_apart_and_leaves_the_z_to_their_page(run_js: Any) -> None:
-    row = '{group: "passed", trading_pnl_window: 4200, edge: 0.031, edge_z: 2.44, bets_checked: 31, copy_label: "Copy not proven"}'
+def test_a_passed_row_keeps_profit_the_price_move_and_usual_trade_apart_and_leaves_the_z_to_their_page(run_js: Any) -> None:
+    row = '{group: "passed", trading_pnl_window: 4200, edge: 0.031, edge_z: 2.44, bets_checked: 31, typical_usd: 250, copy_label: "Copy not proven"}'
     got = run_js(STATS, f"exStats({row})")
-    assert kv(got) == [["Profit, 30d", "+$4.2K", None], ["Price after buys", "+3.1¢", "31 events"], ["Copying", "Copy not proven", None]]
+    assert kv(got) == [["Profit, 30d", "+$4.2K", None], ["Price after buys", "+3.1¢", "31 events"], ["Usual trade", "$250", "30d"]]
+    assert "Copy" not in str(got)  # the copy estimate isn't shown
     assert "2.4" not in str(got)  # the z is on their page, not the row
     unknown = run_js(STATS, 'exStats({group: "passed"})')
     assert [x["v"] for x in unknown] == ["unknown", "unknown", "unknown"]  # never a made-up 0

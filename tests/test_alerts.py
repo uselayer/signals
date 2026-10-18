@@ -94,7 +94,7 @@ def test_a_buy_outside_the_range_says_the_price_already_moved_even_for_a_copyabl
     lines = engine._alert_text(SAM, t, 0.49, 0.60, 980, at, at + 7 * 60).splitlines()
     assert lines[:4] == ["<b>Sam</b> bought <b>Yes</b> at 49¢ ($980)", "Will it &lt;rain&gt;?", "Now 60¢, price already moved.",
                          "Traded 14:02 UTC, 7 min before this alert."]  # fmt: skip
-    assert engine.COPY_LINE not in lines and "get in" not in "\n".join(lines)  # no copy cue once the price moved
+    assert "get in" not in "\n".join(lines) and "Buying after" not in "\n".join(lines)  # no copy cue, ever
     assert lines[4] == engine.TRADED_INTL  # where they traded; no US claim while Layer's matches aren't read
     assert "Check current price" in lines[5] and "Buy on Polymarket International" in lines[5] and lines[6] == engine.FOLLOW_DELAY
     below = engine._alert_text(SAM, t, 0.49, 0.30, 980, at, at)  # the market turned against them: moved too
@@ -288,11 +288,12 @@ def test_big_trades_alert_people_who_saved_markets_there_whoever_the_trader(
 def test_a_big_trade_by_a_scored_trader_links_to_their_signals_page(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     seen = time.time()
     text = engine._whale_text(big(SAM), 0.51, "Politics", seen)
-    assert f'<a href="{engine.SITE}/#/worth/{SAM}">Sam</a>' in text and engine.COPY_LINE not in text
+    assert f'<a href="{engine.SITE}/#/worth/{SAM}">Sam</a>' in text and "Buying after" not in text
     monkeypatch.setattr(engine, "copy_offer", lambda s: (True, None))
-    assert engine.COPY_LINE in engine._whale_text(big(SAM), 0.51, None, seen).splitlines()  # copyable, in range
+    inrange = engine._whale_text(big(SAM), 0.51, None, seen)  # copyable by the old estimate, in range: still no copy line
+    assert "Buying after" not in inrange and "get in" not in inrange
     moved = engine._whale_text(big(SAM), 0.70, None, seen)
-    assert "Now 70¢, price already moved." in moved and engine.COPY_LINE not in moved
+    assert "Now 70¢, price already moved." in moved and "Buying after" not in moved
 
 
 def test_big_trade_alerts_are_capped_within_the_daily_cap(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -630,7 +631,7 @@ def test_a_sell_alerts_with_the_price_now_while_they_still_hold_some_and_only_on
                          f"Traded {t0:%H:%M} UTC, 6 min before this alert."]  # fmt: skip
     assert lines[4] == engine.TRADED_INTL
     assert ">Check current price</a>" in lines[5] and ">Their record</a>" in lines[5] and ">Open on Polymarket International</a>" in lines[5]
-    assert lines[6] == engine.FOLLOW_DELAY and engine.COPY_LINE not in m["text"] and "get in" not in m["text"]
+    assert lines[6] == engine.FOLLOW_DELAY and "Buying after" not in m["text"] and "get in" not in m["text"]
     assert m["reply_markup"]["inline_keyboard"][1][0]["callback_data"] == f"unf:{SAM}"  # Stop alerts from Sam
     assert engine._sent_today("user_1") == 1  # counts towards the daily cap
     trades.append(sold(SAM, t0 + timedelta(minutes=1), i="c"))  # sold more soon after: no second alert

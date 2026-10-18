@@ -589,21 +589,21 @@ def test_the_traders_list_carries_each_traders_section(api: TestClient, monkeypa
     assert got == {"0xabc": "sharp", "0xf": "sharp", "0xr": "rising", "0xl": None}
 
 
-def test_the_page_has_the_sections_and_no_copy_cue_for_traders_copying_isnt_offered_for(api: TestClient) -> None:
+def test_the_page_has_the_sections_and_no_copy_cue(api: TestClient) -> None:
     page = api.get("/").text
-    for words in ('"Sharps"', '"Rising"', "Lately, buying after any of these traders hasn't clearly made money after fees.",
-                  "Copying never moves it: a Proven sharp can be costly to copy.",
-                  '"Copy not proven"', '"Costly to copy"', '"Not offered"', '"Big profit, edge unproven"',
+    for words in ('"Sharps"', '"Rising"', '"Big profit, edge unproven"',
                   '"Profit rests on one win"', '"Limited evidence"', '"Our price test didn\'t show skill"',
                   '"Market maker or arbitrage"', '"Checked, not recommended"',
                   "not as a signal to buy: we haven't found that buying after them makes money.",
-                  "Could you make money buying what they buy?", "If you'd bought after them: ",
-                  "How we work out the price",
                   "they paid", "Buy on ${INTL} ↗", "weeks up",
                   "A week counts profit taken plus the change in value of trades still open.",
-                  "the price you'd actually pay, which is a bit higher than the price on Polymarket's chart",
                   "when it was made on Polymarket, not when Signals saw it"):  # fmt: skip
         assert words in page, words
+    # the copy estimate is gone from the page (the owner: not reliable yet): no status, figure, filter or callout
+    for gone in ('"Copy not proven"', '"Costly to copy"', '"Not offered"', "Copyable only", "Copy estimate",
+                 "Copying is paused", "If you'd bought after them: ", "Could you make money buying what they buy?",
+                 "How we work out the price", "Copying, after fees", '["copying", "Copying"]', 'id="whycopy"'):  # fmt: skip
+        assert gone not in page, gone
     assert "weeks profitable" not in page
     for gone in ("Worth copying", "Worth watching", "Lucky", "No clear edge", "You can copy it.", "too_fast"):
         assert gone not in page, gone  # copying is no tier, section or check; no label claims luck it can't show
@@ -613,6 +613,26 @@ def test_the_page_has_the_sections_and_no_copy_cue_for_traders_copying_isnt_offe
     for jargon in ("Copies kept", "Copies lost", "What copies", "a copy gets in", "Estimated copy return", "95% range",
                    "price a copy", "at the ask", "trader's copies", "a copy a few minutes late"):  # fmt: skip
         assert jargon not in shown, jargon  # plain words for someone who has never heard of copy trading
+
+
+def test_the_page_never_says_copy() -> None:
+    """The copy estimate is gone from everything people see (the owner: it isn't reliable yet): no "Copyable",
+    "Copy not proven", "Costly to copy", "Copy estimate" or "Copying" in the words the page shows (the text of its
+    strings and its HTML, not its code: a lone lowercase name like "copyable" or a route is code). As #126's "never
+    bet" guard, over the page's own strings."""
+    import re
+
+    page = "\n".join(ln for ln in (engine.HERE / "static" / "index.html").read_text().splitlines()
+                     if not ln.lstrip().startswith("//"))  # fmt: skip
+    words = [re.sub(r"\$\{[^}]*\}", " ", m) for m in re.findall(r'"[^"\n]*"|`[^`\n]*`', page)]
+    words += re.findall(r'"[^"\n]*"', page)  # again on their own: a "…" inside a `…${ }…` is text too
+    code = re.compile(r'^["`][#/a-z_-]*["`]$')  # "copyable", "#/copied": a name or a route, never shown
+    copy = re.compile(r"\b[Cc]op(y|ying|yable|ies|ied|ier|iers)\b")
+    said = [w for w in words if copy.search(w) and not code.match(w)]
+    said += re.findall(r">[^<>`\"]*\b[Cc]op(?:y|ying|yable|ies|ied)\b[^<>`\"]*<", page)  # plain HTML text
+    assert said == []
+    for status in ("Copyable", "Copy not proven", "Costly to copy", "Not offered", "Copy estimate", "Copying is paused"):
+        assert status not in page, status
 
 
 # ---- a wallet's account: when it was read, and never part of it shown as all of it ----

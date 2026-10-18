@@ -170,9 +170,9 @@ def test_every_new_buy_alerts_with_how_far_the_price_moved(api: TestClient, monk
     text, moved = engine.tg.sent[-2]["text"], engine.tg.sent[-1]["text"]
     assert "bought <b>Yes</b> at 40¢ ($400)" in moved and "Now 60¢, price already moved." in moved and "get in" not in moved
     assert "Buy on Polymarket International" in moved and moved.endswith(engine.FOLLOW_DELAY)
-    # Copying isn't offered for them: following is research too, so the alert gives the same facts, neutrally.
+    # Following is research: the alert gives the same facts for every trader, neutrally.
     assert text.splitlines()[:3] == ["<b>Sharp &lt;Sam&gt;</b> bought <b>Yes</b> at 41¢ ($820)", "Will it &lt;rain&gt;?", "Now 41¢."]
-    assert "before this alert." in text and "you can still get in" not in text and engine.COPY_LINE not in text
+    assert "before this alert." in text and "you can still get in" not in text and "Buying after" not in text
     assert "Buy on Polymarket International" in text and SHARP in text  # the link only opens the market
     assert text.endswith(engine.FOLLOW_DELAY)
     keys = engine.tg.sent[-1]["reply_markup"]["inline_keyboard"]
@@ -186,7 +186,7 @@ def test_every_new_buy_alerts_with_how_far_the_price_moved(api: TestClient, monk
     assert api.get("/api/me", headers=auth()).json()["follows"] == []
 
 
-def test_an_alert_gives_the_same_facts_for_every_trader_and_a_copy_line_only_where_copying_is_offered(
+def test_an_alert_gives_the_same_facts_for_every_trader_and_never_a_copy_line(
     api: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(Whales, "preview_copy", lambda self, t, **kw: pytest.fail("an alert never prices a copy"))
@@ -195,10 +195,11 @@ def test_an_alert_gives_the_same_facts_for_every_trader_and_a_copy_line_only_whe
              f'<a href="{engine.SITE}/#/worth/{SHARP}">Their record</a> · <a href="https://polymarket.com/event/rain">Buy on Polymarket International</a>')  # fmt: skip
     facts = ["<b>Sharp &lt;Sam&gt;</b> bought <b>Yes</b> at 40¢ ($40)", "Will it &lt;rain&gt;?", "Now 41¢.",
              "Traded 14:02 UTC, 6 min before this alert.", engine.TRADED_INTL]  # fmt: skip
+    # the copy estimate isn't shown anywhere: a trader it calls copyable gets the same alert as anyone
     monkeypatch.setattr(engine, "copy_offer", lambda s: (True, None))
     text = engine._alert_text(SHARP, buy(1, datetime.now(UTC)), 0.40, 0.41, 40, at, at + 6 * 60 + 10)
-    assert text.splitlines() == [*facts, engine.COPY_LINE, links, engine.FOLLOW_DELAY]
-    assert "not a promise" in engine.COPY_LINE and "$" not in engine.COPY_LINE  # secondary, no cost: that's the preview's
+    assert text.splitlines() == [*facts, links, engine.FOLLOW_DELAY]
+    assert not hasattr(engine, "COPY_LINE")
     monkeypatch.setattr(engine, "copy_offer", lambda s: (False, "No."))
     neutral = engine._alert_text(SHARP, buy(1, datetime.now(UTC)), 0.40, 0.41, 40, at, at + 6 * 60 + 10)
     assert neutral.splitlines() == [*facts, links, engine.FOLLOW_DELAY]
