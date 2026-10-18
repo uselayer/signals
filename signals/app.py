@@ -3284,12 +3284,6 @@ def _cents(p: float) -> str:
     return f"{c:.1f}¢" if c < 1 or 99 < c < 100 else f"{round(c)}¢"
 
 
-def _copy_offered(wallet: str) -> bool:
-    """Whether the page offers copying this trader (``copy_offer`` on the last check)."""
-    s = next((x for x in (_worth_load() or {}).get("scores", []) if x["wallet"] == wallet), None)
-    return s is not None and copy_offer(s)[0]
-
-
 LINK_TARGETS = {"Buy on Polymarket International": "market", "Open on Polymarket International": "market",
                 "View on Polymarket US": "market_us", "Their record": "record", "Check current price": "check",
                 "Open your Feed": "feed"}  # fmt: skip
@@ -3325,11 +3319,6 @@ def _links(*pairs: tuple[str, str | None], aid: str | None = None) -> str:
                       for label, url in pairs if url)  # fmt: skip
 
 
-# Said only for a trader copying is offered for, while the price is still near theirs: secondary to what happened,
-# and no cost (that's "Check current price"'s, with the fee, the fill and what's for sale).
-COPY_LINE = "<i>Buying after this trader has made money before, and you can still get in near their price. That's the past, not a promise.</i>"
-
-
 def _lag(at: float, seen: float) -> str:
     """How long before this alert the trade was made, measured: "6 min", or "under a minute"."""
     mins = round((seen - at) / 60)
@@ -3346,8 +3335,8 @@ def _trade_text(head: str, wallet: str, t: WhaleTrade, paid: float, now: float, 
     """What happened, the same for every trader: ``head`` (who bought which outcome, at what price, for how much),
     the market, the price now (", price already moved" outside the "can still get in" range, ``bet_status``), and
     when they traded, measured against this alert, and where (``_venue_line``:
-    Polymarket International, and its Polymarket US twin when there's a verified one). Then COPY_LINE, only when
-    copying is offered for them and the price is still in range. Links: "Check current price" (the trade's own page
+    Polymarket International, and its Polymarket US twin when there's a verified one). Nothing about copying: the
+    copy estimate isn't shown anywhere. Links: "Check current price" (the trade's own page
     on Signals, neutral for every trader), their record, "View on Polymarket US" with a twin (it leads the venues),
     "Buy on Polymarket International" (it only opens the market: Signals places no orders); then ``delay``, how late
     this kind of alert can be (FOLLOW_DELAY, or BIG_DELAY for a big trade)."""
@@ -3356,8 +3345,6 @@ def _trade_text(head: str, wallet: str, t: WhaleTrade, paid: float, now: float, 
     where, us_url = _venue_line(t)
     lines = [head, e(t.title or "A Polymarket market"), f"Now {_cents(now)}{', price already moved' if status != 'in' else ''}.",
              _traded(at, seen), where]  # fmt: skip
-    if status == "in" and _copy_offered(wallet):
-        lines.append(COPY_LINE)
     links = _links(("Check current price", f"{SITE}/#/check/{wallet}/{t.market}"),
                    ("Their record", f"{SITE}/#/worth/{wallet}" if record else None),
                    ("View on Polymarket US", us_url), ("Buy on Polymarket International", t.url), aid=aid)  # fmt: skip
@@ -3968,8 +3955,7 @@ _whale_alerted: dict[tuple[str, str, str], float] = {}  # (account, trader, mark
 def _whale_text(t: WhaleTrade, now: float, category: str | None, seen: float, aid: str | None = None) -> str:
     """A big trade in your markets, with the same facts as a followed trader's buy (``_trade_text``): who (linked
     to their Signals page when we've scored them, else "Trader 0x91…76"), what they bought at what price, the
-    market, the price now and when they traded. COPY_LINE only when copying is offered for them and the price is
-    still in range."""
+    market, the price now and when they traded."""
     e = html.escape
     w = (t.trader or "").lower()
     who = f'<a href="{e(SITE)}/#/worth/{w}">{e(_who(w))}</a>' if _scored(w) else e(_who(w))
