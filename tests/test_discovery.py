@@ -208,6 +208,28 @@ def test_a_recommended_score_from_before_resting_buys_counted_from_the_middle_wa
     assert AMY in wallets(api)
 
 
+@pytest.mark.skipif(engine.WORTH_FORMAT < engine.RESTING_FORMAT, reason="needs uselayer 0.13")
+def test_a_held_recommended_trader_is_presented_until_rescored_so_it_comes_before_new_wallets(
+    api: TestClient,
+) -> None:
+    from signals.directory import Seen
+
+    old_rec = score(AMY, "rising", format=9)
+    old_rec["segment"] = segment_of(old_rec)
+    scored(old_rec, score(BEN, "rising"))
+    engine.directory().add([Seen(CAL, "leaderboard", "PNL MONTH OVERALL", rank=1)])  # never looked at
+    engine._cache.clear()
+    assert AMY in engine.presented_wallets() and BEN in engine.presented_wallets()  # held, and listed
+    engine._directory_writer.submit(lambda: None).result()
+    due = engine.directory().due(10, presented=engine.presented_wallets(), new_first=True)
+    kinds = {r["wallet"]: r["kind"] for r in due}
+    assert kinds[AMY] == "presented" and [r["wallet"] for r in due].index(AMY) < [r["wallet"] for r in due].index(CAL)
+    scored(score(AMY, "rising"), at=NOW - 60)  # rescored with today's scoring: listed, and held no more
+    engine._cache.clear()
+    result(api)
+    assert AMY not in engine._held_stale and AMY in engine.presented_wallets()
+
+
 def test_rescore_soon_brings_a_wallet_forward_and_leaves_one_due_sooner(tmp_path: Any) -> None:
     from signals.directory import Seen
 
