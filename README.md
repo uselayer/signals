@@ -194,6 +194,14 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   latest score's price test in each category in its own table. A score never replaces a newer one, so a wallet a
   later check leaves out keeps its last score. On each launch the last check's scores in `worth-following.json`
   are imported, as of when that check finished: the first time adds them, after that it changes nothing.
+  How each scored wallet trades is kept on the wallet too, from its latest score (no reads): its average price, new
+  positions a day over the days read, whether the score tags it a bot, and its rewards over the score's 30 days.
+  Explore filters on them ("Usual price paid", "New positions", "Bot-like activity": a full check only) and lists
+  market makers and arbitrage in their own group, "Market makers and arbitrage", with trading profit beside rewards;
+  search finds them too. A directory from before these is filled once from its stored scores on first open (about 2 s
+  for 300K wallets and 9.5K scores on a laptop). A trader's page lists their leaderboard places by category, best
+  first, as the sweep last saw them, and a page without a score adds up its open profit from the positions it reads,
+  never Polymarket's summary.
   **Discovery from the directory** (phase 5) is off until the owner sets `SIGNALS_DISCOVERY=directory`: then
   Traders, the Feed's Recommended, alerts and trader pages show each wallet's latest score from the last 2 days
   (twice the background evaluation's daily rescore; a trader shown is rescored every 6 hours), whoever worked it out

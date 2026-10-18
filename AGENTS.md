@@ -22,7 +22,10 @@ behind Vercel (see README, "Hosting").
   its thresholds stay as they are. Traders shows the directory only with `SIGNALS_DISCOVERY=directory` (phase 5,
   the owner's flag; `check`, the default, is the Worth following check's own 200): its latest fresh scores in the
   check's shape and order, through `_worth_load`, so the Feed, alerts and trader pages follow. At most
-  `SIGNALS_DISCOVERY_LIMIT` (the page and the Feed's poller stay their size); Explore is never limited by it. The check keeps
+  `SIGNALS_DISCOVERY_LIMIT` (the page and the Feed's poller stay their size); Explore is never limited by it. Explore's
+  style facts (average price, new positions a day, bot-like, rewards) and its "Market makers and arbitrage" group come
+  from stored scores only, never a read; the resting-orders and held-to-settlement shares stay out of it while the
+  profile hides them. The check keeps
   running beside it, once a day (`WORTH_MAX_AGE_S`: it's only the fallback and the way back now), so going back is
   one switch, to a list up to a day old; `/api/discovery` compares the two (the owner's). Keeping a score
   costs no reads: it's written where a score is already made (`_worth_run`, `_score_of`, the launch import), and
