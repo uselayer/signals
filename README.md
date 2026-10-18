@@ -100,7 +100,8 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
     and the tiers in plain words.
   - Wallets come from the leaderboards and from busy markets' trades. The first check takes 20–30 minutes and
     is kept in the store dir, so later launches show the last result at once while a new check runs in the
-    background (on launch if it's over 6 hours old, then every 6 hours while the app is open). Scoring is
+    background (on launch if it's over a day old, then once a day while the app is open: with the directory on,
+    it's only the fallback, so a day old is fresh enough). Scoring is
     `client.whales.discover()` / `score()` in the SDK.
   - **A trader's profile** (from the leaderboard or a wallet search): their market and last trade, a link to their
     Polymarket profile, their tier, and Follow. A stat strip (profit and per $ traded for the

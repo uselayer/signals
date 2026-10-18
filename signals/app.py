@@ -290,14 +290,16 @@ def links(venue: str, trader_id: str) -> dict[str, Any]:
 
 # ---- worth following (Polymarket) ----
 # Finding and scoring ~200 wallets takes 20-30 minutes, so it runs in the background: on launch when the
-# kept result is older than WORTH_MAX_AGE_S, then again each time it gets that old. The page shows the last
+# kept result is older than WORTH_MAX_AGE_S, then again each time it gets that old: once a day. It's kept only as the
+# fallback and the way back from SIGNALS_DISCOVERY=directory (about 11% of the background's reads at every 6 hours),
+# so a day old is fresh enough. The page shows the last
 # result meanwhile. A wallet that isn't in it is scored when its page is opened. Its reads come out of the
 # background's budget (BACKGROUND_RATE), shared with the directory's sweep and evaluation. With
 # SIGNALS_DISCOVERY=directory the page shows the directory's latest scores instead (_worth_load), and the check
 # keeps running beside it, so going back is instant.
 
 WORTH_WALLETS = int(os.environ.get("SIGNALS_WORTH_WALLETS", "200"))
-WORTH_MAX_AGE_S = 6 * 3600
+WORTH_MAX_AGE_S = 24 * 3600  # once a day (it was every 6 hours)
 WORTH_RETRY_S = 30 * 60  # after a failed check
 # Before format 10 every buy's edge counted from the price paid, so a resting order's half spread read as skill;
 # a kept score can't be corrected (it has no record of which buys rested), so a recommended one waits to be rescored.
@@ -876,7 +878,9 @@ DISCOVERY_FRESH_S = fresh_for(False)
 # poller reads as many Recommended traders as it did
 DISCOVERY_LIMIT = int(os.environ.get("SIGNALS_DISCOVERY_LIMIT", str(WORTH_WALLETS)))
 DISCOVERY_TTL_S = 60
-DISCOVERY_APART_S = WORTH_MAX_AGE_S  # validation: a score worked out apart this close to the check's is compared
+# validation: a score worked out apart this close to the check's is compared. 6 hours, as when the check ran every
+# 6 hours; its own number, so the check running daily doesn't widen what counts as "the same time"
+DISCOVERY_APART_S = 6 * 3600
 _discovery_state: dict[str, Any] = {"error": None}
 
 
