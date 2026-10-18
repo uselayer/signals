@@ -100,7 +100,8 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
     the tiers and copying (its own tab) in plain words.
   - Wallets come from the leaderboards and from busy markets' trades. The first check takes 20–30 minutes and
     is kept in the store dir, so later launches show the last result at once while a new check runs in the
-    background (on launch if it's over a day old, then once a day while the app is open). Scoring is
+    background (on launch if it's over a day old, then once a day while the app is open: with the directory on,
+    it's only the fallback, so a day old is fresh enough). Scoring is
     `client.whales.discover()` / `score()` in the SDK.
   - **A trader's profile** (from the leaderboard or a wallet search): their market and last trade, a link to their
     Polymarket profile, their tier, and their copy status under Follow (Copyable, Copy not proven, Costly to copy
@@ -202,9 +203,8 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   size they are), in the same response as before, those in the picked markets (onboarding's, sent with the
   request) first, so a pick gets the best of the whole directory. Explore browses the whole directory, never
   limited by it. A score is the same score wherever it's read, so
-  a trader gets the same tier, section and copy status either way. The check keeps running beside it, once a
-  day (it was every 6 hours: about 11% of the background's reads for a list kept only to fall back on), so
-  `SIGNALS_DISCOVERY=check` (the default) goes back to it at once, to a list up to a day old, and it's shown anyway while the directory has no
+  a trader gets the same tier, section and copy status either way. The check keeps running beside it, so
+  `SIGNALS_DISCOVERY=check` (the default) goes back to it at once, and it's shown anyway while the directory has no
   fresh score or can't be read. `/api/discovery` (the owner's, as `/api/metrics`) compares the two: each one's
   traders and recommended traders by section, where they come from (the check's "on the leaderboard", any board
   a sweep has seen, or none), who scored them, how old the scores are, by category and by each onboarding pick;
