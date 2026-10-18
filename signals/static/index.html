@@ -1856,7 +1856,8 @@ const EX_DEFAULTS = {
   checked: { evidence: "full" },
 };
 const exDefaults = (group) => ({ active: 0, size: 0, evidence: "", sort: "recent", ...EX_DEFAULTS[group] });
-const EX_SORTS = [["recent", "Recently active"], ["record", "Most markets, 90 days"], ["size", "Biggest usual amount"], ["new", "Recently found"]];
+const EX_SORTS = [["recent", "Recently active"], ["record", "Most markets, 90 days"], ["size", "Biggest usual amount"],
+  ["profit", "Most trading profit, 30 days"], ["new", "Recently found"]];
 const EX_CATS = ["Politics", "Sports", "Crypto", "Esports", "Economy", "Culture", "Weather", "Tech", "Other"];
 // Filters: [key, title, options as [value, label]] (Whales' usual amounts start at its own $1K)
 const exFilters = (group) => [
@@ -1931,11 +1932,11 @@ function boardShort(place, rank, category) {
 // A row's figures, each { k: what it is, v: the value, sub: its unit, sign: green or red }. Which ones depend on what
 // the row is for: Whales, size and recency first; a tier, profit, the price move we saw and their usual trade, each its
 // own answer; limited evidence, how much there is to judge. Unknown stays "unknown".
-function exStats(r, whale = false) {
+function exFigures(r, whale) {
   const U = "unknown";
   const bet = r.typical_usd != null ? { k: "Usual trade", v: usd(r.typical_usd), sub: "30d" } : r.market_usd != null ? { k: "Usual per market", v: usd(r.market_usd), sub: "90d" } : { k: "Usual trade", v: U };
   const last = { k: "Last trade", v: r.last_active ? ago(r.last_active * 1000) : U };
-  const profit = { k: "Profit, 30d", v: r.trading_pnl_window != null ? usd(r.trading_pnl_window, true) : U, sign: r.trading_pnl_window };
+  const profit = exProfit(r);
   const ninety = r.buys_90d != null ? `${exCount(r.buys_90d, r.evidence_cut)} in 90d` : undefined;
   const record = r.evidence === "quick" ? { k: "Markets, 30d", v: exCount(r.buys_30d, r.evidence_cut), sub: ninety } : { k: "Events checked", v: r.bets_checked != null ? String(r.bets_checked) : U, sub: "30d" };
   const tiered = r.group === "passed" || r.group === "recommended";
@@ -1947,12 +1948,19 @@ function exStats(r, whale = false) {
   if (r.evidence === "scored") return [profit, record, last]; // a full check: its record; the label says what skill it showed
   return [bet, last, record];
 }
+const exProfit = (r) => ({ k: "Profit, 30d", v: r.trading_pnl_window != null ? usd(r.trading_pnl_window, true) : "unknown", sign: r.trading_pnl_window });
+// Sorted by profit (a fact to browse by, not a recommendation), a row from a full check shows its profit, in place of
+// its last figure when it isn't one of them already. A quick look has no profit: it stays as it is, sorted last.
+function exStats(r, whale = false, sort = null) {
+  const stats = exFigures(r, whale);
+  return sort === "profit" && r.evidence === "scored" && !stats.some((x) => x.k === "Profit, 30d") ? [...stats.slice(0, -1), exProfit(r)] : stats;
+}
 const exStat = (s) => `<span class="ex-stat"><span class="k">${esc(s.k)}</span><span class="v${s.v === "unknown" ? " u" : ""}">${s.sign ? pl(s.sign, esc(s.v)) : esc(s.v)}${s.sub ? ` <small>${esc(s.sub)}</small>` : ""}</span></span>`;
-function exRow(r, whale = false) {
+function exRow(r, whale = false, sort = null) {
   return `<a class="ex-row" href="#/worth/${esc(r.wallet)}" data-exopen="${esc(r.wallet)}">${avatar(r.wallet, 40)}
     <span class="ex-who"><span class="name">${esc(displayName(r.name, r.wallet))}</span><span class="ex-sub">${exSub(r).map(esc).join(" · ")}</span></span>
     <span class="ex-badges">${exBadges(r)}</span>
-    <span class="ex-stats">${exStats(r, whale).map(exStat).join("")}</span></a>`;
+    <span class="ex-stats">${exStats(r, whale, sort).map(exStat).join("")}</span></a>`;
 }
 const exSearching = () => ex.q.trim().length >= 2;
 function exQuery(offset = 0) {
@@ -2012,7 +2020,7 @@ function renderExplore() {
       return floor ? `<span class="ex-chip">${esc(l)}</span>` : `<button type="button" class="ex-chip" data-exdrop="${k}" aria-label="Remove ${esc(l)}">${esc(l)}<span aria-hidden="true">×</span></button>`;
     }).join("")}${exChanged() ? `<button type="button" class="link" id="exreset">Reset</button>` : ""}</div>` : ""}
     ${searching ? "" : `<p class="ex-about">${esc(about)} <button class="link" id="how">How we pick traders</button></p>`}
-    ${ex.rows.length ? `<div class="list ex-list">${ex.rows.map((r) => exRow(r, whale)).join("")}${ex.more ? `<button type="button" class="lb-more" id="exmore">Show more</button>` : ""}</div>`
+    ${ex.rows.length ? `<div class="list ex-list">${ex.rows.map((r) => exRow(r, whale, ex.sort)).join("")}${ex.more ? `<button type="button" class="lb-more" id="exmore">Show more</button>` : ""}</div>`
       : searching ? emptyState("No trader matches", isWalletQuery(ex.q) ? "We haven't found that wallet yet. We can still check its trades." : `Nobody called “${esc(ex.q.trim())}” among the traders we've found.`,
         isWalletQuery(ex.q) ? `<a class="btn" href="#/worth/${esc(ex.q.trim().toLowerCase())}">Check this wallet</a>` : "")
       : emptyState("No traders here yet", "Nobody matches these filters yet. We look at more traders every hour.", exChanged() ? `<button class="btn ghost" id="exreset2">Reset filters</button>` : "")}
@@ -2064,7 +2072,7 @@ async function passedView(more = false) {
     <div class="ex-bar"><h2 class="h2 ex-title">Every trader who passes our checks${pv.count != null ? ` <span class="n">${pv.count.toLocaleString("en-US")}</span>` : ""}</h2>
       <div class="ex-tools"><label class="ex-tool ex-sort">${SORT_ICON}<select id="pvsort" aria-label="Sort">${EX_SORTS.map(([v, l]) => `<option value="${v}" ${pv.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div></div>
     <p class="ex-about">Every trader scored in the last 48 hours who passes the same checks as Recommended, including any its list has no room for. Price after buys is the move we saw; the tier says whether it's more than chance. <button class="link" id="how">How we pick traders</button></p>
-    ${pv.rows.length ? `<div class="list ex-list">${pv.rows.map((x) => exRow(x)).join("")}${pv.more ? `<button type="button" class="lb-more" id="pvmore">Show more</button>` : ""}</div>`
+    ${pv.rows.length ? `<div class="list ex-list">${pv.rows.map((x) => exRow(x, false, pv.sort)).join("")}${pv.more ? `<button type="button" class="lb-more" id="pvmore">Show more</button>` : ""}</div>`
       : emptyState("No trader passed the checks in the last 48 hours", "We don't loosen the checks to fill this list.")}`;
   $("#pvsort").onchange = (e) => { pv.sort = e.target.value; passedView(); };
   const mo = $("#pvmore"); if (mo) mo.onclick = () => { pv.offset = pv.rows.length; passedView(true); };

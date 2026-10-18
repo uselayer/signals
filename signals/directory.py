@@ -326,6 +326,9 @@ SORTS = {
     "new": "w.first_seen DESC",
     # depth of record: markets bought in the last 90 days, as the last quick check read them (a count, not a grade)
     "record": "w.buys_90d DESC NULLS LAST, w.buys_30d DESC NULLS LAST",
+    # trading profit over the score's 30 days, most first: only when the row's latest look is that score (a quick
+    # look since shows no profit), so a profit nobody sees never sorts a row; no score, unknown, last (never as 0)
+    "profit": "CASE WHEN w.status != 'checked' THEN sc.trading_pnl_window END DESC NULLS LAST",
 }
 # Explore's "what we checked" filter: ``full``, wallets whose latest look is a full check (a score), not a quick look
 EVIDENCE = {"full": "(w.scored_at IS NOT NULL AND w.status != 'checked')"}

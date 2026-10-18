@@ -145,6 +145,35 @@ def test_full_checks_can_be_picked_out_and_the_longest_records_come_first(d: Dir
     assert PRO not in wallets(d.browse("checked", evidence="full"))  # its latest look is a quick one now
 
 
+def test_explore_can_sort_by_trading_profit_with_the_unknown_last(d: Directory, api: TestClient) -> None:
+    """``sort="profit"``: trading profit over the score's 30 days, most first, a loss below a gain, and every row
+    without one (never scored, or a quick look since, whose row shows no profit) after them, never as $0."""
+    rich, poor = "0x" + "a" * 40, "0x" + "b" * 40
+    d.add([Seen(w, "market", "Politics") for w in (rich, poor)], at=NOW - DAY)
+    d.keep_scores([score(rich, "no_edge", trading_pnl_window=5200.0), score(poor, "no_edge", trading_pnl_window=-800.0),
+                   score(PRO, "no_edge", typical_usd=50.0, trading_pnl_window=0.0)], "background", at=NOW + 1)  # fmt: skip
+    assert wallets(d.browse("checked", sort="profit")) == [rich, PRO, poor, DORM]  # +$5.2K, $0, −$800, then unknown
+    d.quick_checked(rich, QuickLook(False, "dormant", 0, 0, None, NOW - 100 * DAY, None, False), at=NOW + 2)
+    assert wallets(d.browse("checked", sort="profit"))[-2:] in ([rich, DORM], [DORM, rich])  # its row shows no profit now
+    assert wallets(d.browse("limited", sort="profit")) == [SEL, PAID]  # neither shows a profit: by wallet
+    d.keep_scores([score(PAID, "too_few", trading_pnl_window=-5.0)], "background", at=NOW + 3)
+    assert wallets(d.browse("limited", sort="profit")) == [PAID, SEL]  # a loss still comes before unknown (SEL: a quick look)
+    assert "profit" in engine.SORTS and api.get("/api/traders", params={"group": "checked", "sort": "profit"}).status_code == 200
+
+
+def test_sorted_by_profit_a_scored_row_shows_its_profit(run_js: Any) -> None:
+    limited = '{group: "limited", evidence: "scored", bets_checked: 6, typical_usd: 900, last_active: null, trading_pnl_window: -250}'
+    assert [x["k"] for x in run_js(STATS, f"exStats({limited})")] == ["Events checked", "Usual trade", "Last trade"]
+    got = kv(run_js(STATS, f'exStats({limited}, false, "profit")'))
+    assert got == [["Events checked", "6", "30d"], ["Usual trade", "$900", "30d"], ["Profit, 30d", "−$250", None]]
+    checked = '{group: "checked", evidence: "scored", trading_pnl_window: 300, bets_checked: 12}'
+    assert run_js(STATS, f'exStats({checked}, false, "profit")') == run_js(STATS, f"exStats({checked})")  # already there
+    quick = '{group: "checked", evidence: "quick", buys_30d: 0, last_active: null}'
+    assert run_js(STATS, f'exStats({quick}, false, "profit")') == run_js(STATS, f"exStats({quick})")  # no profit to show
+    page = (engine.HERE / "static" / "index.html").read_text()
+    assert '["profit", "Most trading profit, 30 days"]' in page
+
+
 def test_a_quick_look_keeps_the_usual_market_size_and_whether_its_counts_are_at_least(tmp_path: Any) -> None:
     trades = [(NOW - 3600, True, "0xa", 100.0), (NOW - 3500, True, "0xa", 200.0), (NOW - 2 * DAY, True, "0xb", 1000.0),
               (NOW - 3 * DAY, True, "0xc", 50.0), (NOW - DAY, False, "0xd", 9999.0)]  # fmt: skip
@@ -331,7 +360,7 @@ def test_the_page_says_unknown_for_what_we_never_read(run_js: Any) -> None:
 
 
 
-STATS = ("usd", "pl", "centsSigned", "ago", "exCount", "exStats")
+STATS = ("usd", "pl", "centsSigned", "ago", "exCount", "exProfit", "exFigures", "exStats")
 
 
 def kv(stats: list[dict[str, Any]]) -> list[list[Any]]:
