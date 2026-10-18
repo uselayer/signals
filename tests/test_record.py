@@ -54,7 +54,7 @@ def test_the_record_is_polymarkets_figures_with_open_positions_biggest_first(api
     # Polymarket's volume counts contracts, never dollars; its "trades" isn't a trade count: left out
     kept = ("trading_pnl", "realized_pnl", "unrealized_pnl", "pnl", "income", "biggest_win")
     assert r["stats"] == {k: STATS[k] for k in kept} | {"volume_contracts": 410000.0}
-    assert r["open"] == {"count": 10, "at_least": False, "value": 9120.0}  # an unpriced one isn't counted as $0
+    assert r["open"] == {"count": 10, "at_least": False, "value": 9120.0, "pnl": None}  # an unpriced one isn't counted as $0; no figure on a position: no open profit
     assert [p["title"] for p in r["positions"][:2]] == ["Big", "Small"] and len(r["positions"]) == engine.RECORD_POSITIONS
     assert r["positions"][0]["category"] == "Sports"
     # markets (not outcomes) per category: 0xb held and traded counts once; 0xs held; 0xt traded

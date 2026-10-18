@@ -55,10 +55,13 @@ from uselayer.whale_scores import (
 from signals import monitoring, us_match
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
+    BOTS,
     CHECK_BOARDS,
     EVIDENCE,
     EXPLORE_GROUPS,
     LISTED_FRESH_S,
+    PACES,
+    PRICES,
     QUICK_TRADES,
     SORTS,
     Directory,
@@ -1628,16 +1631,18 @@ def worth_wallet(wallet: str, request: Request, score: int = 1) -> dict[str, Any
     data = _worth_load()
     s = next((x for x in (data or {}).get("scores", []) if x["wallet"] == w), None)
     row = _explore_row(w) if EXPLORE_ON and _WALLET.fullmatch(w) else None
+    # where the sweep saw them on Polymarket's leaderboards, by category (sightings: no read)
+    boards = {"boards": _boards_of(w)} if row is not None else {}
     if s is None and EXPLORE_ON and _WALLET.fullmatch(w):
         s = _stored_score(w)
     if s is None and not score:
-        return {"wallet": w, "unchecked": True, "name": (row or {}).get("name"), "directory": row}
+        return {"wallet": w, "unchecked": True, "name": (row or {}).get("name"), "directory": row} | boards
     if s is None:
         if _WALLET.fullmatch(w):  # a wallet the last check didn't have, opened here: pasted into search, mostly
             _directory_note_later([Seen(w, "search")])
         s = check_now(w, request)
     b = _board(s)
-    return with_links(s) | b | {"why": why_lines(s | b)} | ({"directory": row} if row is not None else {})
+    return with_links(s) | b | {"why": why_lines(s | b)} | ({"directory": row} if row is not None else {}) | boards
 
 
 # ---- "Why they're here" on a trader's page: plain lines, from what the check kept ----
@@ -1738,6 +1743,13 @@ _check_locks: dict[str, threading.Lock] = {}
 _check_times: dict[str, list[float]] = {}
 
 
+def _boards_of(wallet: str) -> list[dict[str, Any]]:
+    try:
+        return directory().boards(wallet)
+    except (sqlite3.Error, OSError):
+        return []
+
+
 def _explore_row(wallet: str) -> dict[str, Any] | None:
     try:
         return directory().explore_row(wallet)
@@ -1781,13 +1793,19 @@ def _record(wallet: str) -> dict[str, Any]:
         cats = {}  # the record still shows, without categories
     per = Counter({m.partition(":")[0]: c for m, c in cats.items()}.values())  # markets, not outcomes, per category
     values = [p.value for p in held if p.value is not None]
+    # Open profit: Polymarket's own figure for each position they hold, added up (as the scored profile does), never
+    # its summary's, which can be months old. ``at_least``: the read is full, so some may be missing (then it's
+    # their biggest ones'). None when any position has no figure.
+    pnls = [p.pnl for p in held]
+    open_pnl = round(sum(pnls), 2) if pnls and all(x is not None for x in pnls) else 0.0 if not held else None
     return {
         "wallet": wallet,
         "name": d.trader.name,
         "joined": d.joined,
         "stats": poly_stats({k: d.stats.get(k) for k in ("trading_pnl", "realized_pnl", "unrealized_pnl", "pnl",
                                                          "income", "volume_usd", "biggest_win")}),  # fmt: skip
-        "open": {"count": len(held), "at_least": len(held) >= 50, "value": round(sum(values), 2) if values else None},
+        "open": {"count": len(held), "at_least": len(held) >= 50, "value": round(sum(values), 2) if values else None,
+                 "pnl": open_pnl},
         "positions": [p.to_dict() | {"category": cats.get(p.market)} for p in held[:RECORD_POSITIONS]],
         "categories": [{"category": c, "markets": n} for c, n in per.most_common()],
         "trades_read": len(d.trades),
@@ -1846,24 +1864,26 @@ def check_now(wallet: str, request: Request | None = None) -> dict[str, Any]:
 
 @app.get("/api/traders")
 def explore(group: str = "passed", q: str = "", category: str = "", active: int = 0, min_usd: float = 0,
-            board: str = "", makers: int = 0, unchecked: int = 0, evidence: str = "", sort: str = "recent",
-            offset: int = 0) -> dict[str, Any]:  # fmt: skip
+            board: str = "", makers: int = 0, unchecked: int = 0, evidence: str = "", price: str = "", pace: float = 0,
+            bots: str = "", sort: str = "recent", offset: int = 0) -> dict[str, Any]:  # fmt: skip
     """A page of Explore (see Directory.browse), with how many each group lists. From directory.db only, never
     Polymarket. A search (``q``) looks through the limited-evidence and checked groups, and the not-checked-yet one
     too with ``unchecked=1``; otherwise ``unchecked_matches`` says how many of those it would find (up to 20)."""
     if not EXPLORE_ON:
         raise HTTPException(404, detail="Not found")
     if (group not in EXPLORE_GROUPS or sort not in SORTS or (evidence and evidence not in EVIDENCE)
+            or (price and price not in PRICES) or (pace and pace not in PACES) or (bots and bots not in BOTS)
             or not 0 <= offset <= EXPLORE_MAX_OFFSET):  # fmt: skip
         raise HTTPException(400, detail="Unknown group, sort, filter or page.")
     q = q.strip()[:64]
     if q and len(q) < 2:
         raise HTTPException(400, detail="Type at least 2 letters to search.")
     search_in = ("limited", "checked", "recommended", *(("unchecked",) if unchecked else ()))
-    args = (group, q.lower(), category, active, min_usd, board, makers, unchecked, evidence, sort, offset)
+    args = (group, q.lower(), category, active, min_usd, board, makers, unchecked, evidence, price, pace, bots, sort, offset)
     page = cached(f"explore:{args}", EXPLORE_TTL_S, lambda: directory().browse(
         group, q=q, category=category or None, active_days=active or None, min_usd=min_usd or None,
-        board=board or None, makers=bool(makers), evidence=evidence or None, sort=sort, limit=EXPLORE_PAGE,
+        board=board or None, makers=bool(makers), evidence=evidence or None, price=price or None, pace=pace or None,
+        bots=bots or None, sort=sort, limit=EXPLORE_PAGE,
         offset=offset,
         search_in=search_in))  # fmt: skip
     counts = cached("explore:counts", EXPLORE_COUNTS_TTL_S, lambda: directory().explore_counts())

@@ -149,7 +149,7 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
 
 
 NUMBERS = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "lbPct", "readDays", "readPeriod", "weeksUp",
-           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "profileNumbers")  # fmt: skip
+           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "profileNumbers")  # fmt: skip
 
 
 def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_slot(run_js: Any) -> None:

@@ -60,7 +60,7 @@ def test_each_wallet_is_in_one_group_and_says_how_we_know(d: Directory) -> None:
     assert set(limited) == {SEL, PAID}
     assert (limited[SEL]["evidence"], limited[PAID]["evidence"]) == ("quick", "scored")  # a quick look vs a full check
     assert set(wallets(d.browse("checked"))) == {DORM, PRO} and wallets(d.browse("unchecked")) == [NEW]
-    assert d.explore_counts() == {"passed": 0, "limited": 2, "checked": 2, "unchecked": 1, "whales": 2}
+    assert d.explore_counts() == {"passed": 0, "limited": 2, "checked": 2, "unchecked": 1, "whales": 2, "makers": 0}
 
 
 def test_a_wallet_known_only_from_a_search_or_a_follow_is_never_listed_or_found(d: Directory) -> None:
@@ -169,7 +169,7 @@ def test_a_recommended_tier_from_the_last_48_hours_passed_our_checks_and_an_olde
     assert "trading_pnl_window" in row and "edge" in row and "copyable" in row
     found = {r["wallet"]: r["group"] for r in d.browse("limited", q="o", now=NOW)["rows"] if r["wallet"] in (star, old)}
     assert found == {old: "recommended"} and d.browse("limited", q="starsue", now=NOW)["rows"][0]["group"] == "passed"
-    assert d.explore_counts(now=NOW) == {"passed": 1, "limited": 2, "checked": 2, "unchecked": 1, "whales": 4}
+    assert d.explore_counts(now=NOW) == {"passed": 1, "limited": 2, "checked": 2, "unchecked": 1, "whales": 4, "makers": 0}
 
 
 def test_whales_are_big_bettors_whatever_our_checks_found_and_each_keeps_its_own_group(d: Directory) -> None:
@@ -218,7 +218,7 @@ def test_browsing_and_searching_read_only_the_directory(api: TestClient, monkeyp
     monkeypatch.setattr(engine.reads, "whales", NoReads())
     r = api.get("/api/traders", params={"group": "limited"}).json()
     assert {x["wallet"] for x in r["rows"]} == {SEL, PAID}
-    assert r["counts"] == {"passed": 0, "limited": 2, "checked": 2, "unchecked": 1, "whales": 2}
+    assert r["counts"] == {"passed": 0, "limited": 2, "checked": 2, "unchecked": 1, "whales": 2, "makers": 0}
     assert r["more"] is False and r["unchecked_matches"] is None
     s = api.get("/api/traders", params={"q": "ned"}).json()
     assert s["rows"] == [] and s["unchecked_matches"] == 1  # "1 more match among traders we haven't checked"
