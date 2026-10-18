@@ -158,8 +158,9 @@ behind Vercel (see README, "Hosting").
     One bar: filters on the left (market chips = the onboarding choice, Copyable only), how you view the list on
     the right (search name or wallet, period, sort). Columns are grouped as Track record, Style and Copying.
     Recommendations never include Big profit, edge unproven; Profit rests on one win (big profit that's a loss
-    without their biggest win: the only tier that says luck); Edge not proven; Not enough data (too few trades
-    could be checked: never shown as a verdict on skill); or No view traders, and the checks are never loosened to
+    without their biggest win: the only tier that says luck); Our price test didn't show skill (the SDK's "Edge not
+    proven"); Not enough data (too few trades could be checked: never shown as a verdict on skill); or Market maker or
+    arbitrage traders (the SDK's "No view"), and the checks are never loosened to
     fill the list: an empty result says so and names the interests that had no one. "See all checked traders" may
     show the rest, each marked.
   - Never a made-up number for a real trader on the hosted app. A figure the data doesn't have yet shows "—";

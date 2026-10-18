@@ -78,13 +78,13 @@ REASON_LABELS = {
                                   " are needed to judge a trader",
     "not_trading_lately": "Not trading lately: no buy in the last {active} days",
     "dormant": "Dormant: no buy in the last {evidence} days",
-    "too_few": "Scored: limited evidence, too few of their trades could be checked to measure skill either way",
-    "parlays": "Scored: skill unmeasured, they trade mostly parlays, which have no price history",
-    "edge_losing": "Scored: the price moves their way, but they lost money from trading over 30 days",
-    "no_edge": "Scored: edge not proven",
-    "big_profit": "Scored: a big profit, but the price test doesn't show skill (and nothing shows luck)",
-    "lucky": "Scored: a big profit that rests on one win",
-    "no_view": "Scored: a market maker or arbitrage, not views on the outcome",
+    "too_few": "Limited evidence: too few of their trades could be checked to measure skill either way",
+    "parlays": "Skill unmeasured: they trade mostly parlays, which have no price history",
+    "edge_losing": "The price moves their way, but they lost money from trading over 30 days",
+    "no_edge": "Our price test didn't show skill",
+    "big_profit": "A big profit, but the price test doesn't show skill (and nothing shows luck)",
+    "lucky": "A big profit that rests on one win",
+    "no_view": "A market maker or arbitrage, not views on the outcome",
 }  # fmt: skip
 # uselayer 0.10's tiers (``segment``) are skill and track record only: "too_few" and "big_profit" are new, and a
 # "lucky" or "no_edge" kept before then may be either of them until the wallet is scored again. uselayer 0.11 adds

@@ -320,7 +320,7 @@ def test_a_copy_status_is_one_of_four_words_everywhere(run_js: Any) -> None:
         "Copyable", "Costly to copy"]  # fmt: skip
 
 
-WIN = ("esc", "WIN_LABEL", "WIN_MIN", "winPct", "winCell", "winMeta")
+WIN = ("esc", "WIN_LABEL", "WIN_MIN", "winPct", "impliedPct", "winCell", "winMeta")
 
 
 def test_the_traders_list_shows_a_win_rate_from_ten_settled_trades_as_the_sort_ranks(run_js: Any) -> None:
@@ -328,13 +328,41 @@ def test_the_traders_list_shows_a_win_rate_from_ten_settled_trades_as_the_sort_r
     and the sort (win_low, from WIN_MIN) say the same thing; a phone card's meta line opens with it."""
     got = run_js(WIN, """[{won: 31, settled: 57}, {won: 6, settled: 10}, {won: 1, settled: 1}, {won: 0, settled: 0}, {}]
       .map((s) => [winCell(s), winMeta(s)]).concat([[WIN_MIN, WIN_LABEL]])""")
-    assert got[0] == ['<span class="lb-main">54%</span><span class="lb-sub">31 of 57</span>', "Won 54% (31 of 57)"]
+    assert got[0] == ['<span class="lb-main">54%</span><span class="lb-sub">31 of 57</span>', "Picked the winner 54% (31 of 57)"]
     assert got[1][0].startswith('<span class="lb-main">60%</span>')  # 10 settled: shown, as it ranks
-    assert got[2] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">only 1 settled</span>', "Win rate: only 1 settled"]
-    assert got[3] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">none settled yet</span>', "Win rate: none settled yet"]
+    assert got[2] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">only 1 settled</span>', "Picked the winner: only 1 settled"]
+    assert got[3] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">none settled yet</span>', "Picked the winner: none settled yet"]
     assert got[4] == ['<span class="lb-none">—</span>', ""]  # not worked out: unknown, never 0
-    assert got[5] == [engine.WIN_MIN, "Win rate"]  # the page's minimum is the engine's
+    assert got[5] == [engine.WIN_MIN, "Picked the winner"]  # the page's minimum is the engine's
     assert all("gain" not in c and "loss" not in c for c, _ in got[:5])  # never green or red
     page = (engine.HERE / "static" / "index.html").read_text()
     assert 'head("won", `${WIN_LABEL}<small>30 days</small>`)' in page and "Won, 30 days" not in page
     assert "Close rates: more trades rank higher." in page and "settled · ${readDays(s)} days" not in page
+
+
+def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: Any) -> None:
+    """A trader buying at about 92¢ picks the winner about 92% of the time by price alone: the stored ``odds`` (their
+    average price on the settled ones) is said beside the rate, in the cell and on a phone card, when it's known."""
+    got = run_js(WIN, """[{won: 52, settled: 54, odds: 0.92}, {won: 3, settled: 4, odds: 0.5}]
+      .map((s) => [winCell(s), winMeta(s)])""")
+    assert got[0] == ['<span class="lb-main">96%</span><span class="lb-sub">52 of 54</span><span class="lb-sub">prices implied 92%</span>',
+                      "Picked the winner 96% (52 of 54), prices implied 92%"]  # fmt: skip
+    assert "implied" not in got[1][0]  # under 10 settled: no rate, so no baseline either
+
+
+PROFILE = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "readDays", "readPeriod", "weeksUp", "weeksOf",
+           "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "profileNumbers")
+
+
+def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_own(run_js: Any) -> None:
+    s = {"pnl_weeks": [None, None, 1200, -450, 300, 8100, -2300], "weeks_known": 5, "strong_categories": ["Politics"],
+         "categories": [{"category": "Politics", "bets": 30}, {"category": "Sports", "bets": 12}]}  # fmt: skip
+    rows = run_js(PROFILE, f"profileNumbers({json.dumps(s)}, null, {{}}, '30d').groups[0].rows")
+    by = {r["k"]: r for r in rows}
+    assert "+$8.1K" in by["Best week"]["v"] and "−$2.3K" in by["Worst week"]["v"]
+    assert by["Best week"]["sub"] == "since their first trade"  # 5 weeks of history, not 12
+    assert by["Strong in"]["v"] == "Politics" and "price test passes on those trades alone" in by["Strong in"]["sub"]
+    one = run_js(PROFILE, f"profileNumbers({json.dumps(s | {'categories': s['categories'][:1]})}, null, {{}}, '30d').groups[0].rows")
+    assert "Strong in" not in [r["k"] for r in one]  # one kind of market: it's the test itself
+    none = run_js(PROFILE, "profileNumbers({pnl_weeks: [null, null]}, null, {}, '30d').groups[0].rows")
+    assert [r["v"] for r in none if r["k"] in ("Best week", "Worst week")] == [None, None]  # unknown is "—", never $0
