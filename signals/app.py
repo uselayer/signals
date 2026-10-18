@@ -679,11 +679,15 @@ def presented_wallets() -> frozenset[str]:
     """The recommended traders people are shown, whose scores are kept PRESENTED_RESCORE_S fresh: those on the
     Recommended list (the check's, or the directory's capped at its limit) and every wallet someone follows (its
     alerts and page). Bounded however big the directory grows, so rescoring them never takes the whole budget;
-    Explore's "Passed our checks" lists the rest, rescored daily."""
+    Explore's "Passed our checks" lists the rest, rescored daily. Also those held off the list until they're
+    rescored (``_held_stale``): they'd be on it but for an older score, so they're rescored first, ahead of
+    wallets never looked at."""
 
     def read() -> frozenset[str]:
         rec = {s["wallet"] for s in (_check_result() or {}).get("scores", []) if s.get("segment") in RECOMMENDED}
-        return frozenset(rec | {w for u in _load_follows()["users"].values() for w in u.get("follows") or []})
+        # after _check_result: building the directory's list (``_consistent``) is what sets _held_stale
+        follows = {w for u in _load_follows()["users"].values() for w in u.get("follows") or []}
+        return frozenset(rec | follows | _held_stale)
 
     return cached("presented", 60, read)  # type: ignore[no-any-return]
 
@@ -890,6 +894,9 @@ def _upgraded(s: dict[str, Any]) -> dict[str, Any]:
     return _worth_upgrade({"format": s.get("format") or 0, "scores": [s]})["scores"][0]  # type: ignore[no-any-return]
 
 
+_held_stale: frozenset[str] = frozenset()  # recommended traders held off the list until rescored (``_consistent``)
+
+
 def _consistent(d: Directory, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The scores whose tier is the same wherever it's read. One worked out by today's scoring (WORTH_FORMAT)
     always is. An older one is kept only when today's rules (``_upgraded``, as the check's own file is judged) give
@@ -901,6 +908,8 @@ def _consistent(d: Directory, rows: list[dict[str, Any]]) -> list[dict[str, Any]
     old = [w for w, r in by.items() if (r["format"] or 0) < WORTH_FORMAT]
     differs = {w for w, s in d.scores_of(old).items() if _upgraded(s)["segment"] != by[w]["segment"]} if old else set()
     spread = {w for w in old if (by[w]["format"] or 0) < RESTING_FORMAT and by[w]["segment"] in RECOMMENDED}
+    global _held_stale
+    _held_stale = frozenset(spread)  # presented until rescored (``presented_wallets``): fresh each build
     if spread:
         _directory_later(lambda d: d.rescore_soon(spread))
     return [r for r in rows if r["wallet"] not in differs | spread]
@@ -1795,9 +1804,10 @@ def _record(wallet: str) -> dict[str, Any]:
     values = [p.value for p in held if p.value is not None]
     # Open profit: Polymarket's own figure for each position they hold, added up (as the scored profile does), never
     # its summary's, which can be months old. ``at_least``: the read is full, so some may be missing (then it's
-    # their biggest ones'). None when any position has no figure.
+    # their biggest ones'). None when any position has no figure, or none is listed (Polymarket's list leaves out
+    # positions under 1 contract, so none listed isn't "nothing open").
     pnls = [p.pnl for p in held]
-    open_pnl = round(sum(pnls), 2) if pnls and all(x is not None for x in pnls) else 0.0 if not held else None
+    open_pnl = round(sum(pnls), 2) if pnls and all(x is not None for x in pnls) else None
     return {
         "wallet": wallet,
         "name": d.trader.name,

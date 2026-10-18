@@ -114,7 +114,9 @@ def test_each_reason_reads_as_a_sentence() -> None:
 
     for seg in set(SEGMENTS) - set(RECOMMENDED):
         assert reason_for(seg) in REASONS and reason_for(seg) in REASON_LABELS, seg
-    assert reason_label("lucky") == "Scored: a big profit that rests on one win"
+    assert reason_label("lucky") == "A big profit that rests on one win"  # no internal "Scored:" prefix
+    assert reason_label("no_edge") == "Our price test didn't show skill"  # plain words, not "edge not proven"
+    assert not any(t.startswith("Scored:") for t in REASON_LABELS.values())
     assert reason_label("big_profit", 5).endswith("(and nothing shows luck)")
 
 
