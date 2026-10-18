@@ -35,7 +35,7 @@ Then open http://127.0.0.1:8790.
 ## What's on the page
 
 Signals helps you find traders worth following and understand why: who they are, how they trade, and what the
-evidence does and doesn't show. Before you copy a trade, it shows what that would really cost you: the price now
+evidence does and doesn't show. Before you buy what a trader bought, it shows what that would really cost you: the price now
 against theirs, what your amount fills at, the fee. That isn't a promise of profit.
 
 The first visit asks one question, which markets interest you (Politics, Sports, Crypto, Esports, or Skip for all
@@ -55,13 +55,13 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
     oldest of what's shown was read. A page never waits on Polymarket for the list: it reads at most 3 traders
     the engine hasn't read yet, and says "Still reading N traders" for the rest.
   - Both: one card per trade, opened on your markets, three across on a desktop: the market, their pick, what they paid, the price now, how much they put in,
-    and one status line. **You can still get in** means the price is between 5¢ below and 3¢ above what they
-    paid; **Price moved away** means further either way. A bigger drop means
-    the market has turned against them, so buying then is a different trade, not a bargain. A trade at 2¢ or
-    less, 98¢ or more, or one they no longer hold is **Won**, **Lost** or **Closed**, and drops out of the default
-    feed. Turn off "Only trades I can still get into" to see them all. Tap a card for the details and the
-    trader. Every trade has **Check your price** (**What buying now costs**), whoever the trader and whether or
-    not copying them is offered: pick an amount and the engine prices it from Polymarket's order book right now,
+    and one status line: where the price is ("Now 52¢ · they paid 49¢"), in no colour, the same for every
+    trader. "Only trades I can still get into" keeps the ones whose price is between 5¢ below and 3¢ above what
+    they paid; further either way the price has moved away (a bigger drop means the market has turned against
+    them, so buying then is a different trade, not a bargain). A trade at 2¢ or less, 98¢ or more, or one they no
+    longer hold is **Won**, **Lost** or **Closed**, and drops out of the default feed. Turn the switch off to see
+    them all. Tap a card for the details and the trader. Every trade has **Check your price** (**What buying now
+    costs**), whoever the trader: pick an amount and the engine prices it from Polymarket's order book right now,
     up to 3¢ above the cheapest price for sale (said on the page), with the fee, the estimated slippage, what's
     for sale within that limit, when the book was read, and what you get if it wins. Their price is shown for
     context only. The engine reads the price and whether the market is still taking orders itself (Polymarket's
@@ -75,19 +75,19 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
     Kalshi doesn't name them), not filtered by your markets: the SDK has no categories for Kalshi markets, and
     almost all big trades are Kalshi's.
 - **Traders**: a leaderboard of the Polymarket traders we recommend, in two sections by tier: **Sharps** (Proven
-  sharp, Quiet sharp) and **Rising**. The tier is skill and track record only; copying is a separate copy status
-  on every trader: **Copyable**, **Copy not proven** (not reliably above zero; a small positive estimate is never
-  shown as a gain), **Costly to copy** (the whole range of what copies kept is below zero: usually the price moves
-  their way before a copy gets in) or **Not offered**. A Proven sharp can be costly to copy.
-  - One bar: on the left the market chips (your onboarding choice) and **Copyable only**; on the right
+  sharp, Quiet sharp) and **Rising**. The tier is skill and track record only. The page shows no copy estimate
+  (what buying a few minutes after them would have made): it isn't reliable yet, so it's left out everywhere
+  (Traders, trader pages, the Feed, alerts). The engine still works it out (`copy_status`, `copy_ok`) and its API
+  keeps the fields.
+  - One bar: on the left the market chips (your onboarding choice); on the right
     **Search name or wallet**, the period (7D / 30D / 90D, once the SDK provides it) and the sort: Recommended
-    (the checks' order), Most consistent, Profit, Win rate, Most active, Copy result.
+    (the checks' order), Most consistent, Trading profit, Picked the winner, Most active.
   - Columns, grouped: **Track record** (Weeks up, last 12; Trading profit; trend; and **Picked the winner** over 30
     days: "96%" over "52 of 54" and "prices implied 92%" (their average price on the settled ones: buying at 92¢ picks
     the winner about 92% of the time by price alone), neutral since 50% isn't break-even on Polymarket, shown, like its
     sort, from 10 settled trades, else "only N settled" / "none settled yet"; sorting by it says "Close rates: more
-    trades rank higher"), **Style** (their usual opening buy over the last 30 days and how often they trade), **Copying** (what a copy a few minutes late made
-    after fees, as a share of what it paid). On a phone each trader is one card.
+    trades rank higher") and **Style** (their usual opening buy over the last 30 days and how often they trade). On a
+    phone each trader is one card.
   - Weeks in profit, trend, 7D/90D and the "per $ traded" return come from the SDK's profit history (uselayer
     0.6). Until then they show "—" and **Most consistent** says "coming soon"; nothing is made up.
   - A trader matches your markets when it's the category they trade most or one they're strong in. Searching a
@@ -96,21 +96,20 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
   - The footer counts who's left out (edge not proven, not enough data, big profit with the edge unproven or
     resting on one win, market makers, arbitrage) and **See all
     checked traders** shows everyone but market makers and arbitrage, each marked. It also links to **Top
-    profit** (Polymarket's leaderboard; both venues' with Kalshi on). "How we pick traders" explains the checks,
-    the tiers and copying (its own tab) in plain words.
+    profit** (Polymarket's leaderboard; both venues' with Kalshi on). "How we pick traders" explains the checks
+    and the tiers in plain words.
   - Wallets come from the leaderboards and from busy markets' trades. The first check takes 20–30 minutes and
     is kept in the store dir, so later launches show the last result at once while a new check runs in the
     background (on launch if it's over 6 hours old, then every 6 hours while the app is open). Scoring is
     `client.whales.discover()` / `score()` in the SDK.
   - **A trader's profile** (from the leaderboard or a wallet search): their market and last trade, a link to their
-    Polymarket profile, their tier, and their copy status under Follow (Copyable, Copy not proven, Costly to copy
-    or Not offered, with "Why?"). A stat strip (profit and per $ traded for the
+    Polymarket profile, their tier, and Follow. A stat strip (profit and per $ traded for the
     period, 12-week consistency, win record and usual trade over the last 30 days, wallet; a note says the period
     switch changes only profit), a profit chart for 7D / 30D / 90D with the stretches
-    below their previous high shaded, and **Why they're here**: why they're on the list, their copy status and its reason, the SDK's
-    own warnings as a callout, then a short table (markets, buys at, new markets, holds, last bought). Tabs: **Positions** (open, with "You can still get in", and
+    below their previous high shaded, and **Why they're here**: why they're on the list, the SDK's
+    own warnings as a callout, then a short table (markets, buys at, new markets, holds, last bought). Tabs: **Positions** (open, with where the price is now, and
     closed), **Activity** (their recent buys and sells) and **Stats** (consistency, risk, style, execution), with
-    the evidence (each check, how the price moved after their buys, by category, the trades checked) under **How
+    the evidence (each check but the SDK's copy check, how the price moved after their buys, by category, the trades checked) under **How
     we measure this**. The wallet is their cash (read on-chain) plus open positions; anything that can't be read shows "—", never $0.
   - **A leaderboard trader's page** (Top profit, Feed → Big trades), with Kalshi on, also asks **Same person on the other venue?**: accounts that may
     be the same person, each with the evidence (the same name or X handle on an account that really trades,
@@ -155,8 +154,8 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   trades (once per trader) and messages each connected follower about new buys and sells, of any size and whoever
   the trader (split buys within 30 minutes add up; after a message, more buys or sells of that outcome are left out
   for 6 hours, except the sale that leaves them holding none, which the bot's welcome message says): who bought what, at what price, the market, the price
-  now, and when they traded with how long before the alert that was. A trader copying is offered for gets one more
-  line while the price is still near theirs; costs stay on the trade's page, which "Check current price" opens.
+  now, and when they traded with how long before the alert that was, the same for every trader and nothing about
+  copying; costs stay on the trade's page, which "Check current price" opens.
   A sell says whether they still hold some (then the price now) or none, and is never a suggestion to sell.
   Every alert has "Useful / Not useful", "Stop alerts from …" and "Fewer alerts". Two or more followed traders buying the same outcome
   make one grouped message, edited in place as more buy. Big trades ($10,000 or more, from the SDK's big trades)
@@ -201,7 +200,9 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   edge), at most `SIGNALS_DISCOVERY_LIMIT` (default the check's 200, so the page and the Feed's poller stay the
   size they are), in the same response as before, those in the picked markets (onboarding's, sent with the
   request) first, so a pick gets the best of the whole directory. Explore browses the whole directory, never
-  limited by it. A score is the same score wherever it's read, so
+  limited by it. Its sorts are facts, never a ranking of skill: recently active, most markets in 90 days, biggest
+  usual amount, most trading profit over 30 days (a full check's; a row without one sorts last, never as $0) and
+  recently found. A score is the same score wherever it's read, so
   a trader gets the same tier, section and copy status either way. The check keeps running beside it, so
   `SIGNALS_DISCOVERY=check` (the default) goes back to it at once, and it's shown anyway while the directory has no
   fresh score or can't be read. `/api/discovery` (the owner's, as `/api/metrics`) compares the two: each one's
