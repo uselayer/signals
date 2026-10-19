@@ -304,6 +304,7 @@
   .lb-search svg { position: absolute; left: 11px; width: 15px; height: 15px; color: var(--faint); pointer-events: none; }
   .lb-search input { box-sizing: border-box; width: 230px; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 999px; padding: 5px 12px 5px 32px; font: inherit; font-size: 14px; }
   .lb-search input::placeholder { color: var(--faint); }
+  .lb-period-what { font-size: 13px; color: var(--muted); white-space: nowrap; margin-right: -4px; }
   .lb-period { display: inline-flex; background: var(--soft); border-radius: 999px; padding: 3px; }
   .lb-period button { border: 0; background: none; padding: 4px 11px; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer; }
   .lb-period button[aria-pressed="true"] { background: var(--raised); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
@@ -370,13 +371,15 @@
   .lb-head { padding-block: 8px 10px; background: var(--soft); font-size: 12px; color: var(--muted); letter-spacing: .02em; }
   .lb-head button { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; color: inherit; text-align: left; cursor: pointer; }
   .lb-head button[aria-pressed="true"] { color: var(--fg); font-weight: 600; }
-  .lb-head button small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
+  .lb-head small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
   .lb-row { border-top: 1px solid var(--line); color: inherit; }
   .lb-row:hover { background: var(--soft); }
   .lb-rank { color: var(--faint); font-size: 14px; }
   .lb-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .lb-who .nm { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .lb-sub { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  /* a trader's main category: an outlined label, neutral like every tag (colour is only for gains and losses) */
+  .lb-tag { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; margin-right: 6px; font-size: 12px; font-weight: 500; line-height: 18px; color: var(--fg); }
   .lb-main { display: block; font-weight: 600; }
   .lb-none { color: var(--faint); }
   .lb-weeks { display: flex; gap: 2px; margin-bottom: 4px; }
@@ -1792,7 +1795,7 @@ function renderWorth() {
     const main = s.categories?.[0]?.category;
     return `<a class="lb-cols lb-row" href="#/worth/${esc(s.wallet)}" ${i >= RANKED && !open ? "hidden" : ""}>
       <span class="lb-rank">${i + 1}</span>
-      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${[main, s.last_buy ? `active ${ago(s.last_buy)}` : ""].filter(Boolean).map(esc).join(" · ")}${notRec}</span>${cat ? `<span class="lb-sub">${pl(realizedIn(s, cat), esc(realizedText(s, cat)))}</span>` : ""}</span></span>
+      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${main ? `<span class="lb-tag">${esc(main)}</span>` : ""}${s.last_buy ? esc(`active ${ago(s.last_buy)}`) : ""}${notRec}</span>${cat ? `<span class="lb-sub">${pl(realizedIn(s, cat), esc(realizedText(s, cat)))}</span>` : ""}</span></span>
       <span class="lb-cons">${up == null || !known ? `<span class="lb-none">—</span>` : `<span class="lb-weeks" aria-hidden="true">${s.pnl_weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span><span class="lb-sub">${up} of ${known} weeks up</span>`}</span>
       <span class="lb-pnl">${profit == null ? `<span class="lb-none">—</span>` : `<span class="lb-main">${pl(profit, usd(profit, true))}</span><span class="lb-sub">${perDollar != null ? `${lbPct(perDollar)} per $ traded` : `${days} days`}</span>`}</span>
       <span class="lb-trend">${lbSpark(s, days)}</span>
@@ -1818,7 +1821,7 @@ function renderWorth() {
   if (shown.length) {
     body = `<div class="lb-board ${history ? "" : "lb-nohist"}">
       <div class="lb-cols lb-groups" aria-hidden="true"><span style="grid-column:3 / span 4">Track record</span><span style="grid-column:7">Style</span></div>
-      <div class="lb-cols lb-head"><span>#</span><span>Trader</span>${head("consistent", "Weeks up, last 12")}${head("profit", "Trading profit")}<span>Trend</span>${head("won", `${WIN_LABEL}<small>30 days</small>`)}${head("active", "Usual trade, 30 days")}</div>
+      <div class="lb-cols lb-head"><span>#</span><span>Trader</span>${head("consistent", "Weeks up<small>last 12 weeks</small>")}${head("profit", `Trading profit<small>${days} days</small>`)}<span>Trend<small>${days} days</small></span>${head("won", `${WIN_LABEL}<small>30 days</small>`)}${head("active", "Usual trade<small>30 days</small>")}</div>
       ${sections ?? rows(shown, "all")}</div>`;
   } else if (q && isWalletQuery(q)) {
     body = emptyState("That wallet isn't in this list", "We can still check its trades, including your own wallet. It usually takes under a minute.", `<a class="btn" href="#/worth/${esc(q)}">Check this wallet</a>`);
@@ -1841,7 +1844,7 @@ function renderWorth() {
       </div>
       <div class="lb-view">
         <label class="lb-search" for="lbq"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg><input id="lbq" type="search" placeholder="Search name or wallet" value="${esc(lb.q)}" autocomplete="off" aria-label="Search by trader name or wallet address"></label>
-        ${periods ? `<div class="lb-period" role="group" aria-label="Period">${Object.keys(PERIOD_DAYS).map((p) => `<button type="button" data-lbperiod="${p}" aria-pressed="${n === p}">${p.toUpperCase()}</button>`).join("")}</div>` : ""}
+        ${periods ? `<span class="lb-period-what" id="lbperiodwhat">Profit and trend over</span><div class="lb-period" role="group" aria-labelledby="lbperiodwhat">${Object.keys(PERIOD_DAYS).map((p) => `<button type="button" data-lbperiod="${p}" aria-pressed="${n === p}">${p.toUpperCase()}</button>`).join("")}</div>` : ""}
         <select id="lbcat" class="lb-sort" aria-label="Realized profit by category">${[["", "Any category"], ...REALIZED_CATS.map((c) => [c, c])].map(([v, l]) => `<option value="${esc(v)}" ${cat === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
         ${cat ? `<button type="button" class="lb-chip" id="lbmade" aria-pressed="${lb.made}">Made money in ${esc(cat)}</button>` : ""}
         <select id="lbsort" class="lb-sort" aria-label="Sort traders">${Object.entries(LB_SORTS).filter(([k]) => k !== "category" || cat).map(([k, [l]]) => k === "consistent" && !history
