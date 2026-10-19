@@ -154,6 +154,16 @@ behind Vercel (see README, "Hosting").
     arbitrage traders (the SDK's "No view"), and the checks are never loosened to
     fill the list: an empty result says so and names the interests that had no one. "See all checked traders" may
     show the rest, each marked.
+  - A trader's record from uselayer 0.14, on their profile (scored or not): "Made money on X of N positions" is every
+    position they've closed or that settled, losers never redeemed included (`/api/completed`, the SDK's
+    `completed_positions`), shown only when it adds up to Polymarket's realized profit (`reconciles`), with
+    "parlays not included" when they have parlays; otherwise the SDK's own line (`summary`) says why there's none.
+    Positions, never "predictions". The worst drop from a high is the score's `worst_drop` (every hourly point);
+    a score kept before 0.14 shows "—". "Realized profit by category, all time" (`/api/categories`, the SDK's
+    `realized_by_category`, parlays included) has a row per category, "Uncategorised", "All except Sports" and all
+    together, with the owner's caveat word for word: "Polymarket's figures, updated every few hours. Bets still
+    open aren't counted." (the one place the page says "bets"). Both are read on the checks' budget (`checker`:
+    3–13 and 12 reads) and kept per wallet (30 min, 1 h).
   - Never a made-up number for a real trader on the hosted app. A figure the data doesn't have yet shows "—";
     sample values (`SIGNALS_MOCK=1`) are for reviewing the page locally only. The SDK's per-dollar figure is a return per dollar traded, never "ROI".
   - Words: say "trade", never "bet"; never "sandbox" or "paper". Every trade with a market has "Check your
