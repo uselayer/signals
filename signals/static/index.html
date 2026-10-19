@@ -1681,7 +1681,7 @@ const winRateOf = (s) => s.win_low ?? null;
 // The Win rate column: its name in one place (the header, the sort menu), and the engine's WIN_MIN, so a cell shows a
 // rate from the same 10 settled trades the sort ranks from. Neutral, never green or red: on Polymarket 50% isn't
 // break-even (buying at 80¢ needs more than 80% to profit; at 30¢, a third can).
-const WIN_LABEL = "Picked the winner";
+const WIN_LABEL = "Win rate";
 const WIN_MIN = 10;
 const winPct = (s) => s.settled >= WIN_MIN && s.won != null ? `${Math.round((100 * s.won) / s.settled)}%` : null;
 // What the prices they paid implied: their average price on the settled ones (the check's ``odds``), as a share.
@@ -1694,7 +1694,7 @@ function winCell(s) {
   if (winPct(s)) return `<span class="lb-main">${winPct(s)}</span><span class="lb-sub">${s.won} of ${s.settled}</span>${impliedPct(s) ? `<span class="lb-sub">prices implied ${impliedPct(s)}</span>` : ""}`;
   return `<span class="lb-main lb-none">—</span><span class="lb-sub">${s.settled ? `only ${s.settled} settled` : "none settled yet"}</span>`;
 }
-// A phone card's meta line opens with it: "Picked the winner 96% (52 of 54), prices implied 92%".
+// A phone card's meta line opens with it: "Win rate 96% (52 of 54), prices implied 92%".
 const winMeta = (s) => s.settled == null ? "" : winPct(s) ? `${WIN_LABEL} ${winPct(s)} (${s.won} of ${s.settled})${impliedPct(s) ? `, prices implied ${impliedPct(s)}` : ""}`
   : `${WIN_LABEL}: ${s.settled ? `only ${s.settled} settled` : "none settled yet"}`;
 // New markets they bought into (adding to a trade they already have isn't a new one), from the SDK's decisions.
@@ -1818,7 +1818,7 @@ function renderWorth() {
   if (shown.length) {
     body = `<div class="lb-board ${history ? "" : "lb-nohist"}">
       <div class="lb-cols lb-groups" aria-hidden="true"><span style="grid-column:3 / span 4">Track record</span><span style="grid-column:7">Style</span></div>
-      <div class="lb-cols lb-head"><span>#</span><span>Trader</span>${head("consistent", "Weeks up, last 12")}${head("profit", "Trading profit")}<span>Trend</span>${head("won", `${WIN_LABEL}<small>30 days</small>`)}${head("active", "Usual opening buy, 30 days")}</div>
+      <div class="lb-cols lb-head"><span>#</span><span>Trader</span>${head("consistent", "Weeks up, last 12")}${head("profit", "Trading profit")}<span>Trend</span>${head("won", `${WIN_LABEL}<small>30 days</small>`)}${head("active", "Usual trade, 30 days")}</div>
       ${sections ?? rows(shown, "all")}</div>`;
   } else if (q && isWalletQuery(q)) {
     body = emptyState("That wallet isn't in this list", "We can still check its trades, including your own wallet. It usually takes under a minute.", `<a class="btn" href="#/worth/${esc(q)}">Check this wallet</a>`);
@@ -1856,7 +1856,7 @@ function renderWorth() {
     <p class="lb-foot">${st.running ? `Checking again${st.total ? ` (${st.done} of ${st.total})` : ""}…` : `Checked ${plural(scores.length, "trader")} ${ago(res.finished)} · <button class="link" id="wrefresh">Check again</button>`}
       · <button class="link" id="how">How we pick traders</button>
       ${sort === "consistent" ? " · Most consistent ranks by weeks up out of the weeks they've traded (of the last 12), from 4 weeks" : ""}
-      ${periods ? " · 7D/30D/90D changes trading profit and trend only: weeks up always covers the last 12 weeks, picked the winner and usual opening buy the last 30 days" : ""}
+      ${periods ? " · 7D/30D/90D changes trading profit and trend only: weeks up always covers the last 12 weeks, win rate and usual trade the last 30 days" : ""}
       ${history ? "" : " · Weeks in profit, trend and 7D/90D arrive with the next data update"}
       <br>${checkedFoot(res, lb.all)}
       · <a class="link" href="#/traders/top">Top profit</a>
@@ -2436,7 +2436,7 @@ function profileNumbers(s, d, acct, n) {
         ...boardsRow(s.boards),
       ] },
       { title: "How they trade", rows: [
-        { k: "Usual opening buy", v: s.typical_usd != null ? usd(s.typical_usd) : null, sub: readPeriod(s) },
+        { k: "Usual trade", v: s.typical_usd != null ? usd(s.typical_usd) : null, sub: readPeriod(s) },
         { k: "Usual price paid", v: band, sub: `middle half of positions checked, ${readPeriod(s)}` },
         { k: "New positions", v: perDay == null ? null : perDay >= 1 ? `about ${Math.round(perDay)} a day`
           : Math.round(perDay * 7) ? `about ${Math.round(perDay * 7)} a week` : "fewer than one a week", sub: readPeriod(s) },
@@ -2562,7 +2562,7 @@ function worthDetails(s) {
     <p class="note">${esc(sdkText(s.source))} · last ${Math.round((new Date(s.window[1]) - new Date(s.window[0])) / 864e5)} days · ${plural(s.bets, "separate trade")} checked · ${conf}
       · <a class="ext" href="https://polymarket.com/profile/${esc(s.wallet)}" target="_blank" rel="noopener">${INTL} profile ↗</a></p>
     <h3>What the numbers mean</h3><ul>
-      <li><b>Usual opening buy:</b> the middle of their first buys into each position over the ${readPeriod(s)}. Adding to a position isn't counted.</li>
+      <li><b>Usual trade:</b> the middle of their first buys into each position over the ${readPeriod(s)}. Adding to a position isn't counted.</li>
       <li><b>New positions:</b> how many outcomes they bought into for the first time, a day.</li>
       <li><b>Closed positions</b> (the Positions tab): their last 50, from Polymarket, which leaves out settled positions they never redeemed. "Sold" means they sold at least half before the market settled.</li>
       ${readDays(s) < 30 ? `<li>They trade a lot: we read their last 5,000 fills, which go back ${readDays(s)} days, not 30.</li>` : ""}
