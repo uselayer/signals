@@ -124,10 +124,11 @@ def test_made_money_on_comes_from_every_position_they_have_had_and_is_kept(
     client, fake = api
     asked: list[str] = []
 
-    def completed_positions(wallet: str) -> Any:
+    def completed_positions(wallet: str, max_pages: int = 10) -> Any:
         from datetime import UTC, datetime
 
         asked.append(wallet)
+        assert max_pages == 100  # up to 5,000 closed positions: at 500, about half the recommended traders had no record
         return Record(summary="Made money on 215 of 400 positions · parlays not included", made_money=215,
                       positions=[object()] * 400, complete=True, reconciles=True, parlays_excluded=True,
                       read_at=datetime(2026, 10, 19, tzinfo=UTC))  # fmt: skip
@@ -138,10 +139,10 @@ def test_made_money_on_comes_from_every_position_they_have_had_and_is_kept(
                  "count": 400, "complete": True, "reconciles": True, "parlays_excluded": True,
                  "read_at": "2026-10-19T00:00:00+00:00"}  # fmt: skip
     client.get(f"/api/completed/{W}")
-    assert asked == [W]  # kept COMPLETED_TTL_S: 3-13 reads each
+    assert asked == [W]  # kept COMPLETED_TTL_S: 3-103 reads each
     assert client.get("/api/completed/someone").status_code == 400
 
-    def down(wallet: str) -> Any:
+    def down(wallet: str, max_pages: int = 10) -> Any:
         raise VenueError("unavailable", "Polymarket is down", venue="polymarket", retryable=True)
 
     monkeypatch.setattr(fake, "completed_positions", down, raising=False)
@@ -310,7 +311,7 @@ def test_a_profiles_own_reads_are_under_check_nows_limits_and_busy_says_so(
     client, fake = api
     reads: list[str] = []
 
-    def completed_positions(wallet: str) -> Any:
+    def completed_positions(wallet: str, max_pages: int = 10) -> Any:
         reads.append(wallet)
         return Record(summary="Made money on 1 of 2 positions", made_money=1, positions=[1, 2], complete=True,
                       reconciles=True, parlays_excluded=False, read_at=datetime(2026, 10, 19, tzinfo=UTC))  # fmt: skip

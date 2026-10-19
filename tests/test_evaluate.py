@@ -115,6 +115,14 @@ def test_open_pnl_is_added_up_from_their_open_positions_and_unknown_is_never_zer
     assert got["full"]["v"] is None and got["full"]["sub"] == "they hold over 500 positions, too many to add up here"
     assert "+$50" in got["fifty_all_read"]["v"]
     assert "+$98" in got["full_but_settled_last"]["v"]  # every open one was read: the last is a settled loser
+    # one at 1¢ hasn't settled: its loss counts though its status says "lost" (flawfence, 19 Oct: $24K of these were
+    # left out, so +$113K read +$137K); one at 0 has settled and doesn't
+    near = [{"status": "in", "pnl": 500.0, "value": 900.0, "current_price": 0.5},
+            {"status": "lost", "pnl": -300.0, "value": 3.0, "current_price": 0.01},
+            {"status": "lost", "pnl": -1000.0, "value": 0, "current_price": 0}]  # fmt: skip
+    nearly = run_js(NUMBERS, "(() => { pf.account = {}; return profileNumbers(" + json.dumps(s) + ", "
+                    + json.dumps({"stats": {}, "positions": near, "positions_cut": False}) + ", {}, '30d').summary[0]; })()")
+    assert "+$200" in nearly["v"] and nearly["sub"] == "on 2 positions still open, at today's prices"
     assert got["missing_figure"]["v"] is None and got["missing_figure"]["sub"] == "couldn't be worked out from their positions"
     assert got["failed"]["v"] is None and got["failed"]["sub"] == "their positions couldn't be read just now"
 

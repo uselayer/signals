@@ -2388,7 +2388,10 @@ function profileNumbers(s, d, acct, n) {
   // an open one may be missing (the server says so, positions_cut, from Polymarket's own list before settled ones
   // are taken out), so there's no total rather than part of one. Unknown has no row, never $0.
   const held = d && !d.error && Array.isArray(d.positions) ? d.positions : null;
-  const open = held ? held.filter((p) => !SETTLED.has(p.status)) : null;
+  // Still open is priced between 0 and 1: one at 2¢ or 98¢ hasn't settled and its loss or gain counts (its "lost"/"won"
+  // status is about buying in, not the market; leaving those out read flawfence's +$113K as +$137K, 19 Oct).
+  const isOpen = (p) => p.current_price != null ? p.current_price > 0 && p.current_price < 1 : !SETTLED.has(p.status);
+  const open = held ? held.filter(isOpen) : null;
   const cut = held != null && (d.positions_cut ?? (held.length >= POSITIONS_READ && Math.min(...held.map((p) => p.value ?? 0)) > 0));
   const openPnl = open && !cut && open.every((p) => p.pnl != null) ? open.reduce((a, p) => a + p.pnl, 0) : null;
   // Their wallet: cash (read on-chain) plus open positions, read now (else as the check read them), with when.
