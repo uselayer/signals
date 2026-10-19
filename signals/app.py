@@ -514,11 +514,13 @@ def _directory_note_later(seen: list[Seen]) -> None:
 
 def _directory_later(write: Callable[[Directory], Any]) -> None:
     """Any other write to the directory (a score, a failed try, the import) on the writer thread, in order with
-    the sightings. It never fails a page or the check: what went wrong is kept for /api/directory."""
+    the sightings. It never fails a page or the check: what went wrong is kept for /api/directory. The directory is
+    the one in use when the write is queued, never whichever is current when the thread gets to it."""
+    d = directory()
 
     def run() -> None:
         try:
-            write(directory())
+            write(d)
         except Exception as e:  # the page, the check and the next write go on
             _directory_state["note_error"] = f"{type(e).__name__}: {e}"
 
@@ -1633,7 +1635,10 @@ def worth(markets: str = "") -> dict[str, Any]:
     if data is not None:
         # each recommended trader's realized profit by category, as the daily job kept it (no read): the category
         # picker's. A trader it hasn't read yet has none, and the page says "—", never $0.
-        realized = _realized_kept(s["wallet"] for s in data["scores"] if s.get("segment") in RECOMMENDED)
+        # one kept over CATEGORY_KEPT_S old is left out too: the page says "not read yet", never a stale figure
+        now = time.time()
+        realized = {w: v for w, v in _realized_kept(s["wallet"] for s in data["scores"] if s.get("segment") in RECOMMENDED).items()
+                    if now - v["stored_at"] < CATEGORY_KEPT_S}  # fmt: skip
         out["result"] = {k: v for k, v in data.items() if k != "scores"} | {
             "scores": [{k: v for k, v in s.items() if k != "sample"} | _board(s)
                        | ({"realized": realized_row(realized[s["wallet"]])} if s["wallet"] in realized else {})
@@ -1951,12 +1956,16 @@ def category_view(r: dict[str, Any]) -> dict[str, Any]:
             "read_at": r.get("read_at")}  # fmt: skip
 
 
-def _categories_of(wallet: str) -> dict[str, Any]:
-    """Their realized profit by category: the one kept in the directory while it's under CATEGORY_KEPT_S old (the
-    daily job's, for recommended traders: no read), else read on the checks' budget and kept for next time."""
+def _fresh_kept(wallet: str, now: float | None = None) -> dict[str, Any] | None:
+    """Their realized profit by category as the directory keeps it (the daily job's, for recommended traders), while
+    it's under CATEGORY_KEPT_S old; else None."""
+    now = time.time() if now is None else now
     kept = _realized_kept([wallet]).get(wallet)
-    if kept is not None and time.time() - kept["stored_at"] < CATEGORY_KEPT_S:
-        return kept
+    return kept if kept is not None and now - kept["stored_at"] < CATEGORY_KEPT_S else None
+
+
+def _categories_of(wallet: str) -> dict[str, Any]:
+    """Their realized profit by category, read on the checks' budget and kept in the directory for next time."""
     view = category_view(checker().realized_by_category("polymarket", wallet).to_dict())
     _directory_later(lambda d: d.keep_realized(wallet, view))
     return view
@@ -1964,9 +1973,13 @@ def _categories_of(wallet: str) -> dict[str, Any]:
 
 @app.get("/api/categories/{wallet}")
 def realized_categories(wallet: str, request: Request) -> dict[str, Any]:
-    """A Polymarket wallet's realized profit, all time, by category (``category_view``), kept CATEGORY_TTL_S, under
-    "Check now"'s limits (``limited_read``)."""
+    """A Polymarket wallet's realized profit, all time, by category (``category_view``): the kept one while it's fresh
+    (a recommended trader's, no read and no turn), else read, kept CATEGORY_TTL_S, under "Check now"'s limits
+    (``limited_read``)."""
     w = _wallet_or_400(wallet)
+    kept = _fresh_kept(w)
+    if kept is not None:
+        return kept
     return limited_read(f"categories:{w}", CATEGORY_TTL_S, w, request, lambda: _categories_of(w))  # type: ignore[no-any-return]
 
 
@@ -1993,8 +2006,8 @@ def _realized_kept(wallets: Iterable[str]) -> dict[str, dict[str, Any]]:
 
 def categories_round(stop: threading.Event | None = None, now: float | None = None) -> dict[str, int]:
     """Reads the realized profit by category of each recommended trader whose kept one is missing or over
-    CATEGORY_DAILY_S old, one at a time, on the background's budget, and keeps it. A read that fails is left for the
-    next round; the rest go on."""
+    CATEGORY_DAILY_S old, one at a time, on the background's budget, and keeps it. A wallet that fails, whatever
+    the reason, is logged, counted and left for the next round; the rest go on."""
     now = time.time() if now is None else now
     wallets = sorted(_recommended(_check_result()))
     kept = _realized_kept(wallets)
@@ -2007,9 +2020,10 @@ def categories_round(stop: threading.Event | None = None, now: float | None = No
             view = category_view(background().realized_by_category("polymarket", w).to_dict())
             directory().keep_realized(w, view, at=now)
             done += 1
-        except (VenueError, ValueError, sqlite3.Error, OSError) as e:
+        except Exception as e:  # one bad wallet never stops the round for the rest
             failed += 1
             _category_state["error"] = f"{w}: {type(e).__name__}: {str(e)[:200]}"
+            print(f"categories: couldn't read {w}: {type(e).__name__}: {str(e)[:200]}", flush=True)
     out = {"recommended": len(wallets), "due": len(due), "read": done, "failed": failed}
     _category_state["last"] = out | {"at": now}
     return out
