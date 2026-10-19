@@ -1876,14 +1876,44 @@ def _completed(wallet: str) -> dict[str, Any]:
             "reconciles": r.reconciles, "parlays_excluded": r.parlays_excluded, "read_at": r.read_at.isoformat()}  # fmt: skip
 
 
-@app.get("/api/completed/{wallet}")
-def completed(wallet: str) -> dict[str, Any]:
-    """A Polymarket wallet's whole record of positions (``_completed``), kept COMPLETED_TTL_S."""
-    w = _wallet_or_400(wallet)
+BUSY = "Busy, try again in a minute."
+# What a profile's own reads take, as "Check now" does: the same CHECKS_AT_ONCE turns site-wide (waiting CHECK_WAIT_S
+# for one), and hosted, CHECKS_PER_CLIENT wallets per visitor (each wallet counted once, however many of its reads
+# it needs; their own count, so reading profiles never uses up "Check now").
+_profile_reads: dict[str, dict[str, float]] = {}
+
+
+def limited_read(key: str, ttl_s: float, wallet: str, request: Request | None, read: Callable[[], Any]) -> Any:
+    """``read()``, kept ``ttl_s`` under ``key``, under "Check now"'s limits; a kept answer needs no turn. Past a limit,
+    a 429 with BUSY, which the page shows as it is, never as an error or $0."""
+    hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < ttl_s:
+        return hit[1]
+    if HOSTED:
+        who, (most, per) = _client(request), CHECKS_PER_CLIENT
+        now = time.time()
+        recent = {w: t for w, t in _profile_reads.get(who, {}).items() if now - t < per}
+        if wallet not in recent and len(recent) >= most:
+            raise HTTPException(429, detail=BUSY)
+        _profile_reads[who] = recent | {wallet: recent.get(wallet, now)}
+        if len(_profile_reads) > 5000:
+            _profile_reads.clear()
+    if not _checks.acquire(timeout=CHECK_WAIT_S):
+        raise HTTPException(429, detail=BUSY)
     try:
-        return cached(f"completed:{w}", COMPLETED_TTL_S, lambda: _completed(w))  # type: ignore[no-any-return]
+        return cached(key, ttl_s, read)
     except VenueError as e:
         raise venue_error(e) from e
+    finally:
+        _checks.release()
+
+
+@app.get("/api/completed/{wallet}")
+def completed(wallet: str, request: Request) -> dict[str, Any]:
+    """A Polymarket wallet's whole record of positions (``_completed``), kept COMPLETED_TTL_S, under "Check now"'s
+    limits (``limited_read``)."""
+    w = _wallet_or_400(wallet)
+    return limited_read(f"completed:{w}", COMPLETED_TTL_S, w, request, lambda: _completed(w))  # type: ignore[no-any-return]
 
 
 def category_view(r: dict[str, Any]) -> dict[str, Any]:
@@ -1909,13 +1939,11 @@ def _categories_of(wallet: str) -> dict[str, Any]:
 
 
 @app.get("/api/categories/{wallet}")
-def realized_categories(wallet: str) -> dict[str, Any]:
-    """A Polymarket wallet's realized profit, all time, by category (``category_view``), kept CATEGORY_TTL_S."""
+def realized_categories(wallet: str, request: Request) -> dict[str, Any]:
+    """A Polymarket wallet's realized profit, all time, by category (``category_view``), kept CATEGORY_TTL_S, under
+    "Check now"'s limits (``limited_read``)."""
     w = _wallet_or_400(wallet)
-    try:
-        return cached(f"categories:{w}", CATEGORY_TTL_S, lambda: _categories_of(w))  # type: ignore[no-any-return]
-    except VenueError as e:
-        raise venue_error(e) from e
+    return limited_read(f"categories:{w}", CATEGORY_TTL_S, w, request, lambda: _categories_of(w))  # type: ignore[no-any-return]
 
 
 def _client(request: Request | None) -> str:

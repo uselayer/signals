@@ -472,10 +472,8 @@ def test_explore_says_what_each_figure_counts_never_bet() -> None:
                      if not ln.lstrip().startswith("//"))  # fmt: skip
     words = [re.sub(r"\$\{[^}]*\}", " ", m) for m in re.findall(r'"[^"\n]*"|`[^`\n]*`', page)]
     words += re.findall(r'"[^"\n]*"', page)  # again on their own: a "…" inside a `…${ }…` (a menu option) is text too
-    # the one exception: the owner's own caveat under "Realized profit by category", asked for word for word (19 Oct)
-    owners = "Polymarket's figures, updated every few hours. Bets still open aren't counted."
-    said = [w for w in words if re.search(r"\b[Bb]et(s|tors?)?\b", w.replace("/api/bet", "").replace(owners, ""))]
-    assert said == [] and owners in page
+    said = [w for w in words if re.search(r"\b[Bb]et(s|tors?)?\b", w.replace("/api/bet", ""))]
+    assert said == []
     assert not any(re.search(r"\bbets?\b", t) for t in directory.REASON_LABELS.values())
 
 

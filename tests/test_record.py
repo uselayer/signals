@@ -232,7 +232,7 @@ def test_the_records_open_profit_is_added_up_from_their_positions_never_the_summ
     assert client.get(f"/api/record/{W}").json()["open"]["pnl"] is None
 
 
-PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "madeMoneyRow", "worstDrop", "CATEGORY_NOTE", "categoryCard")
+PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "BUSY_TEXT", "readFailed", "madeMoneyRow", "worstDrop", "CATEGORY_NOTE", "categoryCard")
 
 
 def test_made_money_on_is_given_only_when_the_record_adds_up_and_says_positions(run_js: Any) -> None:
@@ -262,7 +262,7 @@ def test_the_category_card_has_all_except_sports_and_says_what_it_counts(run_js:
     for row in ("Sports", "Uncategorised", "Crypto", "All except Sports", "All categories"):
         assert f"<dt>{row}" in html, row
     assert '<span class="loss">−$250</span>' in html and '<span class="gain">+$4.8K</span>' in html
-    note = "Parlays included. Polymarket's figures, updated every few hours. Bets still open aren't counted."
+    note = "Parlays included. Polymarket's figures, updated every few hours. Trades still open aren't counted."
     assert note in html.replace("&#39;", "'")  # the owner's words, as they are
     loading, failed, empty = run_js(PROFILE, "[categoryCard(null), categoryCard({error: true}), categoryCard({rows: [], overall: null})]")
     assert "skel" in loading and "couldn't be read just now" in failed and "No realized profit or loss" in empty
@@ -273,3 +273,58 @@ def test_the_page_says_positions_never_predictions() -> None:
     Polymarket's word for markets traded (its comments may say so)."""
     page = (engine.HERE / "static" / "index.html").read_text().splitlines()
     assert not [ln for ln in page if "prediction" in ln.lower() and not ln.lstrip().startswith("//")]
+
+
+def test_a_profiles_own_reads_are_under_check_nows_limits_and_busy_says_so(
+    api: tuple[TestClient, FakeChecker], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """/api/completed and /api/categories cost up to ~25 reads for a wallet not read lately, so they take "Check now"'s
+    turns (CHECKS_AT_ONCE, waiting CHECK_WAIT_S) and, hosted, CHECKS_PER_CLIENT wallets per visitor (each wallet once,
+    however many of its reads): past one, a 429 that says "Busy, try again in a minute." A kept answer needs no turn."""
+    import threading
+    from datetime import UTC, datetime
+
+    client, fake = api
+    reads: list[str] = []
+
+    def completed_positions(wallet: str) -> Any:
+        reads.append(wallet)
+        return Record(summary="Made money on 1 of 2 positions", made_money=1, positions=[1, 2], complete=True,
+                      reconciles=True, parlays_excluded=False, read_at=datetime(2026, 10, 19, tzinfo=UTC))  # fmt: skip
+
+    def realized_by_category(venue: str, wallet: str) -> Any:
+        from uselayer.whales import RealizedByCategory
+
+        return RealizedByCategory(wallet=wallet, categories={}, overall=None, uncategorised=None, realized_pnl=None,
+                                  realized_market_pnl=None, realized_combo_pnl=None, read_at=datetime(2026, 10, 19, tzinfo=UTC))  # fmt: skip
+
+    monkeypatch.setattr(fake, "completed_positions", completed_positions, raising=False)
+    monkeypatch.setattr(fake, "realized_by_category", realized_by_category, raising=False)
+    a, b, c = ("0x" + x * 40 for x in "abc")
+    assert client.get(f"/api/completed/{a}").status_code == 200
+    # every turn taken: busy, plainly, never a failed read; a kept answer still comes
+    monkeypatch.setattr(engine, "_checks", threading.BoundedSemaphore(1))
+    engine._checks.acquire()
+    monkeypatch.setattr(engine, "CHECK_WAIT_S", 0)
+    busy = client.get(f"/api/completed/{b}")
+    assert busy.status_code == 429 and busy.json()["detail"] == "Busy, try again in a minute."
+    assert client.get(f"/api/completed/{a}").status_code == 200 and reads == [a]
+    engine._checks.release()
+    # hosted: wallets per visitor, each counted once whichever of its reads asks
+    monkeypatch.setattr(engine, "HOSTED", True)
+    monkeypatch.setattr(engine, "CHECKS_PER_CLIENT", (2, 600))
+    monkeypatch.setattr(engine, "_profile_reads", {})
+    engine._cache.clear()
+    assert client.get(f"/api/completed/{a}").status_code == 200
+    assert client.get(f"/api/categories/{a}").status_code == 200  # the same wallet: not counted again
+    assert client.get(f"/api/completed/{b}").status_code == 200
+    third = client.get(f"/api/completed/{c}")
+    assert third.status_code == 429 and third.json()["detail"] == "Busy, try again in a minute."
+
+
+def test_busy_shows_as_busy_on_the_page_never_an_error_or_zero(run_js: Any) -> None:
+    row, card = run_js(PROFILE, "[madeMoneyRow(readFailed({status: 429})), categoryCard(readFailed({status: 429}))]")
+    assert row["v"] is None and row["sub"] == "Busy, try again in a minute."
+    assert "Busy, try again in a minute." in card and "$0" not in card
+    failed = run_js(PROFILE, "madeMoneyRow(readFailed({status: 502}))")
+    assert failed["sub"] == "their positions couldn't be read just now"

@@ -161,9 +161,10 @@ behind Vercel (see README, "Hosting").
     Positions, never "predictions". The worst drop from a high is the score's `worst_drop` (every hourly point);
     a score kept before 0.14 shows "—". "Realized profit by category, all time" (`/api/categories`, the SDK's
     `realized_by_category`, parlays included) has a row per category, "Uncategorised", "All except Sports" and all
-    together, with the owner's caveat word for word: "Polymarket's figures, updated every few hours. Bets still
-    open aren't counted." (the one place the page says "bets"). Both are read on the checks' budget (`checker`:
-    3–13 and 12 reads) and kept per wallet (30 min, 1 h).
+    together, with the caveat "Polymarket's figures, updated every few hours. Trades still open aren't counted."
+    Both are read on the checks' budget (`checker`: 3–13 and 12 reads), kept per wallet (30 min, 1 h), and under
+    "Check now"'s limits (`limited_read`: CHECKS_AT_ONCE turns, CHECKS_PER_CLIENT wallets per visitor); past one
+    the card says "Busy, try again in a minute.", never an error or $0.
   - Never a made-up number for a real trader on the hosted app. A figure the data doesn't have yet shows "—";
     sample values (`SIGNALS_MOCK=1`) are for reviewing the page locally only. The SDK's per-dollar figure is a return per dollar traded, never "ROI".
   - Words: say "trade", never "bet"; never "sandbox" or "paper". Every trade with a market has "Check your
