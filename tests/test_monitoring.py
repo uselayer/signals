@@ -177,6 +177,40 @@ def test_memory_is_the_containers_as_railway_bills_it_and_egress_every_byte_sent
     assert cost({"served_bytes": monitoring.GB})["egress"] == 0.05  # off Linux, the pages served stand in
 
 
+def test_the_sdks_firewall_retries_are_counted_by_day_as_retried_recovered_and_failed(tmp_path: Any) -> None:
+    """uselayer 0.14 tries a read Polymarket's firewall turned away once more and counts it since the process started
+    (``whale_scores.firewall_retries()``): each sample adds what changed, 0 included, so a counted day says 0 and a
+    day before it shipped says None."""
+    from uselayer import whale_scores
+
+    assert set(whale_scores.firewall_retries()) == set(monitoring.FIREWALL_KEYS)  # the SDK's shape, as counted here
+    assert set(monitoring.firewall_retries() or {}) == set(monitoring.FIREWALL_KEYS)
+    u = Usage(clock=lambda: NOW)
+    seen = iter([{"retried": 3, "recovered": 2, "failed": 1}, {"retried": 3, "recovered": 2, "failed": 1},
+                 {"retried": 5, "recovered": 3, "failed": 2}])  # fmt: skip
+    s = monitoring.Sampler(tmp_path, u, clock=lambda: 0.0, firewall=lambda: next(seen))
+    s.sample()  # every retry since launch (the SDK counts from the process's start)
+    assert u.since_launch("api_firewall") == {"retried": 3, "recovered": 2, "failed": 1}
+    d = Directory(tmp_path / "directory.db")
+    d.tally(u.take())
+    s.sample()  # nothing new: still counted, as 0
+    assert [r for r in u.take() if r[1] == "api_firewall"] == [(day_of(NOW), "api_firewall", k, 0.0) for k in monitoring.FIREWALL_KEYS]
+    s.sample()
+    assert u.since_launch("api_firewall") == {"retried": 5, "recovered": 3, "failed": 2}
+    assert monitoring.firewall_counts({"retried": 5.0, "recovered": 3.0, "failed": 2.0}) == {"retried": 5, "recovered": 3, "failed": 2}
+    assert monitoring.firewall_counts({"retried": 0.0, "recovered": 0.0, "failed": 0.0}) == {"retried": 0, "recovered": 0, "failed": 0}
+    assert monitoring.firewall_counts(None) is None and monitoring.firewall_counts({}) is None  # not counted, never 0s
+
+    quiet = monitoring.Sampler(tmp_path, Usage(clock=lambda: NOW), clock=lambda: 0.0, firewall=lambda: None)
+    quiet.sample()  # an SDK without the count: nothing counted, nothing breaks
+    assert quiet._c().since_launch("api_firewall") == {}
+
+    def broken() -> dict[str, int]:
+        raise RuntimeError("no")
+
+    monitoring.Sampler(tmp_path, Usage(clock=lambda: NOW), clock=lambda: 0.0, firewall=broken).sample()  # counting never gets in the way
+
+
 # ---- what the directory says ----
 
 
@@ -288,6 +322,8 @@ def test_the_report_has_every_part_in_counts_only(api: TestClient, counts: Usage
     counts.add("evaluated_lane", "board:dormant", 2, at=time.time())
     counts.add("evaluated_lane", "sample:dormant", 1, at=time.time())
     counts.add("infra", "cpu_s", 864, at=time.time())
+    counts.add("api_firewall", "retried", 4, at=time.time())
+    counts.add("api_firewall", "recovered", 3, at=time.time())
     engine._monitor_flush()
     r = api.get("/api/monitoring?days=2").json()
     assert set(r) >= {"funnel", "by_category", "sources", "by_day", "freshness", "failures", "sweeps", "api",
@@ -298,6 +334,9 @@ def test_the_report_has_every_part_in_counts_only(api: TestClient, counts: Usage
     assert today["screened"] == 3 and today["evaluated"] == {"dormant": 3}
     assert today["evaluated_by_lane"] == {"board": {"dormant": 2}, "sample": {"dormant": 1}}
     assert today["infra"]["cost_usd"]["cpu"] == pytest.approx(864 / monitoring.MONTH_S * 20, abs=1e-4)
+    # the SDK's firewall retries: each day's, and its own count since this process started (counts only)
+    assert today["api_firewall_retries"] == {"retried": 4, "recovered": 3, "failed": 0}
+    assert set(r["api"]["firewall_retries_since_launch"]) == {"retried", "recovered", "failed"}
     assert all(w not in repr(r) for w in (AMY, BEN, CAL, DAN, EVE))
 
 
@@ -354,7 +393,9 @@ def test_days_before_live_counting_say_not_counted_rather_than_zero(api: TestCli
     engine._monitor_flush()
     days = api.get("/api/monitoring?days=4").json()["by_day"]
     assert days[0]["live_counts"] is True and days[0]["screened"] == 1
+    assert days[0]["api_firewall_retries"] is None  # counted from before the firewall's retries were: not 0s
     assert all(d["live_counts"] is False and d["screened"] is None and d["api"] is None for d in days[1:])
+    assert all(d["api_firewall_retries"] is None for d in days[1:])
     assert sum(d["new_wallets"] for d in days) >= 3  # history is there for every day
 
 

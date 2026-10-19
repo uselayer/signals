@@ -17,6 +17,10 @@ directory.db's ``daily`` table about once a minute (``Directory.tally``), by UTC
   which the process's resident memory leaves out: 0.54 GB against Railway's 0.86 GB, 2026-10-14). Egress is every
   byte the container sends (/proc/net/dev: Polymarket requests and TLS too, not only pages served: 3.7 MB of pages
   against 20 MB sent). Off Linux, the process's memory and the pages served stand in.
+- ``api_firewall``: reads Polymarket's firewall turned away that the SDK tried once more (uselayer 0.14's
+  ``whale_scores.firewall_retries()``, counted since this process started): ``retried`` (each one an extra read),
+  ``recovered`` (the second try was answered) and ``failed`` (it wasn't: that figure stays unread, and the page says
+  so). What the retry costs in reads and how often it pays off. Counts only, never a wallet.
 
 Counting never gets in the way: a tally that can't be written stays in memory for the next try, and a restart
 loses at most the last minute.
@@ -41,6 +45,7 @@ MONTH_S = 30 * 86400
 GB = 1024**3
 SAMPLE_S = 60  # resources are read, and the tallies kept, this often
 VOLUME_EVERY = 10  # the volume's use is read every this many samples
+FIREWALL_KEYS = ("retried", "recovered", "failed")  # the SDK's firewall retries, as ``api_firewall`` counts them
 
 
 def day_of(at: float) -> str:
@@ -187,15 +192,29 @@ def _peak_rss_bytes() -> int:
     return peak if sys.platform == "darwin" else peak * 1024  # bytes on macOS, KB on Linux
 
 
+def firewall_retries() -> dict[str, int] | None:
+    """The SDK's count of reads Polymarket's firewall turned away and tried once more, since this process started
+    (``retried``, ``recovered``, ``failed``); None from an SDK without it."""
+    try:
+        from uselayer.whale_scores import firewall_retries as counted
+    except ImportError:
+        return None
+    return counted()
+
+
 class Sampler:
     """Reads the engine's CPU time, memory, bytes sent and the volume's use every SAMPLE_S (``sample``), as ``infra``
-    tallies."""
+    tallies, and what the SDK's firewall retries came to since the last sample (``api_firewall``)."""
 
-    def __init__(self, store: Path, counts: Usage | None = None, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(self, store: Path, counts: Usage | None = None, clock: Callable[[], float] = time.monotonic,
+                 firewall: Callable[[], dict[str, int] | None] = firewall_retries) -> None:  # fmt: skip
         self.store, self._counts, self._clock = store, counts, clock
         self._at, self._cpu, self._tx = clock(), _cpu_s(), _tx_bytes()
         self._samples = 0
         self.volume: int | None = None
+        # The SDK counts from this process's start, so the first sample counts every retry since launch (one Sampler
+        # per process: the monitor's).
+        self._firewall, self._firewall_was = firewall, dict.fromkeys(FIREWALL_KEYS, 0)
 
     def _c(self) -> Usage:
         return self._counts or usage
@@ -219,6 +238,21 @@ class Sampler:
         if self.volume is not None:
             self._c().add("infra", "volume_gb_s", self.volume / GB * elapsed)
             self._c().add("infra_max", "volume_bytes", self.volume)
+        self._sample_firewall()
+
+    def _sample_firewall(self) -> None:
+        """What the SDK's firewall retries came to since the last sample. Each of the three is added every sample,
+        0 included, so a day that has them was counted: a day without them wasn't (before this shipped)."""
+        try:
+            now = self._firewall()
+        except Exception:  # counting never gets in the way
+            return
+        if now is None:
+            return
+        for k in FIREWALL_KEYS:
+            n = int(now.get(k, 0))
+            self._c().add("api_firewall", k, max(0, n - self._firewall_was.get(k, 0)))
+            self._firewall_was[k] = n
 
     def now(self) -> dict[str, Any]:
         """The engine as it is: the container's memory (as billed) and the process's own (now, and at its most since
@@ -230,6 +264,14 @@ class Sampler:
 
         return {"ram_mb": mb(ram if ram is not None else rss), "process_mb": mb(rss), "peak_process_mb": mb(_peak_rss_bytes()),
                 "volume_gb": None if self.volume is None else round(self.volume / GB, 2), "cpu_s": round(_cpu_s())}  # fmt: skip
+
+
+def firewall_counts(tally: dict[str, float] | None) -> dict[str, int] | None:
+    """A day's ``api_firewall`` tally as ``{"retried": n, "recovered": n, "failed": n}``; None when it wasn't
+    counted (a day before it shipped), never 0s."""
+    if not tally:
+        return None
+    return {k: int(tally.get(k, 0)) for k in FIREWALL_KEYS}
 
 
 def cost(infra: dict[str, float]) -> dict[str, float]:

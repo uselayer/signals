@@ -2365,6 +2365,14 @@ const POSITIONS_READ = 50; // the trader read's open positions (/api/trader): th
 // A read that failed: busy (the site's limits on reads, a 429) says so plainly, never as an error or $0.
 const BUSY_TEXT = "Busy, try again in a minute.";
 const readFailed = (e) => ({ error: true, busy: e?.status === 429 });
+// A figure whose read failed says so in place of "—" (which stays for what the data doesn't have).
+const UNREAD_VALUE = `<span class="lb-none">couldn't be read</span>`;
+// Their account for the Wallet row: the read now (/api/account) once it's back, else the check's figures with, as
+// `missing`, the parts ("positions", "cash", as the read now names them) whose read failed: all of it when the read
+// now failed, else what the check's `unread` (uselayer 0.14) lists; none for a score kept before 0.14, which doesn't say.
+const profileAccount = (s, account) => account && !account.error ? account
+  : { cash_usd: s.cash_usd ?? null, positions_usd: s.positions_usd ?? null, read_at: s.account_at ?? null,
+    missing: account?.error ? ["positions", "cash"] : Array.isArray(s.unread) ? ["positions", "cash"].filter((k) => s.unread.includes(`${k}_usd`)) : undefined };
 function madeMoneyRow(c) {
   const ok = c && !c.error && c.reconciles && c.count;
   return { k: "Made money on", v: c == null ? "…" : ok ? `${c.made_money.toLocaleString()} of ${plural(c.count, "position")}` : null,
@@ -2396,6 +2404,13 @@ function profileNumbers(s, d, acct, n) {
   const cash = acct.cash_usd ?? null, inPositions = acct.positions_usd ?? null;
   const wallet = cash != null && inPositions != null ? cash + inPositions : null;
   const reading = pf.account === null && cash == null && inPositions == null;
+  // A part that's missing because its read failed (acct.missing: the read now's, or the check's own from its
+  // `unread`) makes the wallet "couldn't be read", never a bare "—". No `missing` (a score kept before uselayer
+  // 0.14) is as before; a part the check didn't fail is still being read now.
+  const failed = Array.isArray(acct.missing) ? acct.missing : null;
+  const lost = [["cash", cash], ["positions", inPositions]].filter(([, x]) => x == null).map(([k]) => k);
+  const unread = failed != null && lost.length > 0 && lost.every((k) => failed.includes(k));
+  const partGone = (k) => failed == null || failed.includes(k) ? "couldn't be read" : "still being read";
   const when = acct.read_at ? `as of ${ago(acct.read_at)}` : "now";
   const up = weeksUp(s), known = weeksOf(s), weeks = s.pnl_weeks || [];
   const had = weeks.filter((w) => w != null), weekSub = known && known < 12 ? "since their first trade" : "last 12 weeks";
@@ -2415,9 +2430,10 @@ function profileNumbers(s, d, acct, n) {
           : cut ? `they hold over ${POSITIONS_READ} positions, too many to add up here`
           : openPnl == null ? "couldn't be worked out from their positions"
           : open.length ? `on ${plural(open.length, "position")} still open, at today's prices` : "no open positions" },
-      { k: "Wallet", v: wallet != null ? usd(wallet) : reading ? "…" : null,
+      { k: "Wallet", v: wallet != null ? usd(wallet) : reading ? "…" : unread ? UNREAD_VALUE : null,
         sub: reading ? "reading their wallet" : wallet != null ? `cash ${usd(cash)} + open positions ${usd(inPositions)}, ${when}`
-          : cash != null ? `cash ${usd(cash)}; open positions couldn't be read` : inPositions != null ? `open positions ${usd(inPositions)}; cash couldn't be read` : "couldn't be read just now" },
+          : cash != null ? `cash ${usd(cash)}; open positions ${partGone("positions")}` : inPositions != null ? `open positions ${usd(inPositions)}; cash ${partGone("cash")}`
+          : unread ? "their cash and open positions" : "couldn't be read just now" },
       madeMoneyRow(pf.completed),
     ],
     groups: [
@@ -2472,8 +2488,7 @@ function renderProfile() {
   if (pf.tab === "stats") pf.tab = "positions"; // the Stats tab's figures are in Their numbers now
   const name = displayName(s.name, s.wallet);
   const cats = s.categories || [];
-  const fresh = pf.account && !pf.account.error ? pf.account : null;
-  const acct = fresh || { cash_usd: s.cash_usd ?? null, positions_usd: s.positions_usd ?? null, read_at: s.account_at ?? null };
+  const acct = profileAccount(s, pf.account);
   const nums = profileNumbers(s, d, acct, n);
   // when the figures from their check (chart, realized P&L, record, how they trade) were worked out: every score
   // carries it, kept (stored_at) or not, so the header always says how old they are

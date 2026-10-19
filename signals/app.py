@@ -1227,7 +1227,7 @@ SCREENED_KINDS = ("new", "recheck")  # what the evaluation quick-checks first (r
 
 
 LIVE_FIELDS = ("screened", "screened_never_looked_at_before", "evaluated", "api", "polymarket_reads_by_budget",
-               "evaluated_by_lane", "api_failed", "infra")  # fmt: skip
+               "evaluated_by_lane", "api_failed", "api_firewall_retries", "infra")  # fmt: skip
 
 
 def _by_lane(tally: dict[str, float]) -> dict[str, dict[str, int]]:
@@ -1263,6 +1263,9 @@ def _day_view(day: dict[str, Any], counted_from: str | None) -> dict[str, Any]:
         "evaluated_by_lane": _by_lane(t.get("evaluated_lane", {})),
         # which endpoints failed, and how ("data-api.polymarket.com /positions 403"), most first
         "api_failed": dict(sorted(((k, int(v)) for k, v in t.get("api_failed", {}).items()), key=lambda kv: -kv[1])[:15]),
+        # reads Polymarket's firewall turned away, tried once more by the SDK: retried (each an extra read), recovered,
+        # failed (that figure stays unread); None on a day before this was counted
+        "api_firewall_retries": monitoring.firewall_counts(t.get("api_firewall")),
         "infra": {"cpu_s": round(infra.get("cpu_s", 0)), "ram_gb_h": round(infra.get("ram_gb_s", 0) / 3600, 2),
                   "egress_mb": round(infra.get("egress_bytes", infra.get("served_bytes", 0)) / 2**20, 1),
                   "served_mb": round(infra.get("served_bytes", 0) / 2**20, 1),
@@ -1410,6 +1413,9 @@ def monitoring_report(days: int = 14) -> dict[str, Any]:
             "budgets": {"background": _background["budget"].state() if "budget" in _background else None,
                         "check": _check_budget.state()},  # fmt: skip
             "feed": feed_stats(),
+            # the SDK's own count since this process started (uptime_h): what its firewall retry costs in reads, and
+            # how many came back; by_day has each day's
+            "firewall_retries_since_launch": monitoring.firewall_retries(),
             "errors": {k: _scrub(v) for k, v in {
                 "sweep": (directory().last_error() or {}).get("error"), "evaluation": _evaluate_state["error"],
                 "leaderboards": _evaluate_state["leaderboards"], "discovery": _discovery_state["error"],
@@ -1434,9 +1440,10 @@ def monitoring_report(days: int = 14) -> dict[str, Any]:
                        "funnel, categories, sources, each day's new wallets and scores, freshness, failures, sweeps.",
             "live": "Counted as it happens since monitoring shipped (counted_from; that first day is partial): each "
                     "day's screened wallets and evaluation outcomes, requests, reads by budget, CPU, memory, volume, "
-                    "egress and cost. A day before counted_from has them as null (not counted), never 0.",
-            "since_launch": "api.since_launch, api.polymarket_reads_since_launch and infrastructure.since_launch_usd "
-                            "start again at each restart (infrastructure.uptime_h).",
+                    "egress and cost. A day before counted_from has them as null (not counted), never 0. "
+                    "api_firewall_retries is null on a day before it was counted (it shipped later).",
+            "since_launch": "api.since_launch, api.polymarket_reads_since_launch, api.firewall_retries_since_launch "
+                            "and infrastructure.since_launch_usd start again at each restart (infrastructure.uptime_h).",
             "qualification": "History, from every score kept (score_history, back to 2026-10-13): each score compared "
                              "with the wallet's score before it, tiers as kept when scored. A recommended trader whose "
                              "score only grew stale (not rescored) isn't a dropout here: freshness.recommended says "
@@ -1717,6 +1724,12 @@ def _trade_words(t: str) -> str:
     return re.sub(r"\b([Bb])et(s?)\b", lambda m: ("Trade" if m.group(1) == "B" else "trade") + m.group(2), t)
 
 
+# A score's held-to-settlement share is None both when they have too few closed positions (nothing to say) and when
+# its read failed (uselayer 0.14's ``unread`` names it): only the second is said, so it's never mistaken for none.
+# A score kept before 0.14 has no ``unread`` and says nothing, as before.
+HELD_UNREAD = "how often they hold until the market settles couldn't be read"
+
+
 def why_lines(s: dict[str, Any]) -> dict[str, str | None]:
     """Four of the five lines of "Why they're here" (the page adds Lately), each a short plain sentence, or
     None when the data doesn't say. ``s`` is a score with its leaderboard fields (``_board``)."""
@@ -1731,7 +1744,8 @@ def why_lines(s: dict[str, Any]) -> dict[str, str | None]:
            else f"pays {_cents(s['avg_price'])} on average" if s.get("avg_price") is not None else None,
            f"usually {_usd(s['typical_usd'])}" if s.get("typical_usd") is not None else None,
            _per_day(s["trades_per_day"]) if s.get("trades_per_day") is not None else None,
-           f"holds {round(s['held_share'] * 100)}% of closed positions until the market settles" if s.get("held_share") is not None else None]  # fmt: skip
+           f"holds {round(s['held_share'] * 100)}% of closed positions until the market settles" if s.get("held_share") is not None
+           else HELD_UNREAD if "held_share" in (s.get("unread") or ()) else None]  # fmt: skip
     how_line = ", ".join(x for x in how if x)
 
     edge_n = (s.get("edge") or {}).get("n")
