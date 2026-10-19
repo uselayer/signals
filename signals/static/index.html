@@ -645,7 +645,7 @@ async function api(path, opts = {}) {
   }
   const r = await fetch(path, opts);
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body?.detail?.message || (typeof body?.detail === "string" ? body.detail : "") || `Request failed (${r.status})`);
+  if (!r.ok) throw Object.assign(new Error(body?.detail?.message || (typeof body?.detail === "string" ? body.detail : "") || `Request failed (${r.status})`), { status: r.status });
   return body;
 }
 const post = (path, body) => api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -2221,8 +2221,8 @@ async function loadRecord(wallet) {
     if (box) box.outerHTML = categoryCard(cats).replace('<section class="pf-card">', '<section class="pf-card" id="reccats">');
   };
   draw();
-  api(`/api/completed/${wallet}`).then((c) => { made = c; }, () => { made = { error: true }; }).then(draw);
-  api(`/api/categories/${wallet}`).then((c) => { cats = c; }, () => { cats = { error: true }; }).then(draw);
+  api(`/api/completed/${wallet}`).then((c) => { made = c; }, (e) => { made = readFailed(e); }).then(draw);
+  api(`/api/categories/${wallet}`).then((c) => { cats = c; }, (e) => { cats = readFailed(e); }).then(draw);
 }
 function renderUnchecked(s, wallet) {
   const app = $("#app"), r = s.directory, name = displayName(s.name, wallet);
@@ -2305,8 +2305,8 @@ async function loadProfileExtras(wallet, s) {
   const redraw = () => { if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile(); };
   api(`/api/account/${wallet}`).then((a) => { pf.account = a; }, () => { pf.account = { error: true }; }).then(redraw); // their account now
   // every position they've closed or that settled (Made money on), and realized profit by category: own reads, kept
-  api(`/api/completed/${wallet}`).then((c) => { pf.completed = c; }, () => { pf.completed = { error: true }; }).then(redraw);
-  api(`/api/categories/${wallet}`).then((c) => { pf.cats = c; }, () => { pf.cats = { error: true }; }).then(redraw);
+  api(`/api/completed/${wallet}`).then((c) => { pf.completed = c; }, (e) => { pf.completed = readFailed(e); }).then(redraw);
+  api(`/api/categories/${wallet}`).then((c) => { pf.cats = c; }, (e) => { pf.cats = readFailed(e); }).then(redraw);
   try { pf.detail = await api(`/api/trader/polymarket/${wallet}`); } catch (e) { pf.detail = { error: e.message }; }
   if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile();
 }
@@ -2361,10 +2361,13 @@ const POSITIONS_READ = 50; // the trader read's open positions (/api/trader): th
 // "Made money on X of N positions" from /api/completed: only when every position they've had was read and they add
 // up to Polymarket's realized profit; otherwise the SDK's own line says why there's no record. Positions, never
 // "predictions" (Polymarket's word for markets traded).
+// A read that failed: busy (the site's limits on reads, a 429) says so plainly, never as an error or $0.
+const BUSY_TEXT = "Busy, try again in a minute.";
+const readFailed = (e) => ({ error: true, busy: e?.status === 429 });
 function madeMoneyRow(c) {
   const ok = c && !c.error && c.reconciles && c.count;
   return { k: "Made money on", v: c == null ? "…" : ok ? `${c.made_money.toLocaleString()} of ${plural(c.count, "position")}` : null,
-    sub: c == null ? "reading every position they've had" : c.error ? "their positions couldn't be read just now"
+    sub: c == null ? "reading every position they've had" : c.busy ? BUSY_TEXT : c.error ? "their positions couldn't be read just now"
       : ok ? `every position they've closed or that settled${c.parlays_excluded ? " · parlays not included" : ""}` : c.summary };
 }
 // The worst fall in trading profit from a high (the score's worst_drop, from every hourly point), as a loss; "—" for a
@@ -2451,11 +2454,11 @@ const numberRow = (r) => `<div><dt>${esc(r.k)}${r.sub ? `<small>${esc(r.sub)}</s
 
 // "Realized profit by category, all time" (/api/categories: Polymarket's leaderboard for this trader, by category):
 // a row per category they traded, "Uncategorised" for markets in none, all except Sports, and all together.
-const CATEGORY_NOTE = "Polymarket's figures, updated every few hours. Bets still open aren't counted.";
+const CATEGORY_NOTE = "Polymarket's figures, updated every few hours. Trades still open aren't counted.";
 function categoryCard(c) {
   const head = `<h2>Realized profit by category, all time</h2>`;
   if (c == null) return `<section class="pf-card">${head}<div class="skel" style="width:60%;height:14px;margin:16px 0"></div></section>`;
-  if (c.error) return `<section class="pf-card">${head}<p class="pf-empty">Their profit by category couldn't be read just now.</p></section>`;
+  if (c.error) return `<section class="pf-card">${head}<p class="pf-empty">${c.busy ? BUSY_TEXT : "Their profit by category couldn't be read just now."}</p></section>`;
   const money = (x) => x == null ? null : pl(x, usd(x, true));
   const rows = [...(c.rows || []).map((r) => ({ k: r.category, v: money(r.usd) })),
     ...(c.overall != null ? [{ k: "All except Sports", v: money(c.except_sports) }, { k: "All categories", v: money(c.overall) }] : [])];
