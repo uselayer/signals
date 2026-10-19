@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -23,7 +24,7 @@ SEL, PAID, DORM, NEW, HIDDEN, PRO = ("0x" + c * 40 for c in "123456")  # selecti
 def score(wallet: str, segment: str, **kw: Any) -> dict[str, Any]:
     return {"wallet": wallet, "name": None, "segment": segment, "skill": "unknown", "copyable": "unknown", "bets": 5,
             "typical_usd": 2500.0, "categories": [{"category": "Politics", "bets": 5}],
-            "last_buy": "2026-10-12T00:00:00+00:00", "sample": [], "format": engine.WORTH_FORMAT} | kw  # fmt: skip
+            "last_buy": datetime.fromtimestamp(NOW - DAY, UTC).isoformat(), "sample": [], "format": engine.WORTH_FORMAT} | kw  # fmt: skip
 
 
 def fill(d: Directory, at: float = NOW) -> None:
@@ -126,7 +127,7 @@ def test_filters_are_facts_and_sorts_put_the_unknown_last(d: Directory) -> None:
     assert wallets(d.browse("limited", board="on")) == [PAID] and wallets(d.browse("limited", board="off")) == [SEL]
     assert set(wallets(d.browse("limited", active_days=7, now=NOW))) == {SEL, PAID}
     assert wallets(d.browse("checked", active_days=7, now=NOW)) == [PRO]  # DORM's last trade: 100 days ago
-    assert wallets(d.browse("limited", sort="recent", now=NOW)) == [SEL, PAID]  # SEL traded an hour ago, PAID on 12 Oct
+    assert wallets(d.browse("limited", sort="recent", now=NOW)) == [SEL, PAID]  # SEL traded an hour ago, PAID a day ago
     assert wallets(d.browse("checked", sort="size")) == [PRO, DORM]  # $50 a trade, then unknown
     d.keep_scores([score(PRO, "no_view")], "background", at=NOW + 1)
     assert PRO not in wallets(d.browse("checked")) and PRO in wallets(d.browse("checked", makers=True))  # makers hidden
