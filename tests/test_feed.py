@@ -161,7 +161,7 @@ def test_the_feed_page_has_following_and_recommended(api: TestClient) -> None:
     page = api.get("/").text
     for words in ('"Following"', '"Recommended"', "#/recommended", "Only buys I can still get into", "Also ${did} by",
                   "Sold at <b>", "They no longer hold it.", "They still hold some.",
-                  "Sign in to see the Feed", "Browse traders", "/api/me/feed", "from Sharps and Rising traders", "not as a signal to buy",
+                  "Sign in to see the Feed", "Browse traders", "/api/me/feed", "or more from Sharps.", "not as a signal to buy",
                   "All big trades right now", "Typically 3–5 min behind", "Typically read every 30–60 s"):  # fmt: skip
         assert words in page, words
     assert '"Traders we follow"' not in page

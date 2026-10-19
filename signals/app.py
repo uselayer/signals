@@ -1549,17 +1549,17 @@ def _consistency(weeks: list[float | None] | None) -> dict[str, Any]:
 
 
 COPY_TIERS = ("proven", "quiet", "rising")  # the recommended tiers copying can be offered for
-SECTIONS = ("sharp", "rising")  # Traders' sections, in order: Sharps (Proven and Quiet), Rising
+# Traders' one recommended section: Sharps. The SDK's "rising" tier is listed in it as a Sharp (the owner, 19 Oct: in
+# traders scored a month earlier, Sharp and Rising had indistinguishable next-month results). Presentation only: the
+# segment, which tiers are recommended and the thresholds are the SDK's, unchanged.
+SECTIONS = ("sharp",)
 
 
 def section_of(segment: str | None) -> str | None:
-    """Which section of Traders a recommended trader is listed in, by their tier alone: ``"sharp"`` (Proven
-    and Quiet sharps) or ``"rising"``. Whether copying pays never moves a trader between sections: that's their
-    copy status (``copy_status``), shown in every row. None for a trader we don't recommend, who is only in
-    "See all checked traders"."""
-    if segment not in RECOMMENDED:
-        return None
-    return "rising" if segment == "rising" else "sharp"  # "too_fast", kept before uselayer 0.10, was a sharp
+    """Which section of Traders a recommended trader is listed in: ``"sharp"`` for every recommended tier (Proven,
+    Quiet and the SDK's Rising). Whether copying pays never moves a trader between sections: that's their copy status
+    (``copy_status``). None for a trader we don't recommend, who is only in "See all checked traders"."""
+    return "sharp" if segment in RECOMMENDED else None  # "too_fast", kept before uselayer 0.10, was a sharp too
 
 
 # A trader's copy status, a separate question from their tier, in the same words everywhere (Traders, a trader's
@@ -1573,7 +1573,7 @@ LABEL_COPYABLE, LABEL_NOT_PROVEN, LABEL_COSTLY, LABEL_NOT_OFFERED = (
 
 def copy_status(s: dict[str, Any]) -> tuple[str, str | None]:
     """A trader's copy status and, unless Copyable, why: one plain sentence that starts with it ("Costly to
-    copy: …"). Copyable takes a recommended tier (Proven sharp, Quiet sharp, Rising) and copies a few minutes
+    copy: …"). Copyable takes a recommended tier (Proven, Quiet or Rising) and copies a few minutes
     late reliably above zero after fees (the SDK's ``copyable``: the bottom of the 95% range above zero). The
     rest is said from the copy result alone, whatever the tier, as a reading of the past."""
     if s.get("segment") in COPY_TIERS and s.get("copyable") == "yes":
@@ -1738,7 +1738,7 @@ def why_lines(s: dict[str, Any]) -> dict[str, str | None]:
     over = f" (over {edge_n} trades)" if edge_n else ""
     # Skill and track record only: whether copying pays is the separate "copying" line below.
     section = s.get("section")
-    if section == "rising":  # hedged: few trades yet
+    if section == "sharp" and s.get("segment") == "rising":  # a Sharp on the page, but the evidence says fewer trades yet
         listed = f"Early signs: the price has tended to move their way after they buy{f', over {edge_n} trades so far' if edge_n else ''}, too few to be sure yet."
     elif section == "sharp":
         listed = f"The price tends to move their way within minutes after they buy{over}, and it holds without their best trades."
@@ -2184,7 +2184,7 @@ def with_links(s: dict[str, Any]) -> dict[str, Any]:
 # Their buys over the last day, one row per bet (fills on the same outcome merged), with the price now:
 # the current price of their open position. Polymarket's public trade feed runs a few minutes behind.
 
-FEED_SEGMENTS = RECOMMENDED  # Traders' two sections: Sharps and Rising ("inactive" isn't in it)
+FEED_SEGMENTS = RECOMMENDED  # Traders' Sharps ("inactive" isn't in it)
 RECOMMENDED_MIN_USD = 1000.0  # the Feed's Recommended shows only trades this big: fewer, bigger trades
 FEED_HOURS = 24
 GET_IN = 0.03  # at most this far above their price you can still get in: an alert's "$10 gets you" limit too
@@ -2584,7 +2584,7 @@ def one_bet(wallet: str, market: str, response: Response, _: None = Depends(feed
 @app.get("/api/live")
 def live(response: Response, _: None = Depends(feed_reader)) -> dict[str, Any]:
     """The Feed's Recommended: trades of RECOMMENDED_MIN_USD or more over the last FEED_HOURS from the traders in
-    Traders' two sections (Sharps, Rising). Quiet on purpose: fewer, bigger trades."""
+    Traders' Sharps. Quiet on purpose: fewer, bigger trades."""
     _private(response)
     data = _worth_load()
     people = [s | copy_fields(s) for s in (data or {}).get("scores", []) if s["segment"] in FEED_SEGMENTS]

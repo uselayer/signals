@@ -138,11 +138,15 @@ behind Vercel (see README, "Hosting").
     column, sort, filter, "Copying is paused" callout, How-we-pick tab, copy line in an alert, the SDK's
     "Copyable" check on a trader page, or colour (an open trade reads the same for every trader). A guard test
     keeps the page's words free of "Copy", "Copyable" and "Copying". Bringing it back is the owner's call.
-  - Traders lists the traders we recommend (Proven sharp, Quiet sharp, Rising) in two sections by tier, from the
-    engine's `section_of`: **Sharps** (Proven and Quiet) and **Rising**. Each section has the same columns, its
-    own ranks and "Show more", and "See all checked traders" is one flat list. An open trade (their page, a Feed
-    card, a trader page) says only "Now 52¢ · they paid 49¢", for every trader, never green or "you can still
-    get in". The "Buy on Polymarket" link, which only opens the market, "Check your price" and "What buying now
+  - Traders lists the traders we recommend in one section, **Sharps** (the engine's `section_of`: every recommended
+    tier), with its ranks and "Show more" in the sort picked (by default Recommended's tier order); "See all checked
+    traders" is one flat list. The SDK's Proven and Rising both read "Sharp" (chip and colour), and Quiet reads
+    "Quiet sharp", a style (fewer, bigger trades): the owner, 19 Oct, after Sharp and Rising had indistinguishable
+    next-month results. Presentation only: the segment ("rising" stays in the data and the API), which tiers are
+    recommended and the thresholds are the SDK's. Nothing a visitor reads says "Rising" (a guard test), and no new
+    label or "hot" list. A Rising trader's "Why they're here" still says what the evidence shows (fewer trades so
+    far). An open trade (their page, a Feed card, a trader page) says only "Now 52¢ · they paid 49¢", for every
+    trader, never green or "you can still get in". The "Buy on Polymarket" link, which only opens the market, "Check your price" and "What buying now
     costs" stay for everyone: neutral market data. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; consistency is 12 weeks,
     win record and usual trade the last 30 days. Consistency is "X of N weeks up", where a week counts profit
     taken plus the change in value of trades still open.
@@ -191,7 +195,7 @@ behind Vercel (see README, "Hosting").
     empty and error states.
   - The Feed has two parts. **Following** (`#/`, the default, `/api/me/feed`): every trade from the last day of
     the traders you follow, whoever they are (following is also research). **Recommended** (`#/recommended`, `/api/live`): trades of $1,000 or more (`RECOMMENDED_MIN_USD`) from
-    the traders in Sharps and Rising, with the same neutral cards as Following. Recommended
+    the traders in Sharps, with the same neutral cards as Following. Recommended
     stays quiet (fewer, bigger trades) and never more prominent than Following: second in the switch, never the
     default. Both keep the switch "Only trades I can still get into", one card per outcome with "Also bought
     by", and the delay line. Big trades (`#/big`) is linked from the foot of Recommended. Traders' trades come from
