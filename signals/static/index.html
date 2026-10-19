@@ -22,9 +22,10 @@
 <style>
   @font-face { font-family: "Host Grotesk"; src: url(/static/fonts/HostGrotesk-latin-var.woff2) format("woff2");
     font-weight: 300 600; font-display: swap; }
-  /* Colour tokens. Dark is the default for everyone (the owner, Oct 2026: Hyperdash's near-black look); the
-     light palette stays, under data-theme="light", for a switch later. Every component rule uses these, never a
-     literal colour (a test checks). Text meets WCAG AA (4.5:1) on --bg, --card and --soft: --faint included. */
+  /* Colour tokens. Dark is the default (the owner, Oct 2026: Hyperdash's near-black look); light is the palette
+     Signals had before, chosen with the header's switch (data-theme="light", kept in this browser). Every component
+     rule uses these, never a literal colour (a test checks). Text meets WCAG AA (4.5:1) on --bg, --card and --soft
+     in both: --faint included (light's was #a1a1a6, 2.5:1). */
   :root {
     color-scheme: dark;
     --bg: #0e0e0f; --card: #161617; --fg: #ececec; --muted: #8f8f95; --faint: #838389; --line: #26262a;
@@ -38,10 +39,10 @@
   }
   :root[data-theme="light"] {
     color-scheme: light;
-    --bg: #fafaf9; --card: #ffffff; --fg: #111112; --muted: #5f5f65; --faint: #6c6c72; --line: #ececea;
+    --bg: #fafaf9; --card: #ffffff; --fg: #111112; --muted: #6c6c72; --faint: #6e6e73; --line: #ececea;
     --soft: #f3f3f1; --raised: #ffffff; --green: #12a150; --green-soft: #e9f7ef; --danger: #c43d2f;
     --gain: #087f3d; --loss: #cf3426; --amber: #a86200; --teal: #0b7a83; --blue: #2557d6;
-    --accent: #c7360d; --on-accent: #ffffff;
+    --accent: #4b3fe0; --on-accent: #ffffff;
     --knob: #ffffff; --toast-bg: #111112; --toast-fg: #fafaf9;
     --scrim: rgba(10, 10, 12, .38); --pop-shadow: 0 20px 60px rgba(0, 0, 0, .18); --tip-shadow: 0 8px 24px rgba(17, 17, 18, .08);
     --shadow: 0 1px 2px rgba(17, 17, 18, .04), 0 2px 8px rgba(17, 17, 18, .03);
@@ -70,6 +71,13 @@
   .tabs a:hover { color: var(--fg); }
   .tabs a.on { background: color-mix(in srgb, var(--accent) 12%, var(--card)); color: var(--accent); }
   .account { margin-left: auto; display: flex; align-items: center; min-height: 32px; }
+  .theme-btn { flex: none; width: 32px; height: 32px; margin-left: -8px; display: grid; place-items: center; border: 0; border-radius: 999px;
+    background: none; color: var(--muted); cursor: pointer; }
+  .theme-btn:hover { color: var(--fg); background: var(--soft); }
+  .theme-btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .theme-btn svg { width: 18px; height: 18px; }
+  .theme-btn .moon, :root[data-theme="light"] .theme-btn .sun { display: none; } /* the icon is where it takes you */
+  :root[data-theme="light"] .theme-btn .moon { display: block; }
   .tabbar { display: none; }
   main.wrap { flex: 1 0 auto; width: 100%; padding-top: 28px; padding-bottom: 40px; } /* takes the slack: the footer stays at the bottom */
   footer.foot { width: 100%; color: var(--faint); font-size: 12.5px; padding-top: 8px; padding-bottom: 36px; text-align: center; }
@@ -578,6 +586,21 @@
     #sheet .panel::before { content: ""; position: absolute; top: 8px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 4px; background: var(--line); }
   }
 </style>
+<script>
+  // The theme, set before the first paint so nothing flashes: dark unless this browser chose light with the header's
+  // switch. Storage can be blocked (a private window): then it's dark, and the switch still works for the visit.
+  // The browser's bar (theme-color) and its own controls (color-scheme) follow, and the switch says what it does.
+  function setTheme(theme, keep) {
+    const root = document.documentElement;
+    root.dataset.theme = theme === "light" ? "light" : "dark";
+    if (keep) { try { localStorage.setItem("signals.theme", root.dataset.theme); } catch {} }
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", getComputedStyle(root).getPropertyValue("--bg").trim());
+    document.querySelector('meta[name="color-scheme"]')?.setAttribute("content", root.dataset.theme);
+    const b = document.getElementById("theme");
+    if (b) { const label = root.dataset.theme === "light" ? "Dark theme" : "Light theme"; b.setAttribute("aria-label", label); b.title = label; }
+  }
+  setTheme((() => { try { return localStorage.getItem("signals.theme"); } catch { return null; } })());
+</script>
 </head>
 <body>
 <header class="top">
@@ -587,6 +610,7 @@
       <a href="#/" data-tab="feed">Feed</a><a href="#/traders" data-tab="traders">Traders</a>
     </nav>
     <div class="account" id="account"></div>
+    <button type="button" class="theme-btn" id="theme" aria-label="Light theme" title="Light theme"><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
   </div>
 </header>
 <main class="wrap" id="app"></main>
@@ -1510,6 +1534,10 @@ function howSheet(tab = "checks", focus = null) {
 }
 // A tier pill that's a button (on Feed cards) opens what that tier means.
 document.addEventListener("click", (e) => { const t = e.target.closest("[data-tier]"); if (t) howSheet("tiers", t.dataset.tier); });
+
+// ---- the theme switch (header): dark or light, kept in this browser (setTheme, in the head) ----
+setTheme(document.documentElement.dataset.theme); // the switch's label, now that it's on the page
+$("#theme").onclick = () => setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light", true);
 
 // ---- interests: asked once per browser ----
 // Kept in localStorage; [] means all markets, null not asked yet. Storage can be blocked (private windows),
