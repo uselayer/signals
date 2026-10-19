@@ -107,7 +107,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if LAYER_KEY:  # Polymarket US twins of the International markets, from Layer's matches (us_match)
         threading.Thread(target=us_match.loop, args=(reads.matches, _us_stop), daemon=True).start()
     threading.Thread(target=_monitor_loop, daemon=True).start()  # resources each minute; the day's counts kept
+    if CATEGORY_READS_ON:  # recommended traders' realized profit by category, daily, for Traders' category picker
+        threading.Thread(target=_categories_loop, daemon=True).start()
     yield
+    _category_stop.set()
     _monitor_stop.set()
     _monitor_flush()  # the last minute's counts
     _us_stop.set()
@@ -1628,10 +1631,24 @@ def worth(markets: str = "") -> dict[str, Any]:
     data = _worth_load(_interests_of(markets))
     out: dict[str, Any] = {"status": dict(_worth), "result": None}
     if data is not None:
+        # each recommended trader's realized profit by category, as the daily job kept it (no read): the category
+        # picker's. A trader it hasn't read yet has none, and the page says "—", never $0.
+        realized = _realized_kept(s["wallet"] for s in data["scores"] if s.get("segment") in RECOMMENDED)
         out["result"] = {k: v for k, v in data.items() if k != "scores"} | {
-            "scores": [{k: v for k, v in s.items() if k != "sample"} | _board(s) for s in data["scores"]]
+            "scores": [{k: v for k, v in s.items() if k != "sample"} | _board(s)
+                       | ({"realized": realized_row(realized[s["wallet"]])} if s["wallet"] in realized else {})
+                       for s in data["scores"]]  # fmt: skip
         }
     return out
+
+
+def realized_row(view: dict[str, Any]) -> dict[str, Any]:
+    """A kept realized profit by category (``category_view``) as Traders' rows carry it: category → dollars, with
+    "All except Sports" and "All categories", and when it was read (``at``)."""
+    out: dict[str, Any] = {r["category"]: r["usd"] for r in view.get("rows") or []}
+    if view.get("overall") is not None:
+        out |= {"All except Sports": view.get("except_sports"), "All categories": view["overall"]}
+    return {"usd": out, "at": view.get("stored_at")}
 
 
 @app.post("/api/worth/refresh")
@@ -1905,7 +1922,14 @@ def category_view(r: dict[str, Any]) -> dict[str, Any]:
 
 
 def _categories_of(wallet: str) -> dict[str, Any]:
-    return category_view(checker().realized_by_category("polymarket", wallet).to_dict())
+    """Their realized profit by category: the one kept in the directory while it's under CATEGORY_KEPT_S old (the
+    daily job's, for recommended traders: no read), else read on the checks' budget and kept for next time."""
+    kept = _realized_kept([wallet]).get(wallet)
+    if kept is not None and time.time() - kept["stored_at"] < CATEGORY_KEPT_S:
+        return kept
+    view = category_view(checker().realized_by_category("polymarket", wallet).to_dict())
+    _directory_later(lambda d: d.keep_realized(wallet, view))
+    return view
 
 
 @app.get("/api/categories/{wallet}")
@@ -1916,6 +1940,67 @@ def realized_categories(wallet: str) -> dict[str, Any]:
         return cached(f"categories:{w}", CATEGORY_TTL_S, lambda: _categories_of(w))  # type: ignore[no-any-return]
     except VenueError as e:
         raise venue_error(e) from e
+
+
+# ---- realized profit by category for the recommended traders, read daily (Traders' category picker) ----
+# Once a day each recommended trader's realized profit by category (12 reads) is read on the background's budget
+# (``background``: the check's, the sweep's and the evaluation's share, BACKGROUND_RATE) and kept in directory.db, so
+# Traders can pick a category, sort by realized profit in it and keep those who made money in it with no read on a
+# page load. ~110 traders is ~1,300 reads a day. SIGNALS_CATEGORY_READS=0 turns it off; what's kept stays shown.
+CATEGORY_READS_ON = os.environ.get("SIGNALS_CATEGORY_READS", "1") != "0"
+CATEGORY_DAILY_S = 24 * 3600  # each recommended trader's is read again once it's this old
+CATEGORY_KEPT_S = 26 * 3600  # a profile uses the kept one up to this old (a day, plus a late round)
+CATEGORY_START_S = 300  # after launch: the page's reads, the check and the evaluation first
+CATEGORY_ROUND_S = 3600  # it looks for traders due this often
+_category_stop = threading.Event()
+_category_state: dict[str, Any] = {"running": False, "last": None, "error": None}
+
+
+def _realized_kept(wallets: Iterable[str]) -> dict[str, dict[str, Any]]:
+    try:
+        return directory().realized_of(wallets)
+    except (sqlite3.Error, OSError):
+        return {}
+
+
+def categories_round(stop: threading.Event | None = None, now: float | None = None) -> dict[str, int]:
+    """Reads the realized profit by category of each recommended trader whose kept one is missing or over
+    CATEGORY_DAILY_S old, one at a time, on the background's budget, and keeps it. A read that fails is left for the
+    next round; the rest go on."""
+    now = time.time() if now is None else now
+    wallets = sorted(_recommended(_check_result()))
+    kept = _realized_kept(wallets)
+    due = [w for w in wallets if w not in kept or now - kept[w]["stored_at"] >= CATEGORY_DAILY_S]
+    done = failed = 0
+    for w in due:
+        if stop is not None and stop.is_set():
+            break
+        try:
+            view = category_view(background().realized_by_category("polymarket", w).to_dict())
+            directory().keep_realized(w, view, at=now)
+            done += 1
+        except (VenueError, ValueError, sqlite3.Error, OSError) as e:
+            failed += 1
+            _category_state["error"] = f"{w}: {type(e).__name__}: {str(e)[:200]}"
+    out = {"recommended": len(wallets), "due": len(due), "read": done, "failed": failed}
+    _category_state["last"] = out | {"at": now}
+    return out
+
+
+def _categories_loop() -> None:
+    """A round (``categories_round``) every CATEGORY_ROUND_S, from CATEGORY_START_S after launch."""
+    _category_stop.wait(CATEGORY_START_S)
+    while not _category_stop.is_set():
+        _category_state["running"] = True
+        try:
+            got = categories_round(_category_stop)
+            if got["read"] or got["failed"]:
+                print(f"categories: read {got['read']} of {got['due']} recommended traders due, {got['failed']} failed", flush=True)
+        except Exception as e:  # the next round tries again
+            _category_state["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            _category_state["running"] = False
+        _category_stop.wait(CATEGORY_ROUND_S)
 
 
 def _client(request: Request | None) -> str:

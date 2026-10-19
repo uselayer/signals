@@ -164,6 +164,14 @@ behind Vercel (see README, "Hosting").
     together, with the owner's caveat word for word: "Polymarket's figures, updated every few hours. Bets still
     open aren't counted." (the one place the page says "bets"). Both are read on the checks' budget (`checker`:
     3–13 and 12 reads) and kept per wallet (30 min, 1 h).
+  - Traders' category picker ("Any category", Polymarket's categories, "Uncategorised", "All except Sports"): picking
+    one sorts by realized profit in it (all time) and offers "Made money in X". Only the traders already listed are
+    sorted or filtered: no new tier or label, no recommendation loosened, no raw-profit leaderboard beyond this sort.
+    Its figures come from what's kept, never a read on a page load: a daily job (`_categories_loop`,
+    `categories_round`) reads each recommended trader's realized profit by category once a day on the
+    background's budget (`background`, ~1,300 reads a day for ~110 traders) into directory.db
+    (`realized_categories`); a trader profile uses the kept one while it's under a day old. A trader not read yet
+    shows "—" and is never counted as having made money. SIGNALS_CATEGORY_READS=0 stops the reads.
   - Never a made-up number for a real trader on the hosted app. A figure the data doesn't have yet shows "—";
     sample values (`SIGNALS_MOCK=1`) are for reviewing the page locally only. The SDK's per-dollar figure is a return per dollar traded, never "ROI".
   - Words: say "trade", never "bet"; never "sandbox" or "paper". Every trade with a market has "Check your

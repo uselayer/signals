@@ -41,10 +41,14 @@ class FakeChecker:
 
 
 @pytest.fixture
-def api(monkeypatch: pytest.MonkeyPatch) -> tuple[TestClient, FakeChecker]:
+def api(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> tuple[TestClient, FakeChecker]:
+    from signals.directory import Directory
+
     engine._cache.clear()
     fake = FakeChecker()
     monkeypatch.setattr(engine, "checker", lambda: fake)
+    kept = Directory(tmp_path / "directory.db")  # never the developer's own store
+    monkeypatch.setattr(engine, "directory", lambda: kept)
     cats = {"0xb:1": "Sports", "0xb:0": "Sports", "0xt:1": "Politics", "0xs:0": "Sports"}
     monkeypatch.setattr(engine, "_categories", lambda ms: {m: cats[m] for m in ms if m in cats})
     return TestClient(engine.app), fake
