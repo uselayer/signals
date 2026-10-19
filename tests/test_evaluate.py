@@ -188,7 +188,7 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     assert m["Worst drop from a high"]["v"] is None and m["Worst drop from a high"]["sub"].startswith("last 90 days")
     assert m["Weeks up"]["v"] == "4 of 6" and m["Weeks up"]["sub"] == "since their first trade" and m["Weeks up"]["weeks"]
     assert m["Markets"]["v"] == "Sports 98%" and m["Markets"]["sub"] == "of 42 events checked, last 30 days"  # under 5% left out
-    assert m["Usual opening buy"]["v"] == "$24.8K" and m["Usual price paid"]["v"] == "35¢–54¢"
+    assert m["Usual trade"]["v"] == "$24.8K" and m["Usual price paid"]["v"] == "35¢–54¢"
     assert m["New positions"]["v"] == "about 2 a day"
     assert "+$780K" in m["All time without their biggest win"]["v"]  # in the fold
     assert m["How far the price moved before you could buy"]["v"] is None  # not read: "—", never 0
@@ -199,7 +199,7 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     # 7D moves realized P&L only; the trader read still loading is "…"; a wallet read in part isn't the wallet
     w = rows(week)
     assert week["hero"]["k"] == "Realized P&L, 7 days" and "−$20" in week["hero"]["v"] and week["hero"]["sub"].endswith("all time … · after fees")
-    assert w["Open P&L"]["v"] == "…" and w["Usual opening buy"]["v"] == "$24.8K"
+    assert w["Open P&L"]["v"] == "…" and w["Usual trade"]["v"] == "$24.8K"
     assert w["Wallet"]["v"] is None and w["Wallet"]["sub"] == "cash $5.00; open positions couldn't be read"
     # the trader read failed: "—", never the score's change in open value over 30 days
     f = rows(failed)
@@ -324,12 +324,12 @@ def test_the_traders_list_shows_a_win_rate_from_ten_settled_trades_as_the_sort_r
     and the sort (win_low, from WIN_MIN) say the same thing; a phone card's meta line opens with it."""
     got = run_js(WIN, """[{won: 31, settled: 57}, {won: 6, settled: 10}, {won: 1, settled: 1}, {won: 0, settled: 0}, {}]
       .map((s) => [winCell(s), winMeta(s)]).concat([[WIN_MIN, WIN_LABEL]])""")
-    assert got[0] == ['<span class="lb-main">54%</span><span class="lb-sub">31 of 57</span>', "Picked the winner 54% (31 of 57)"]
+    assert got[0] == ['<span class="lb-main">54%</span><span class="lb-sub">31 of 57</span>', "Win rate 54% (31 of 57)"]
     assert got[1][0].startswith('<span class="lb-main">60%</span>')  # 10 settled: shown, as it ranks
-    assert got[2] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">only 1 settled</span>', "Picked the winner: only 1 settled"]
-    assert got[3] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">none settled yet</span>', "Picked the winner: none settled yet"]
+    assert got[2] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">only 1 settled</span>', "Win rate: only 1 settled"]
+    assert got[3] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">none settled yet</span>', "Win rate: none settled yet"]
     assert got[4] == ['<span class="lb-none">—</span>', ""]  # not worked out: unknown, never 0
-    assert got[5] == [engine.WIN_MIN, "Picked the winner"]  # the page's minimum is the engine's
+    assert got[5] == [engine.WIN_MIN, "Win rate"]  # the page's minimum is the engine's
     assert all("gain" not in c and "loss" not in c for c, _ in got[:5])  # never green or red
     page = (engine.HERE / "static" / "index.html").read_text()
     assert 'head("won", `${WIN_LABEL}<small>30 days</small>`)' in page and "Won, 30 days" not in page
@@ -342,7 +342,7 @@ def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: 
     got = run_js(WIN, """[{won: 52, settled: 54, odds: 0.92}, {won: 3, settled: 4, odds: 0.5}]
       .map((s) => [winCell(s), winMeta(s)])""")
     assert got[0] == ['<span class="lb-main">96%</span><span class="lb-sub">52 of 54</span><span class="lb-sub">prices implied 92%</span>',
-                      "Picked the winner 96% (52 of 54), prices implied 92%"]  # fmt: skip
+                      "Win rate 96% (52 of 54), prices implied 92%"]  # fmt: skip
     assert "implied" not in got[1][0]  # under 10 settled: no rate, so no baseline either
 
 
