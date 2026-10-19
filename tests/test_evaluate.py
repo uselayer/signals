@@ -98,19 +98,22 @@ def test_a_traders_page_carries_the_why_lines(api: TestClient) -> None:
 
 def test_open_pnl_is_added_up_from_their_open_positions_and_unknown_is_never_zero(run_js: Any) -> None:
     """Open P&L is the sum of Polymarket's own figure for each position still open, never its summary figure; a
-    read that failed, or one cut off at POSITIONS_READ while even the smallest is still worth something, is unknown
-    ("—" and why), never $0. No open positions is a real $0, and says so."""
+    read that failed, or one the server says was cut off (positions_cut: Polymarket's list came back at POSITIONS_READ
+    while even the smallest is still worth something), is unknown (no value, so no row), never $0. No open positions
+    is a real $0, and says so."""
     s = {"periods": {"30d": {"realized": 1.0}}}
     pos = lambda n, value=10.0, pnl=1.0: [{"status": "in", "pnl": pnl, "value": value}] * n  # noqa: E731
     cases = {"none": {"stats": {"unrealized_pnl": 5400}, "positions": [{"status": "lost", "pnl": -50.0, "value": 0}]},
-             "full": {"stats": {}, "positions": pos(50)},
-             "full_but_settled_last": {"stats": {}, "positions": pos(49, pnl=2.0) + [{"status": "lost", "pnl": -9.0, "value": 0}]},
+             "full": {"stats": {}, "positions": pos(40), "positions_cut": True},
+             "fifty_all_read": {"stats": {}, "positions": pos(50), "positions_cut": False},  # 50 was the old read's limit
+             "full_but_settled_last": {"stats": {}, "positions": pos(49, pnl=2.0) + [{"status": "lost", "pnl": -9.0, "value": 0}], "positions_cut": False},
              "missing_figure": {"stats": {}, "positions": pos(1, pnl=None)},
              "failed": {"error": "x"}}  # fmt: skip
     got = run_js(NUMBERS, "(() => { pf.account = {}; const c = " + json.dumps(cases) + "; return Object.fromEntries("
                  f"Object.entries(c).map(([k, d]) => [k, profileNumbers({s}, d, {{}}, '30d').summary[0]])); }})()")
     assert (got["none"]["v"], got["none"]["sub"]) == ("$0.00", "no open positions")  # a real $0, not the summary's 5,400
-    assert got["full"]["v"] is None and got["full"]["sub"] == "they hold over 50 positions, too many to add up here"
+    assert got["full"]["v"] is None and got["full"]["sub"] == "they hold over 500 positions, too many to add up here"
+    assert "+$50" in got["fifty_all_read"]["v"]
     assert "+$98" in got["full_but_settled_last"]["v"]  # every open one was read: the last is a settled loser
     assert got["missing_figure"]["v"] is None and got["missing_figure"]["sub"] == "couldn't be worked out from their positions"
     assert got["failed"]["v"] is None and got["failed"]["sub"] == "their positions couldn't be read just now"

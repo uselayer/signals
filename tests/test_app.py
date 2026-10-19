@@ -182,6 +182,11 @@ def test_trader_pages_ask_for_closed_positions_and_the_feed_does_not(
     monkeypatch.setattr(engine.reads.whales, "trader", trader)
     api.get("/api/trader/polymarket/0xabc")
     assert asked[-1]["closed"] == 50  # the profile's Closed positions (uselayer 0.7)
+    assert asked[-1]["positions"] == 500  # every open one for most traders, so Open P&L adds up (at 50, 16 of 50 had none)
+    # Open P&L is unknown when Polymarket's list came back full and even its smallest is worth something, or unread
+    full = [{"currentValue": 5.0}] * 500
+    assert engine.positions_cut(full) and engine.positions_cut(None)
+    assert not engine.positions_cut(full[:499]) and not engine.positions_cut(full[:499] + [{"currentValue": 0}])
     monkeypatch.setattr(engine, "_worth_data", {"scores": [SCORE | {"segment": "proven", "label": "Proven sharps"}]})
     monkeypatch.setattr(engine, "_categories", lambda markets: {})
     feed: list[Any] = []

@@ -236,7 +236,7 @@ def test_the_records_open_profit_is_added_up_from_their_positions_never_the_summ
     assert client.get(f"/api/record/{W}").json()["open"]["pnl"] is None
 
 
-PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "BUSY_TEXT", "readFailed", "madeMoneyRow", "worstDrop", "CATEGORY_NOTE", "categoryCard")
+PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "numberRows", "BUSY_TEXT", "readFailed", "madeMoneyRow", "worstDrop", "CATEGORY_NOTE", "categoryCard")
 
 
 def test_made_money_on_is_given_only_when_the_record_adds_up_and_says_positions(run_js: Any) -> None:
@@ -270,6 +270,25 @@ def test_the_category_card_has_all_except_sports_and_says_what_it_counts(run_js:
     assert note in html.replace("&#39;", "'")  # the owner's words, as they are
     loading, failed, empty = run_js(PROFILE, "[categoryCard(null), categoryCard({error: true}), categoryCard({rows: [], overall: null})]")
     assert "skel" in loading and "couldn't be read just now" in failed and "No realized profit or loss" in empty
+
+
+def test_the_category_card_never_repeats_a_row_or_shows_a_0_for_categories_never_traded(run_js: Any) -> None:
+    """OhWhenTheReds, 19 Oct: all $673,545 in Sports. One category is that row alone: no "All except Sports" $0.00 and
+    no "All categories" repeating it. Sports and one other: "All except Sports" would be that other row again."""
+    only, two, none = run_js(PROFILE, """[categoryCard({rows: [{category: "Sports", usd: 673545.48}], overall: 673545.48, except_sports: 0}),
+      categoryCard({rows: [{category: "Sports", usd: 500}, {category: "Politics", usd: 200}], overall: 700, except_sports: 200}),
+      categoryCard({rows: [{category: "Politics", usd: 900}, {category: "Crypto", usd: 100}], overall: 1000, except_sports: 1000})]""")
+    assert "<dt>Sports" in only and "All except Sports" not in only and "All categories" not in only and "$0" not in only
+    assert "All except Sports" not in two and "<dt>All categories" in two
+    assert "All except Sports" not in none and "<dt>All categories" in none  # never traded Sports: it would repeat All
+
+
+def test_a_figure_that_cant_be_given_has_no_row(run_js: Any) -> None:
+    """A row with no value isn't drawn (the owner's call: left out, never "—"); one still loading ("…") is."""
+    html = run_js(PROFILE, """numberRows([{k: "Open P&L", v: null, sub: "they hold over 500 positions"}, {k: "Wallet", v: "$1M"},
+      {k: "Made money on", v: "…"}, {k: "Worst drop from a high", v: null}])""")
+    assert "<dt>Wallet" in html and "<dt>Made money on" in html and "Open P&L" not in html and "Worst drop" not in html
+    assert "—" not in html
 
 
 def test_the_page_says_positions_never_predictions() -> None:
