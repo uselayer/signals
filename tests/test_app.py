@@ -667,6 +667,12 @@ def test_rising_reads_sharp_everywhere_and_the_page_never_says_rising(run_js: An
                      if not ln.lstrip().startswith("//"))  # fmt: skip
     shown = re.sub(r"(^|\s)//\s.*$", "", page, flags=re.M)  # without code comments
     assert "Rising" not in shown and "Proven sharp" not in shown and "s-rising" not in shown
+    # never a hedge beside a Sharp chip: not in the page's words, nor in a Sharp's "Why they're here" (the engine's)
+    assert "too few to be sure" not in shown and "Early signs" not in shown
+    for seg in ("proven", "quiet", "rising"):
+        s = SCORE | {"segment": seg, "edge": {"mean": 0.02, "margin": 0.03, "n": 12, "z": 1}}
+        listed = engine.why_lines(s | engine._board(s))["listed"] or ""
+        assert "too few" not in listed and "to be sure" not in listed and "Early signs" not in listed, seg
 
 
 def test_the_page_never_says_copy() -> None:

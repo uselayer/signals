@@ -1738,8 +1738,10 @@ def why_lines(s: dict[str, Any]) -> dict[str, str | None]:
     over = f" (over {edge_n} trades)" if edge_n else ""
     # Skill and track record only: whether copying pays is the separate "copying" line below.
     section = s.get("section")
-    if section == "sharp" and s.get("segment") == "rising":  # a Sharp on the page, but the evidence says fewer trades yet
-        listed = f"Early signs: the price has tended to move their way after they buy{f', over {edge_n} trades so far' if edge_n else ''}, too few to be sure yet."
+    if section == "sharp" and s.get("segment") == "rising":
+        # A Sharp on the page (the owner, 19 Oct), said as a plain fact with no hedge. Not "it holds without their best
+        # trades": the SDK's Rising doesn't establish that (its edge test needs more trades), so it isn't claimed.
+        listed = f"The price has tended to move their way after they buy{f', over {edge_n} trades so far' if edge_n else ''}."
     elif section == "sharp":
         listed = f"The price tends to move their way within minutes after they buy{over}, and it holds without their best trades."
     else:

@@ -59,7 +59,9 @@ def test_why_theyre_here_says_what_how_why_listed_and_copying_in_plain_lines() -
     assert why_costly["copying"] == engine.copy_offer(costly)[1] and why_costly["copying"].startswith("Costly to copy: ")
 
     rising = s | {"segment": "rising", "copyable": "unknown", "edge": {"mean": 0.02, "margin": 0.03, "n": 12, "z": 1}}
-    assert "over 12 trades so far, too few to be sure yet" in engine.why_lines(rising | engine._board(rising))["listed"]
+    rising_listed = engine.why_lines(rising | engine._board(rising))["listed"]
+    assert rising_listed.startswith("The price has tended to move their way after they buy, over 12 trades so far.")
+    assert "too few" not in rising_listed and "to be sure" not in rising_listed and "Early signs" not in rising_listed
 
     lucky = SCORE | {"segment": "lucky", "reason": "Big profit, but it rests on one bet."}
     assert engine.why_lines(lucky | engine._board(lucky))["listed"] == "Not on our list: Big profit, but it rests on one trade."
@@ -246,12 +248,17 @@ def test_the_check_says_how_much_the_book_holds_near_their_price(api: TestClient
     assert (r["ok"], r["max_spend"], r["depth_checked"], r["best_price"]) == (False, 340.0, True, None)
 
 
-def test_a_rising_trader_is_a_sharp_whose_evidence_stays_hedged_even_when_copying_is_offered() -> None:
+def test_a_rising_trader_is_a_sharp_said_as_a_plain_fact_even_when_copying_is_offered() -> None:
     rising = COPYABLE | {"segment": "rising", "edge": {"mean": 0.02, "margin": 0.03, "n": 12, "z": 1}}
     b = engine._board(rising)
     assert (b["section"], b["copy_ok"]) == ("sharp", True)  # listed with the Sharps; copying is its status
-    # their why line still says what the evidence shows: fewer trades so far than a Proven sharp's
-    assert engine.why_lines(rising | b)["listed"].startswith("Early signs: the price has tended to move their way after they buy, over 12 trades so far")
+    # next to a "Sharp" chip: a plain fact, no hedge, and never "it holds without their best trades" (not shown for them)
+    listed = engine.why_lines(rising | b)["listed"]
+    assert listed.startswith("The price has tended to move their way after they buy, over 12 trades so far.")
+    for hedge in ("too few", "to be sure", "Early signs", "without their best trades"):
+        assert hedge not in listed, hedge
+    no_edge = engine.why_lines(COPYABLE | {"segment": "rising", "edge": None} | b)["listed"]
+    assert no_edge.startswith("The price has tended to move their way after they buy.")  # no count: none made up
 
 
 def test_why_lines_take_trading_profit_as_the_page_does() -> None:

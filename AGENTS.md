@@ -144,8 +144,9 @@ behind Vercel (see README, "Hosting").
     "Quiet sharp", a style (fewer, bigger trades): the owner, 19 Oct, after Sharp and Rising had indistinguishable
     next-month results. Presentation only: the segment ("rising" stays in the data and the API), which tiers are
     recommended and the thresholds are the SDK's. Nothing a visitor reads says "Rising" (a guard test), and no new
-    label or "hot" list. A Rising trader's "Why they're here" still says what the evidence shows (fewer trades so
-    far). An open trade (their page, a Feed card, a trader page) says only "Now 52¢ · they paid 49¢", for every
+    label or "hot" list. A Rising trader's "Why they're here" is a plain fact with no hedge ("The price has tended
+    to move their way after they buy, over 12 trades so far."), never "too few to be sure" beside a Sharp chip,
+    and never "it holds without their best trades" (not shown for them). An open trade (their page, a Feed card, a trader page) says only "Now 52¢ · they paid 49¢", for every
     trader, never green or "you can still get in". The "Buy on Polymarket" link, which only opens the market, "Check your price" and "What buying now
     costs" stay for everyone: neutral market data. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; consistency is 12 weeks,
     win record and usual trade the last 30 days. Consistency is "X of N weeks up", where a week counts profit
