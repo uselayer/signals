@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS score_categories (wallet TEXT NOT NULL, category TEXT
 CREATE INDEX IF NOT EXISTS score_categories_by_category ON score_categories (category, strong);
 CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, metric TEXT NOT NULL, key TEXT NOT NULL, n REAL NOT NULL,
   PRIMARY KEY (day, metric, key));
+CREATE TABLE IF NOT EXISTS realized_categories (wallet TEXT PRIMARY KEY, read_at REAL NOT NULL, view TEXT NOT NULL);
 """
 # A phase 1 directory.db has wallets without these: added when it's first opened, empty (status "found").
 _PHASE_2_COLUMNS = (("last_active", "REAL"), ("status", "TEXT NOT NULL DEFAULT 'found'"), ("scored_at", "REAL"),
@@ -875,6 +876,31 @@ class Directory:
                 "SELECT * FROM score_categories WHERE wallet = ? ORDER BY bets DESC, category", (wallet.lower(),)
             )
             return [dict(r) for r in rows]
+
+    def keep_realized(self, wallet: str, view: dict[str, Any], at: float | None = None) -> None:
+        """A wallet's realized profit by category as the page shows it (the app's ``category_view``), read at ``at``:
+        the latest only, a newer read replacing it."""
+        now = time.time() if at is None else at
+        with self._db() as con:
+            con.execute(
+                "INSERT INTO realized_categories (wallet, read_at, view) VALUES (?, ?, ?) ON CONFLICT (wallet) DO "
+                "UPDATE SET read_at = excluded.read_at, view = excluded.view WHERE excluded.read_at >= read_at",
+                (wallet.lower(), now, json.dumps(view)),
+            )
+
+    def realized_of(self, wallets: Iterable[str]) -> dict[str, dict[str, Any]]:
+        """The kept realized profit by category of each of these wallets that has one, by wallet, with ``stored_at``
+        (when it was read)."""
+        ws = sorted({w.lower() for w in wallets})
+        out: dict[str, dict[str, Any]] = {}
+        with self._db() as con:
+            for i in range(0, len(ws), 500):
+                part = ws[i : i + 500]
+                for w, at, view in con.execute(
+                    f"SELECT wallet, read_at, view FROM realized_categories WHERE wallet IN ({', '.join('?' * len(part))})", part
+                ):  # fmt: skip
+                    out[w] = json.loads(view) | {"stored_at": at}
+        return out
 
     def sweep_started(self, at: float | None = None) -> float:
         started = time.time() if at is None else at

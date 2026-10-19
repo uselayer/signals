@@ -1631,7 +1631,7 @@ const tierRank = (seg) => { const i = TIER_ORDER.indexOf(seg); return i < 0 ? TI
 const RANKED = 25;
 let worthTimer = null, worthLast = null;
 const topOpts = { venue: "all", by: "pnl" };
-const lb = { q: "", sort: null, period: "30d", all: false, more: {} }; // more: "Show more" pressed, per section
+const lb = { q: "", sort: null, period: "30d", all: false, more: {}, cat: "", made: false }; // more: "Show more" pressed, per section; cat: the category picked (realized profit), made: only those who made money in it
 // Traders' sections, from the engine's section_of: by tier alone, so the list and its tests agree.
 const SECTIONS = [
   ["sharp", "Sharps", "The price moves their way after they buy, over enough trades to trust it."],
@@ -1713,12 +1713,19 @@ const lbPct = (x) => {
   const v = Math.abs(x) < 0.1 ? (Math.abs(x) * 100).toFixed(1) : String(Math.round(Math.abs(x) * 100));
   return `${Number(v) === 0 ? "" : x > 0 ? "+" : "−"}${v}%`; // rounds to zero: no sign
 };
+// Realized profit by category, all time (Polymarket's leaderboard, parlays included), kept once a day for the traders
+// we recommend (the engine's daily job): the category picker sorts by it and can keep only those who made money in
+// it. A trader not read yet, or with none in that category (they never traded it), has "—", never $0.
+const REALIZED_CATS = ["Sports", "Politics", "Crypto", "Esports", "Economics", "Finance", "Culture", "Tech", "Weather", "Mentions", "Uncategorised", "All except Sports"];
+const realizedIn = (s, cat) => s.realized?.usd?.[cat] ?? null;
+const realizedText = (s, cat) => !s.realized ? `${cat}: not read yet` : realizedIn(s, cat) == null ? `${cat}: none` : `${cat}: ${usd(realizedIn(s, cat), true)} realized, all time`;
 const LB_SORTS = {
   recommended: ["Recommended", (a, b) => tierRank(a.segment) - tierRank(b.segment) || (b.edge?.z ?? -99) - (a.edge?.z ?? -99)],
   consistent: ["Most consistent", (a, b) => (b.consistency_low ?? -1) - (a.consistency_low ?? -1) || (profitOf(b, "30d") ?? 0) - (profitOf(a, "30d") ?? 0)],
   profit: ["Trading profit", byDesc((s) => profitOf(s, lb.period))],
   won: [WIN_LABEL, byDesc(winRateOf)],
   active: ["Most active", byDesc((s) => s.trades_per_day)],
+  category: ["Realized profit in the category", byDesc((s) => realizedIn(s, lb.cat))], // only offered with a category picked
 };
 function lbSpark(s, days, w = 76, h = 26) {
   const pts = (s.pnl_daily || []).slice(-(days + 1)).map((p) => p[1]); // n days: n + 1 end-of-day points
@@ -1747,6 +1754,11 @@ function checkedFoot(res, all) {
   return `Showing ${scores.length.toLocaleString("en-US")} of ${considered.toLocaleString("en-US")} checked traders: the ${rec.toLocaleString("en-US")} we recommend, then the others in tier order until the list is full${tiers.length ? ` (${tiers.map(([t, n]) => `${esc(TIER[t]?.[0] || t)} ${n.toLocaleString("en-US")}`).join(" · ")})` : ""}. Market makers and arbitrage aren't listed.${toExplore} · <button class="link" id="lbrec">Recommended only</button>`;
 }
 
+// What the category picker's figures are, and for how many of the traders shown they aren't read yet.
+function categoryNote(shown, cat) {
+  const unread = shown.filter((s) => !s.realized).length;
+  return `Realized profit in ${cat}, all time: Polymarket's figures, read once a day for the traders we recommend. Parlays included; trades still open aren't counted.${unread ? ` Not read yet for ${plural(unread, "trader")}.` : ""}`;
+}
 function renderWorth() {
   const box = $("#tview"), r = worthLast;
   if (!box || !r || routeName() !== "traders:worth") return;
@@ -1762,23 +1774,25 @@ function renderWorth() {
   const history = scores.some((s) => Array.isArray(s.pnl_weeks));
   const periods = scores.some((s) => s.periods);
   if (!periods) lb.period = "30d";
-  const sort = lb.sort && (lb.sort !== "consistent" || history) ? lb.sort : "recommended";
+  const cat = REALIZED_CATS.includes(lb.cat) ? lb.cat : "";
+  const sort = lb.sort && (lb.sort !== "consistent" || history) && (lb.sort !== "category" || cat) ? lb.sort : "recommended";
   const n = lb.period, days = PERIOD_DAYS[n];
   const picked = interests || [], names = interestNames(picked), q = lb.q.trim().toLowerCase();
   const recommended = scores.filter((s) => SEG_ORDER.includes(s.segment));
   const pool = lb.all ? scores.filter((s) => s.segment !== "no_view") : recommended;
   const shown = pool.filter((s) => matchesInterests(s, picked))
     .filter((s) => !q || (s.name || "").toLowerCase().includes(q) || s.wallet.startsWith(q))
+    .filter((s) => !cat || !lb.made || realizedIn(s, cat) > 0)
     .sort(LB_SORTS[sort][1]);
 
   const head = (key, label) => `<button type="button" data-lbsort="${key}" aria-pressed="${sort === key}" ${key === "consistent" && !history ? "disabled" : ""}>${label}</button>`;
   const row = (s, i, open) => {
     const up = weeksUp(s), known = weeksOf(s), profit = profitOf(s, n), perDollar = perDollarOf(s, n);
     const notRec = !SEG_ORDER.includes(s.segment) ? ` · ${esc(TIER[s.segment]?.[0] || "Not recommended")}` : "";
-    const cat = s.categories?.[0]?.category;
+    const main = s.categories?.[0]?.category;
     return `<a class="lb-cols lb-row" href="#/worth/${esc(s.wallet)}" ${i >= RANKED && !open ? "hidden" : ""}>
       <span class="lb-rank">${i + 1}</span>
-      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${[cat, s.last_buy ? `active ${ago(s.last_buy)}` : ""].filter(Boolean).map(esc).join(" · ")}${notRec}</span></span></span>
+      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${[main, s.last_buy ? `active ${ago(s.last_buy)}` : ""].filter(Boolean).map(esc).join(" · ")}${notRec}</span>${cat ? `<span class="lb-sub">${pl(realizedIn(s, cat), esc(realizedText(s, cat)))}</span>` : ""}</span></span>
       <span class="lb-cons">${up == null || !known ? `<span class="lb-none">—</span>` : `<span class="lb-weeks" aria-hidden="true">${s.pnl_weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span><span class="lb-sub">${up} of ${known} weeks up</span>`}</span>
       <span class="lb-pnl">${profit == null ? `<span class="lb-none">—</span>` : `<span class="lb-main">${pl(profit, usd(profit, true))}</span><span class="lb-sub">${perDollar != null ? `${lbPct(perDollar)} per $ traded` : `${days} days`}</span>`}</span>
       <span class="lb-trend">${lbSpark(s, days)}</span>
@@ -1810,6 +1824,8 @@ function renderWorth() {
     body = emptyState("That wallet isn't in this list", "We can still check its trades, including your own wallet. It usually takes under a minute.", `<a class="btn" href="#/worth/${esc(q)}">Check this wallet</a>`);
   } else if (q) {
     body = emptyState("No trader matches", `Nobody called “${esc(lb.q.trim())}” here. Paste a full wallet address to check any wallet.`, `<button class="btn ghost" id="lbclear">Clear search</button>`);
+  } else if (cat && lb.made && pool.length) {
+    body = emptyState(`No one here made money in ${esc(cat)}`, "Of the traders listed, none has realized profit in it, or theirs hasn't been read yet.", `<button class="btn ghost" id="lbmadeoff">Show everyone</button>`);
   } else if (picked.length && pool.length) {
     body = emptyState(`No ${esc(names)} traders this time`, `No ${esc(names)} trader passed the checks, and we don't loosen them to fill the list.`, `<button class="btn ghost" id="lball">Show all markets</button>`);
   } else {
@@ -1826,10 +1842,13 @@ function renderWorth() {
       <div class="lb-view">
         <label class="lb-search" for="lbq"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg><input id="lbq" type="search" placeholder="Search name or wallet" value="${esc(lb.q)}" autocomplete="off" aria-label="Search by trader name or wallet address"></label>
         ${periods ? `<div class="lb-period" role="group" aria-label="Period">${Object.keys(PERIOD_DAYS).map((p) => `<button type="button" data-lbperiod="${p}" aria-pressed="${n === p}">${p.toUpperCase()}</button>`).join("")}</div>` : ""}
-        <select id="lbsort" class="lb-sort" aria-label="Sort traders">${Object.entries(LB_SORTS).map(([k, [l]]) => k === "consistent" && !history
-          ? `<option value="consistent" disabled>Most consistent (coming soon)</option>` : `<option value="${k}" ${sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <select id="lbcat" class="lb-sort" aria-label="Realized profit by category">${[["", "Any category"], ...REALIZED_CATS.map((c) => [c, c])].map(([v, l]) => `<option value="${esc(v)}" ${cat === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        ${cat ? `<button type="button" class="lb-chip" id="lbmade" aria-pressed="${lb.made}">Made money in ${esc(cat)}</button>` : ""}
+        <select id="lbsort" class="lb-sort" aria-label="Sort traders">${Object.entries(LB_SORTS).filter(([k]) => k !== "category" || cat).map(([k, [l]]) => k === "consistent" && !history
+          ? `<option value="consistent" disabled>Most consistent (coming soon)</option>` : `<option value="${k}" ${sort === k ? "selected" : ""}>${k === "category" ? `Realized profit in ${esc(cat)}` : l}</option>`).join("")}</select>
       </div>
     </div>
+    ${cat ? `<p class="lb-note">${esc(categoryNote(shown, cat))}</p>` : ""}
     ${sample ? `<p class="lb-note">Sample profit history (SIGNALS_MOCK=1): weeks in profit, trend and 7D/90D are made up here, to review the page. They never show on the hosted app.</p>` : ""}
     ${sort === "won" && shown.length ? `<p class="lb-note">Close rates: more trades rank higher.</p>` : ""}
     ${body}
@@ -1849,6 +1868,10 @@ function renderWorth() {
     lb.q = e.target.value; const at = e.target.selectionStart; renderWorth();
     const s = $("#lbq"); if (s) { s.focus(); s.setSelectionRange(at, at); } };
   $("#lbsort").onchange = (e) => { lb.sort = e.target.value; renderWorth(); };
+  // a category picked sorts by realized profit in it (another sort can still be picked); none goes back
+  $("#lbcat").onchange = (e) => { lb.cat = e.target.value; lb.sort = lb.cat ? "category" : lb.sort === "category" ? null : lb.sort; if (!lb.cat) lb.made = false; renderWorth(); };
+  const made = $("#lbmade"); if (made) made.onclick = () => { lb.made = !lb.made; renderWorth(); };
+  const madeOff = $("#lbmadeoff"); if (madeOff) madeOff.onclick = () => { lb.made = false; renderWorth(); };
   $$("[data-lbsort]", box).forEach((b) => (b.onclick = () => { lb.sort = b.dataset.lbsort; renderWorth(); }));
   $$("[data-lbperiod]", box).forEach((b) => (b.onclick = () => { lb.period = b.dataset.lbperiod; renderWorth(); }));
   $$("[data-lbmore]", box).forEach((b) => (b.onclick = () => { lb.more[b.dataset.lbmore] = true; renderWorth(); }));
