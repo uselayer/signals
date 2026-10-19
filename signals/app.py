@@ -194,13 +194,20 @@ def top(venue: str = "all", by: str = "pnl", limit: int = 25) -> list[dict[str, 
     return [t.to_dict() | ({"volume_unit": "contracts"} if t.venue == "polymarket" else {}) for t in rows]
 
 
+# What a Polymarket trader's figures hold from uselayer 0.14: ``volume_usd`` dollars bought and sold,
+# ``volume_contracts`` the contracts, ``trades`` how many trades (fills), ``markets_traded`` how many markets, and
+# ``pnl_as_of`` when Polymarket last worked them out.
+POLY_STATS_014 = ("volume_contracts", "trades", "markets_traded", "pnl_as_of")
+_ONLY_014 = ("volume_contracts", "markets_traded", "pnl_as_of")  # ``trades`` was there before too, meaning markets
+
+
 def poly_stats(stats: dict[str, Any]) -> dict[str, Any]:
-    """A Polymarket trader's figures as uselayer 0.12 passes them on, with its two mislabelled ones put right. Its
-    ``volume_usd`` is Polymarket's ``volume``, which counts contracts (the sizes of every fill added up; dollars are
-    ``volume_usdc``, which it doesn't pass on), so it's kept as ``volume_contracts``. Its ``trades`` isn't how many
-    trades they made (that's Polymarket's ``trade_count``, not passed on either), so it's left out. An SDK that
-    passes ``volume_contracts`` on (uselayer-sdk#30) has both right: its figures pass through as they are."""
-    if "volume_contracts" in stats:
+    """A Polymarket trader's figures, safe whichever SDK made them. From uselayer 0.14 (a key only it has among
+    them) they're right and pass through as they are, a key missing just missing (the page shows "—"). Before,
+    uselayer 0.12's ``volume_usd`` was Polymarket's ``volume``, which counts contracts, so it's kept as
+    ``volume_contracts``, and its ``trades`` wasn't how many trades they made, so it's left out: never 0.12's
+    contracts shown as dollars."""
+    if any(k in stats for k in _ONLY_014):
         return stats
     out = {k: v for k, v in stats.items() if k not in ("volume_usd", "trades")}
     if "volume_usd" in stats:
@@ -1816,8 +1823,10 @@ def _record(wallet: str) -> dict[str, Any]:
         "wallet": wallet,
         "name": d.trader.name,
         "joined": d.joined,
+        # every key asked for is there (None when Polymarket didn't say), so 0.14's dollars are never taken for
+        # 0.12's contracts (poly_stats) and nothing is dropped
         "stats": poly_stats({k: d.stats.get(k) for k in ("trading_pnl", "realized_pnl", "unrealized_pnl", "pnl",
-                                                         "income", "volume_usd", "biggest_win")}),  # fmt: skip
+                                                         "income", "volume_usd", "biggest_win", *POLY_STATS_014)}),  # fmt: skip
         "open": {"count": len(held), "at_least": len(held) >= 50, "value": round(sum(values), 2) if values else None,
                  "pnl": open_pnl},
         "positions": [p.to_dict() | {"category": cats.get(p.market)} for p in held[:RECORD_POSITIONS]],
@@ -1837,6 +1846,104 @@ def record(wallet: str) -> dict[str, Any]:
         return cached(f"record:{w}", RECORD_TTL_S, lambda: _record(w))  # type: ignore[no-any-return]
     except VenueError as e:
         raise venue_error(e) from e
+
+
+# ---- a trader's whole record of positions, and their realized profit by category (uselayer 0.14) ----
+# Both on the checks' budget (checker), kept per wallet. completed_positions is 3 reads for most wallets, 13 at most;
+# realized_by_category is 12. Polymarket works both out every few hours, so they're kept that long-ish.
+COMPLETED_TTL_S = 1800
+CATEGORY_TTL_S = 3600
+# Polymarket's leaderboard categories, as the page names them
+CATEGORY_NAMES = {"SPORTS": "Sports", "ESPORTS": "Esports", "CRYPTO": "Crypto", "POLITICS": "Politics",
+                  "ECONOMICS": "Economics", "FINANCE": "Finance", "CULTURE": "Culture", "TECH": "Tech",
+                  "WEATHER": "Weather", "MENTIONS": "Mentions"}  # fmt: skip
+UNCATEGORISED = "Uncategorised"
+
+
+def _wallet_or_400(wallet: str) -> str:
+    w = wallet.lower()
+    if not _WALLET.fullmatch(w):
+        raise HTTPException(400, detail="That isn't a Polymarket wallet address.")
+    return w
+
+
+def _completed(wallet: str) -> dict[str, Any]:
+    """Their whole record of positions (the SDK's ``completed_positions``): ``summary`` is its one line ("Made money
+    on 43 of 82 positions", "· parlays not included" when they have parlays, or why there's no record), and the
+    figures behind it. The positions themselves stay out: a busy trader has hundreds."""
+    r = checker().completed_positions(wallet)
+    return {"summary": r.summary, "made_money": r.made_money, "count": len(r.positions), "complete": r.complete,
+            "reconciles": r.reconciles, "parlays_excluded": r.parlays_excluded, "read_at": r.read_at.isoformat()}  # fmt: skip
+
+
+BUSY = "Busy, try again in a minute."
+# What a profile's own reads take, as "Check now" does: the same CHECKS_AT_ONCE turns site-wide (waiting CHECK_WAIT_S
+# for one), and hosted, CHECKS_PER_CLIENT wallets per visitor (each wallet counted once, however many of its reads
+# it needs; their own count, so reading profiles never uses up "Check now").
+_profile_reads: dict[str, dict[str, float]] = {}
+
+
+def limited_read(key: str, ttl_s: float, wallet: str, request: Request | None, read: Callable[[], Any]) -> Any:
+    """``read()``, kept ``ttl_s`` under ``key``, under "Check now"'s limits; a kept answer needs no turn. Past a limit,
+    a 429 with BUSY, which the page shows as it is, never as an error or $0."""
+    hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < ttl_s:
+        return hit[1]
+    if HOSTED:
+        who, (most, per) = _client(request), CHECKS_PER_CLIENT
+        now = time.time()
+        recent = {w: t for w, t in _profile_reads.get(who, {}).items() if now - t < per}
+        if wallet not in recent and len(recent) >= most:
+            raise HTTPException(429, detail=BUSY)
+        _profile_reads[who] = recent | {wallet: recent.get(wallet, now)}
+        if len(_profile_reads) > 5000:
+            _profile_reads.clear()
+    if not _checks.acquire(timeout=CHECK_WAIT_S):
+        raise HTTPException(429, detail=BUSY)
+    try:
+        return cached(key, ttl_s, read)
+    except VenueError as e:
+        raise venue_error(e) from e
+    finally:
+        _checks.release()
+
+
+@app.get("/api/completed/{wallet}")
+def completed(wallet: str, request: Request) -> dict[str, Any]:
+    """A Polymarket wallet's whole record of positions (``_completed``), kept COMPLETED_TTL_S, under "Check now"'s
+    limits (``limited_read``)."""
+    w = _wallet_or_400(wallet)
+    return limited_read(f"completed:{w}", COMPLETED_TTL_S, w, request, lambda: _completed(w))  # type: ignore[no-any-return]
+
+
+def category_view(r: dict[str, Any]) -> dict[str, Any]:
+    """The SDK's realized profit by category (``RealizedByCategory.to_dict()``) as the page shows it: a row per
+    category they traded (most profit first, Polymarket's names made plain), then "Uncategorised" for markets in no
+    category when that isn't $0, all of them together (``overall``) and all except Sports. Parlays are included."""
+    cats: dict[str, float] = r.get("categories") or {}
+    rows = [{"category": CATEGORY_NAMES.get(c, UNCATEGORISED), "usd": v} for c, v in cats.items()]
+    other = r.get("uncategorised")
+    if other is not None and round(other, 2) != 0:
+        rows.append({"category": UNCATEGORISED, "usd": other})
+    merged: dict[str, float] = {}
+    for row in rows:  # a category Polymarket adds that we don't know yet counts as uncategorised, never dropped
+        merged[row["category"]] = round(merged.get(row["category"], 0.0) + row["usd"], 2)
+    overall = r.get("overall")
+    return {"rows": [{"category": c, "usd": v} for c, v in merged.items()], "overall": overall,
+            "except_sports": None if overall is None else round(overall - cats.get("SPORTS", 0.0), 2),
+            "read_at": r.get("read_at")}  # fmt: skip
+
+
+def _categories_of(wallet: str) -> dict[str, Any]:
+    return category_view(checker().realized_by_category("polymarket", wallet).to_dict())
+
+
+@app.get("/api/categories/{wallet}")
+def realized_categories(wallet: str, request: Request) -> dict[str, Any]:
+    """A Polymarket wallet's realized profit, all time, by category (``category_view``), kept CATEGORY_TTL_S, under
+    "Check now"'s limits (``limited_read``)."""
+    w = _wallet_or_400(wallet)
+    return limited_read(f"categories:{w}", CATEGORY_TTL_S, w, request, lambda: _categories_of(w))  # type: ignore[no-any-return]
 
 
 def _client(request: Request | None) -> str:

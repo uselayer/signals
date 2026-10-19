@@ -143,14 +143,14 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
         assert words in page, words
     for gone in ("<b>Lately</b>", "<b>Worth knowing</b>", "<b>Consistent</b>", "<b>Can you copy them</b>", 'id="pfcopy"', 'id="whycopy"',
                  "est. ${lbPct(s.copy_return)} after fees",
-                 "What copying it costs", "within 3¢ of their price", 'class="pf-stats"', '["stats", "Stats"]', "Held until the market settles:", "Worst drop",
+                 "What copying it costs", "within 3¢ of their price", 'class="pf-stats"', '["stats", "Stats"]', "Held until the market settles:", "usd(-chart.worst)", "worst90",
                  "<b>Won:</b>", "<b>Resting orders:</b>", "for context.", "<span>Price now</span>", "You get ${money",
                  "You lose ${money", "fills at ${c1"):  # the old lines
         assert gone not in page, gone
 
 
 NUMBERS = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "lbPct", "readDays", "readPeriod", "weeksUp",
-           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "profileNumbers")  # fmt: skip
+           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "madeMoneyRow", "worstDrop", "profileNumbers")  # fmt: skip
 
 
 def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_slot(run_js: Any) -> None:
@@ -182,11 +182,10 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     assert [r["k"] for r in month["summary"]] == ["Open P&L", "Wallet", "Made money on"]
     assert "+$899" in m["Open P&L"]["v"] and m["Open P&L"]["sub"] == "on 2 positions still open, at today's prices"  # not the stale $0
     assert m["Wallet"]["v"] == "$1.1M" and m["Wallet"]["sub"].startswith("cash $800K + open positions $300K")
-    assert m["Made money on"]["v"] is None  # "—" until the SDK reads every settled position
+    assert m["Made money on"]["v"] == "…"  # their whole record of positions is its own read (/api/completed)
     assert [g["title"] for g in month["groups"]] == ["Record", "How they trade"]
-    # worst drop is hidden until the SDK works it out from the whole hourly curve: one reading a day can miss or
-    # exaggerate a drop, depending on the hour the score was made
-    assert not [k for k in m if "drop" in k.lower()]
+    # the worst drop is the score's own (uselayer 0.14, every hourly point); a score kept before it has none: "—"
+    assert m["Worst drop from a high"]["v"] is None and m["Worst drop from a high"]["sub"].startswith("last 90 days")
     assert m["Weeks up"]["v"] == "4 of 6" and m["Weeks up"]["sub"] == "since their first trade" and m["Weeks up"]["weeks"]
     assert m["Markets"]["v"] == "Sports 98%" and m["Markets"]["sub"] == "of 42 events checked, last 30 days"  # under 5% left out
     assert m["Usual opening buy"]["v"] == "$24.8K" and m["Usual price paid"]["v"] == "35¢–54¢"
@@ -348,7 +347,7 @@ def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: 
 
 
 PROFILE = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "readDays", "readPeriod", "weeksUp", "weeksOf",
-           "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "profileNumbers")
+           "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "madeMoneyRow", "worstDrop", "profileNumbers")
 
 
 def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_own(run_js: Any) -> None:
@@ -386,3 +385,15 @@ def test_see_all_checked_traders_lists_recommended_first_and_says_what_it_is(run
     whole = run_js(foot, f"[checkedFoot({{scores: {scores}}}, true), checkedFoot({{scores: {scores}}}, false)]")
     assert whole[0].startswith("Showing every checked trader except market makers and arbitrage")  # the check's 200
     assert 'id="lbrec">See all checked traders</button>' in whole[1] and "lbchecked" not in whole[1]
+
+
+def test_made_money_on_and_the_worst_drop_come_from_uselayer_014(run_js: Any) -> None:
+    """Made money on: every position they've closed or that settled (/api/completed), only when it adds up, with
+    parlays said to be left out; the worst drop from a high: the score's worst_drop over 90 days, as a loss."""
+    s = {"periods": {"30d": {"realized": 1}}, "worst_drop": {"90d": {"usd": 425504.66, "peak_at": "x", "trough_at": "y"}}}
+    done = {"reconciles": True, "count": 400, "made_money": 215, "parlays_excluded": True, "summary": "x"}
+    got = run_js(NUMBERS, f"(() => {{ pf.account = {{}}; pf.completed = {json.dumps(done)}; return profileNumbers({json.dumps(s)}, null, {{}}, '30d'); }})()")
+    rows = {x["k"]: x for g in [{"rows": got["summary"]}, *got["groups"]] for x in g["rows"]}
+    assert rows["Made money on"]["v"] == "215 of 400 positions"
+    assert rows["Made money on"]["sub"] == "every position they've closed or that settled · parlays not included"
+    assert rows["Worst drop from a high"]["v"] == '<span class="loss">−$426K</span>'

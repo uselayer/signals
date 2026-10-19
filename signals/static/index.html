@@ -645,7 +645,7 @@ async function api(path, opts = {}) {
   }
   const r = await fetch(path, opts);
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(body?.detail?.message || (typeof body?.detail === "string" ? body.detail : "") || `Request failed (${r.status})`);
+  if (!r.ok) throw Object.assign(new Error(body?.detail?.message || (typeof body?.detail === "string" ? body.detail : "") || `Request failed (${r.status})`), { status: r.status });
   return body;
 }
 const post = (path, body) => api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -2159,14 +2159,16 @@ function recordFacts(rec) {
     ? new Date(rec.joined).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }) : null;
   return [
     ["Profit from trading", st.trading_pnl != null ? `${pl(st.trading_pnl, usd(st.trading_pnl, true))} all time${split}` : "—"],
-    // Polymarket's volume counts contracts, not dollars; how many trades they made isn't passed on yet, so no row
-    ["Contracts traded", st.volume_contracts != null ? `${usd(st.volume_contracts).slice(1)}, all time` : "—"],
+    // dollars bought and sold (Polymarket's volume in contracts is beside it), trades (fills) and markets traded
+    ["Bought and sold", st.volume_usd != null ? `${usd(st.volume_usd)}, all time${st.volume_contracts != null ? ` <small class="muted">${usd(st.volume_contracts).slice(1)} contracts</small>` : ""}` : "—"],
+    ["Trades", st.trades != null ? `${plural(st.trades, "trade")}${st.markets_traded != null ? ` in ${plural(st.markets_traded, "market")}` : ""}, all time` : "—"],
     ["Biggest win", st.biggest_win != null ? usd(st.biggest_win) : "—"],
     // Polymarket's positions list leaves out any under 1 contract, which its open profit still counts: said, never "None"
     ["Open now", (open.count ? `${open.count}${open.at_least ? "+" : ""} position${open.count === 1 ? "" : "s"} over 1 contract${open.value != null ? `, worth ${usd(open.value)}` : ""}`
       : "No positions over 1 contract") + (open.count ? ` <small class="muted">positions under 1 contract aren't listed or counted</small>` : "")],
     ["Markets", (rec.categories || []).length ? esc(rec.categories.map((c) => `${c.category} ${c.markets}`).join(" · ")) + ` <small class="muted">held or traded lately</small>` : "—"],
     ...(joined ? [["Joined", `${esc(joined)} <small class="muted">on Polymarket</small>`]] : []),
+    ...(st.pnl_as_of ? [["Figures as of", `${ago(st.pnl_as_of)} <small class="muted">Polymarket works them out every few hours</small>`]] : []),
   ];
 }
 // Their biggest open positions: the market, the side, what it's worth now, and the price they paid → the price now.
@@ -2185,9 +2187,19 @@ async function loadRecord(wallet) {
   try { rec = await api(`/api/record/${wallet}`); } catch (e) { box.innerHTML = `<h2>Track record</h2><p class="muted">Polymarket's figures couldn't be read just now: ${esc(e.message)}</p>`; return; }
   if (location.hash !== `#/worth/${wallet}` || !$("#record")) return;
   const pos = recordPositions(rec);
-  $("#record").innerHTML = `<h2>Track record <small class="muted">Polymarket's figures</small></h2><p class="pf-note">${esc(RECORD_NOTE)}</p>
-    <dl class="pf-facts">${recordFacts(rec).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
-    ${pos.length ? `<h3 class="pf-sub">Biggest open positions</h3><dl class="pf-facts pf-pos">${pos.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : ""}`;
+  let made = null, cats = null; // their whole record of positions and profit by category, read beside it
+  const draw = () => {
+    if (location.hash !== `#/worth/${wallet}` || !$("#record")) return;
+    const m = madeMoneyRow(made);
+    $("#record").innerHTML = `<h2>Track record <small class="muted">Polymarket's figures</small></h2><p class="pf-note">${esc(RECORD_NOTE)}</p>
+      <dl class="pf-facts">${recordFacts(rec).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}<dt>${m.k}</dt><dd>${m.v ?? "—"} <small class="muted">${esc(m.sub)}</small></dd></dl>
+      ${pos.length ? `<h3 class="pf-sub">Biggest open positions</h3><dl class="pf-facts pf-pos">${pos.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : ""}`;
+    const box = $("#reccats");
+    if (box) box.outerHTML = categoryCard(cats).replace('<section class="pf-card">', '<section class="pf-card" id="reccats">');
+  };
+  draw();
+  api(`/api/completed/${wallet}`).then((c) => { made = c; }, (e) => { made = readFailed(e); }).then(draw);
+  api(`/api/categories/${wallet}`).then((c) => { cats = c; }, (e) => { cats = readFailed(e); }).then(draw);
 }
 function renderUnchecked(s, wallet) {
   const app = $("#app"), r = s.directory, name = displayName(s.name, wallet);
@@ -2203,14 +2215,15 @@ function renderUnchecked(s, wallet) {
     <section class="pf-card"><h2>Skill <small class="muted">our test</small></h2><p class="pf-note">${note}</p>
       <dl class="pf-facts">${evidenceFacts(r).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}${boardsRow(s.boards).map((b) => `<dt>${b.k}</dt><dd>${b.v} <small class="muted">${esc(b.sub)}</small></dd>`).join("")}</dl>
       <p style="margin-top:16px"><button class="btn" id="checknow">Check now</button> <span class="muted" style="font-size:13px">Reads their last 30 days of trades, usually under a minute.</span></p></section>
-    <section class="pf-card" id="record"><h2>Track record <small class="muted">Polymarket's figures</small></h2>${skelRows(3)}</section>`;
+    <section class="pf-card" id="record"><h2>Track record <small class="muted">Polymarket's figures</small></h2>${skelRows(3)}</section>
+    <section class="pf-card" id="reccats"></section>`;
   loadRecord(wallet);
   $("#checknow").onclick = async (e) => {
     e.target.disabled = true; e.target.textContent = "Checking…";
     let full;
     try { full = await api(`/api/worth/${wallet}`); } catch (err) { e.target.disabled = false; e.target.textContent = "Check now"; return toast(esc(err.message)); }
     if (location.hash !== `#/worth/${wallet}`) return;
-    Object.assign(pf, { s: full, detail: null, account: null, tab: "positions", period: full.periods ? pf.period : "30d", from: "explore" });
+    Object.assign(pf, { s: full, detail: null, account: null, completed: null, cats: null, tab: "positions", period: full.periods ? pf.period : "30d", from: "explore" });
     renderProfile(); loadProfileExtras(wallet, full);
   };
   bindActions(app);
@@ -2261,13 +2274,16 @@ async function worthTraderPage(wallet) {
   try { s = await api(`/api/worth/${wallet}${peek ? "?score=0" : ""}`); } catch (e) { app.innerHTML = back + errorState(e.message); bindActions(app); return; }
   if (location.hash !== `#/worth/${wallet}`) return;
   if (s.unchecked) return renderUnchecked(s, wallet);
-  Object.assign(pf, { s, detail: null, account: null, tab: "positions", period: s.periods ? pf.period : "30d" });
+  Object.assign(pf, { s, detail: null, account: null, completed: null, cats: null, tab: "positions", period: s.periods ? pf.period : "30d" });
   renderProfile();
   loadProfileExtras(wallet, s);
 }
 async function loadProfileExtras(wallet, s) {
-  api(`/api/account/${wallet}`).then((a) => { pf.account = a; }, () => { pf.account = { error: true }; })
-    .then(() => { if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile(); }); // their account now
+  const redraw = () => { if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile(); };
+  api(`/api/account/${wallet}`).then((a) => { pf.account = a; }, () => { pf.account = { error: true }; }).then(redraw); // their account now
+  // every position they've closed or that settled (Made money on), and realized profit by category: own reads, kept
+  api(`/api/completed/${wallet}`).then((c) => { pf.completed = c; }, (e) => { pf.completed = readFailed(e); }).then(redraw);
+  api(`/api/categories/${wallet}`).then((c) => { pf.cats = c; }, (e) => { pf.cats = readFailed(e); }).then(redraw);
   try { pf.detail = await api(`/api/trader/polymarket/${wallet}`); } catch (e) { pf.detail = { error: e.message }; }
   if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile();
 }
@@ -2310,14 +2326,30 @@ const WARN_ICON = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" st
 // A row is { k: its label, v: the value (html; null shows "—", never 0), sub: what it's based on and its period,
 // weeks: their weekly results for the bars }. `summary` sits at the top (on a phone, before the chart), `groups`
 // below it, `fold` in "How we measure this". Only the hero (realized P&L) and the chart follow 7D/30D/90D.
-// Left out until they count settled positions never redeemed (Polymarket's closed positions leave those losers
-// out): the last closed positions' won/lost/sold record and the share held until the market settles. The worst
-// drop from a high too, here and on the chart: it's one reading a day of the hourly curve, at the hour the score was made, so a
-// game in play at that hour sets it. It comes back once the SDK works it out from the whole hourly curve. Also
+// "Made money on" is every position they've closed or that settled, losers never redeemed included (uselayer 0.14's
+// completed_positions, /api/completed), given only when those add up to Polymarket's realized profit; parlays are
+// never in it and it says so. The worst drop from a high is the score's (uselayer 0.14's worst_drop, from every
+// hourly point, so the hour the score was made doesn't set it); a score kept before 0.14 has none and shows "—".
+// Left out: the last closed positions' won/lost/sold record and the share held until the market settles. Also
 // hidden until fixed (the owner's call): the win record of checked trades ("won" is the outcome they bought paying
 // out, even when they sold first at a loss, and its count differs by where the score came from until #124; the
 // Traders list keeps it) and the resting-orders share (its comparison feed stops at 500 rows, so it can read high).
 const POSITIONS_READ = 50; // the trader read's open positions (/api/trader): the SDK's 50 biggest by value now
+// "Made money on X of N positions" from /api/completed: only when every position they've had was read and they add
+// up to Polymarket's realized profit; otherwise the SDK's own line says why there's no record. Positions, never
+// "predictions" (Polymarket's word for markets traded).
+// A read that failed: busy (the site's limits on reads, a 429) says so plainly, never as an error or $0.
+const BUSY_TEXT = "Busy, try again in a minute.";
+const readFailed = (e) => ({ error: true, busy: e?.status === 429 });
+function madeMoneyRow(c) {
+  const ok = c && !c.error && c.reconciles && c.count;
+  return { k: "Made money on", v: c == null ? "…" : ok ? `${c.made_money.toLocaleString()} of ${plural(c.count, "position")}` : null,
+    sub: c == null ? "reading every position they've had" : c.busy ? BUSY_TEXT : c.error ? "their positions couldn't be read just now"
+      : ok ? `every position they've closed or that settled${c.parlays_excluded ? " · parlays not included" : ""}` : c.summary };
+}
+// The worst fall in trading profit from a high (the score's worst_drop, from every hourly point), as a loss; "—" for a
+// score kept before it had one.
+const worstDrop = (s, n) => { const w = s.worst_drop?.[n]; return w && w.usd != null ? (w.usd > 0 ? pl(-w.usd, usd(-w.usd, true)) : usd(0)) : null; };
 function profileNumbers(s, d, acct, n) {
   const P = PF_PERIOD[n];
   const money = (x) => x == null ? null : pl(x, usd(x, true));
@@ -2362,7 +2394,7 @@ function profileNumbers(s, d, acct, n) {
       { k: "Wallet", v: wallet != null ? usd(wallet) : reading ? "…" : null,
         sub: reading ? "reading their wallet" : wallet != null ? `cash ${usd(cash)} + open positions ${usd(inPositions)}, ${when}`
           : cash != null ? `cash ${usd(cash)}; open positions couldn't be read` : inPositions != null ? `open positions ${usd(inPositions)}; cash couldn't be read` : "couldn't be read just now" },
-      { k: "Made money on", v: null, sub: "every closed or settled position they've had · not available yet" },
+      madeMoneyRow(pf.completed),
     ],
     groups: [
       { title: "Record", rows: [
@@ -2371,6 +2403,7 @@ function profileNumbers(s, d, acct, n) {
         // in dollars: a week's trading profit (taken plus the change in what's still open), as Weeks up counts it
         { k: "Best week", v: had.length ? money(Math.max(...had)) : null, sub: weekSub },
         { k: "Worst week", v: had.length ? money(Math.min(...had)) : null, sub: weekSub },
+        { k: "Worst drop from a high", v: worstDrop(s, "90d"), sub: "last 90 days, hour by hour · open positions at their price then" },
         { k: "Markets", v: shares.length ? shares.map(([c, p]) => `${esc(c)} ${p}%`).join(" · ") : null,
           sub: events ? `of ${plural(events, "event")} checked, ${readPeriod(s)}` : readPeriod(s) },
         // the SDK's strong categories: the price test passes on their trades in that kind of market alone. Said only
@@ -2396,6 +2429,19 @@ function profileNumbers(s, d, acct, n) {
 const weekBars = (weeks) => `<span class="lb-weeks" aria-hidden="true">${weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span>`;
 const numberRow = (r) => `<div><dt>${esc(r.k)}${r.sub ? `<small>${esc(r.sub)}</small>` : ""}</dt><dd>${r.weeks ? weekBars(r.weeks) : ""}${r.v ?? `<span class="lb-none">—</span>`}</dd></div>`;
 
+// "Realized profit by category, all time" (/api/categories: Polymarket's leaderboard for this trader, by category):
+// a row per category they traded, "Uncategorised" for markets in none, all except Sports, and all together.
+const CATEGORY_NOTE = "Polymarket's figures, updated every few hours. Trades still open aren't counted.";
+function categoryCard(c) {
+  const head = `<h2>Realized profit by category, all time</h2>`;
+  if (c == null) return `<section class="pf-card">${head}<div class="skel" style="width:60%;height:14px;margin:16px 0"></div></section>`;
+  if (c.error) return `<section class="pf-card">${head}<p class="pf-empty">${c.busy ? BUSY_TEXT : "Their profit by category couldn't be read just now."}</p></section>`;
+  const money = (x) => x == null ? null : pl(x, usd(x, true));
+  const rows = [...(c.rows || []).map((r) => ({ k: r.category, v: money(r.usd) })),
+    ...(c.overall != null ? [{ k: "All except Sports", v: money(c.except_sports) }, { k: "All categories", v: money(c.overall) }] : [])];
+  return `<section class="pf-card">${head}${rows.length ? `<dl class="pf-rows">${rows.map(numberRow).join("")}</dl>` : `<p class="pf-empty">No realized profit or loss in any category yet.</p>`}
+    <p class="pf-statnote">Parlays included. ${esc(CATEGORY_NOTE)}</p></section>`;
+}
 function renderProfile() {
   const s = pf.s, d = pf.detail, n = pf.period, app = $("#app");
   if (!s || !app) return;
@@ -2456,7 +2502,7 @@ function renderProfile() {
         <dl class="pf-rows">${nums.summary.map(numberRow).join("")}</dl>
       </section>
       <section class="pf-card pf-chart"><div class="pf-card-head"><h2>Trading profit, ${PF_PERIOD[n]}</h2></div>
-        ${chart ? `${chart.svg}<div class="pf-legend"><span><i></i>Below their previous high</span><span>Profit taken plus positions still open</span></div>`
+        ${chart ? `${chart.svg}<div class="pf-legend"><span><i></i>Below their previous high</span>${worstDrop(s, n) ? `<span>Worst drop: ${worstDrop(s, n)}</span>` : ""}<span>Profit taken plus positions still open</span></div>`
           : `<p class="pf-empty">Their profit history isn't available yet.</p>`}</section>
       <section class="pf-card pf-det" aria-label="More of their numbers">
         ${nums.groups.map((g) => `<h3>${esc(g.title)}</h3><dl class="pf-rows">${g.rows.map(numberRow).join("")}</dl>`).join("")}
@@ -2468,6 +2514,7 @@ function renderProfile() {
           ${risks.length ? `<div class="pf-warn">${WARN_ICON}<p>${risks.map(esc).join(" ")}</p></div>` : ""}
           ${lastAt ? `<dl class="pf-facts"><dt>Last bought</dt><dd>${ago(lastAt)} · <button type="button" class="link" id="pfactivity">See activity</button></dd></dl>` : ""}
         </section>
+        ${categoryCard(pf.cats)}
         ${s.directory && s.directory.group === "limited" && s.directory.evidence === "quick" ? `<section class="pf-card"><h2>What we know so far</h2>
           <p class="pf-note">Limited evidence: fewer than 8 markets traded in the last 30 days, which is too few to judge skill either way.</p>
           <dl class="pf-facts">${evidenceFacts(s.directory).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl></section>` : ""}
@@ -2538,7 +2585,8 @@ async function traderPage(venue, id) {
   const name = displayName(t.name, t.id);
   const tiles = venue === "kalshi"
     ? [["Contracts traded", t.volume != null ? usd(t.volume).slice(1) : "—"], ["Markets traded", s.markets_traded?.toLocaleString() ?? "—"]]
-    : [["Contracts traded", s.volume_contracts != null ? usd(s.volume_contracts).slice(1) : "—"], ["Biggest win", usd(s.biggest_win)]];
+    : [["Bought and sold", s.volume_usd != null ? usd(s.volume_usd) : "—"], ["Trades", s.trades?.toLocaleString() ?? "—"],
+      ["Markets traded", s.markets_traded?.toLocaleString() ?? "—"], ["Biggest win", s.biggest_win != null ? usd(s.biggest_win) : "—"]];
   app.innerHTML = `${back}
     <div class="th">${avatar(`${venue}:${t.id}`, 64)}<div style="min-width:0"><h1 class="name">${esc(name)}</h1>
       <div class="badges"><span class="tier t3">${VENUE[venue]}</span>${t.x_handle ? `<span class="badge">@${esc(t.x_handle)}</span>` : ""}</div>
