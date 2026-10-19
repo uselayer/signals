@@ -206,6 +206,55 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     assert f["Open P&L"]["v"] is None and failed["hero"]["sub"] == "taken in the last 30 days · after fees"
 
 
+def test_a_figure_whose_read_failed_says_couldnt_be_read_and_too_few_stays_a_dash() -> None:
+    """uselayer 0.14's ``unread``: held-to-settlement is None both with too few closed positions and when its read
+    failed. Only the failed read is said; too few says nothing, and a score kept before 0.14 (no ``unread``) is as
+    before."""
+    s = SCORE | {"typical_usd": 855.0}
+    failed = engine.why_lines(s | {"held_share": None, "unread": ["held_share", "cash_usd"]})["how"]
+    assert failed == "Usually $855, how often they hold until the market settles couldn't be read."
+    too_few = engine.why_lines(s | {"held_share": None, "unread": ["cash_usd"]})["how"]
+    old = engine.why_lines(s | {"held_share": None})["how"]
+    assert too_few == old == "Usually $855."
+    read = engine.why_lines(s | {"held_share": 0.5, "unread": ["held_share"]})["how"]  # a figure wins: never both
+    assert read == "Usually $855, holds 50% of closed positions until the market settles."
+    assert "bet" not in failed.lower()
+
+
+ACCOUNT = ("profileAccount", "UNREAD_VALUE")
+
+
+def test_the_wallet_says_couldnt_be_read_when_its_read_failed_and_old_scores_are_as_before(run_js: Any) -> None:
+    """The Wallet row (cash plus open positions): when a part's read failed, the read now's own ``missing`` or, while
+    the check's figures stand in, the score's ``unread``, it says "couldn't be read" rather than a bare "—". A part
+    the check didn't fail is still being read now. A score kept before uselayer 0.14 (no ``unread``) is as before."""
+    s = {"periods": {"30d": {"realized": 1.0}}}
+
+    def wallet(score: dict[str, Any], account: Any) -> dict[str, Any]:
+        expr = (f"(() => {{ pf.account = {json.dumps(account)}; const s = {json.dumps(s | score)}; "
+                "return profileNumbers(s, null, profileAccount(s, pf.account), '30d').summary[1]; })()")  # as renderProfile
+        return run_js((*NUMBERS, *ACCOUNT), expr)  # type: ignore[no-any-return]
+
+    unread = "<span class=\"lb-none\">couldn't be read</span>"
+    # the read now failed and the check couldn't read either part: said, not "—"
+    both = wallet({"cash_usd": None, "positions_usd": None, "unread": ["positions_usd", "cash_usd"]}, {"error": True})
+    assert (both["v"], both["sub"]) == (unread, "their cash and open positions")
+    # still reading now, and the check couldn't read their cash: their positions are shown, the total isn't
+    cash = wallet({"cash_usd": None, "positions_usd": 300.0, "unread": ["cash_usd"]}, None)
+    assert (cash["v"], cash["sub"]) == (unread, "open positions $300; cash couldn't be read")
+    # the check didn't fail it (no Polygon reader, say): no "couldn't be read", the read now is still out
+    pending = wallet({"cash_usd": None, "positions_usd": 300.0, "unread": []}, None)
+    assert (pending["v"], pending["sub"]) == (None, "open positions $300; cash still being read")
+    # a score kept before 0.14: exactly as before
+    old = wallet({"cash_usd": None, "positions_usd": 300.0}, None)
+    assert (old["v"], old["sub"]) == (None, "open positions $300; cash couldn't be read")
+    # the read now came back without their cash: its `missing` says it couldn't be read
+    now = wallet({}, {"cash_usd": None, "positions_usd": 300.0, "missing": ["cash"], "read_at": None})
+    assert (now["v"], now["sub"]) == (unread, "open positions $300; cash couldn't be read")
+    whole = wallet({}, {"cash_usd": 5.0, "positions_usd": 300.0, "missing": [], "read_at": None})
+    assert whole["v"] == "$305" and whole["sub"].startswith("cash $5.00 + open positions $300")
+
+
 # ---- the price check ----
 
 
