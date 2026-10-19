@@ -45,9 +45,9 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
 - **Feed** (signed in; signed out it's a sign-in page, while Traders and trader pages need no account): one
   switch at the top, **Following** (the default) or **Recommended**.
   - **Following**: every trade over the last 24 hours from the traders you follow, whoever they are.
-  - **Recommended**: trades of $1,000 or more over the last 24 hours from the traders in Traders' two sections
-    (Sharps, Rising). Quieter on purpose, and never the default. The page says to use their trades to
-    learn what they're doing, not as a signal to buy: we haven't found that buying after them makes money.
+  - **Recommended**: trades of $1,000 or more over the last 24 hours from the traders in Traders' Sharps.
+    Quieter on purpose, and never the default. The page says to use their trades to learn what they're doing, not
+    as a signal to buy: we haven't found that buying after them makes money.
   - How fresh: the engine reads each followed trader every 30 seconds and each Recommended trader every minute
     (less often as the list grows: about every 2½ minutes at 200 traders, every 12 at 1,000), and Polymarket's
     shared feed of $1,000+ trades moves anyone who just traded to the front. Per trader that's one read of their
@@ -74,10 +74,10 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
     opens their page. With Kalshi on, it shows every big trade on both venues instead ("Anonymous trader" when
     Kalshi doesn't name them), not filtered by your markets: the SDK has no categories for Kalshi markets, and
     almost all big trades are Kalshi's.
-- **Traders**: a leaderboard of the Polymarket traders we recommend, in two sections by tier: **Sharps** (Proven
-  sharp, Quiet sharp) and **Rising**. The tier is skill and track record only. The page shows no copy estimate
-  (what buying a few minutes after them would have made): it isn't reliable yet, so it's left out everywhere
-  (Traders, trader pages, the Feed, alerts). The engine still works it out (`copy_status`, `copy_ok`) and its API
+- **Traders**: a leaderboard of the Polymarket traders we recommend, in one section, **Sharps** (Sharp and Quiet
+  sharp; the SDK's Rising traders are listed and named as Sharps, as their next-month results were no different).
+  The tier is skill and track record only. The page shows no copy estimate (what buying a few minutes after them
+  would have made): it isn't reliable yet, so it's left out everywhere (Traders, trader pages, the Feed, alerts). The engine still works it out (`copy_status`, `copy_ok`) and its API
   keeps the fields.
   - One bar: on the left the market chips (your onboarding choice); on the right
     **Search name or wallet**, the period (7D / 30D / 90D, once the SDK provides it) and the sort: Recommended
