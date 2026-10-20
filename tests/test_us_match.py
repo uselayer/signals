@@ -180,7 +180,7 @@ def api(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     monkeypatch.setattr(engine, "_worth_data", {"format": engine.WORTH_FORMAT, "scores": []})
     monkeypatch.setattr(engine, "_worth_one", {})
     monkeypatch.setattr(engine, "_categories", lambda ids: {})
-    monkeypatch.setattr(engine, "position_links", lambda wallet: {})
+    monkeypatch.setattr(engine, "held_rows", lambda wallet: [])
     monkeypatch.setattr(us_match, "twins", built())
     monkeypatch.setattr(us_match.twins, "fresh", lambda now=None: True)
     return TestClient(engine.app)

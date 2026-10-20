@@ -165,17 +165,19 @@ behind Vercel (see README, "Hosting").
     arbitrage traders (the SDK's "No view"), and the checks are never loosened to
     fill the list: an empty result says so and names the interests that had no one. "See all checked traders" may
     show the rest, each marked.
-  - A trader's record from uselayer 0.14, on their profile (scored or not): "Made money on X of N positions" is every
-    position they've closed or that settled, losers never redeemed included (`/api/completed`, the SDK's
-    `completed_positions`), shown only when it adds up to Polymarket's realized profit (`reconciles`), with
-    "parlays not included" when they have parlays; otherwise the SDK's own line (`summary`) says why there's none.
-    Positions, never "predictions". The worst drop from a high is the score's `worst_drop` (every hourly point);
-    a score kept before 0.14 shows "—". "Realized profit by category, all time" (`/api/categories`, the SDK's
-    `realized_by_category`, parlays included) has a row per category, "Uncategorised", "All except Sports" and all
-    together, with the caveat "Polymarket's figures, updated every few hours. Trades still open aren't counted."
-    Both are read on the checks' budget (`checker`: 3–13 and 12 reads), kept per wallet (30 min, 1 h), and under
-    "Check now"'s limits (`limited_read`: CHECKS_AT_ONCE turns, CHECKS_PER_CLIENT wallets per visitor); past one
-    the card says "Busy, try again in a minute.", never an error or $0.
+  - A profile figure we can't give has no row, never "—" (the owner, 19 Oct: "better to remove than just have missing
+    data"); a row still loading ("…") is shown. Open P&L adds up Polymarket's figure for each open position (priced
+    between 0 and 1: one at 2¢ or 98¢ hasn't settled and counts), read up to 500 at once; when Polymarket's list may
+    hold more (`positions_cut`), there's no row. "Made money on X of N positions" (`/api/completed`) is on neither
+    profile: a hit rate, not skill, slow for busy traders and given for only 18 of 50 recommended traders (dropped
+    19 Oct). The worst drop from a high is the score's `worst_drop` (every hourly point); a score kept before 0.14
+    has none and no row. "Realized profit by category, all time" (`/api/categories`, the SDK's
+    `realized_by_category`, parlays included) has a row per category and "Uncategorised"; "All categories" only
+    with more than one row and "All except Sports" only with Sports and two or more others, so no row repeats
+    another; with the caveat "Polymarket's figures, updated every few hours. Trades still open aren't counted."
+    It's read on the checks' budget (`checker`: 12 reads), kept per wallet (1 h), and under "Check now"'s limits
+    (`limited_read`: CHECKS_AT_ONCE turns, CHECKS_PER_CLIENT wallets per visitor); past one the card says "Busy,
+    try again in a minute.", never an error or $0.
   - Traders' category picker ("Any category", Polymarket's categories, "Uncategorised", "All except Sports"): picking
     one sorts by realized profit in it (all time) and offers "Made money in X". Only the traders already listed are
     sorted or filtered: no new tier or label, no recommendation loosened, no raw-profit leaderboard beyond this sort.

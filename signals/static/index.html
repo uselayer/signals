@@ -2225,18 +2225,16 @@ async function loadRecord(wallet) {
   try { rec = await api(`/api/record/${wallet}`); } catch (e) { box.innerHTML = `<h2>Track record</h2><p class="muted">Polymarket's figures couldn't be read just now: ${esc(e.message)}</p>`; return; }
   if (location.hash !== `#/worth/${wallet}` || !$("#record")) return;
   const pos = recordPositions(rec);
-  let made = null, cats = null; // their whole record of positions and profit by category, read beside it
+  let cats = null; // their profit by category, read beside it
   const draw = () => {
     if (location.hash !== `#/worth/${wallet}` || !$("#record")) return;
-    const m = madeMoneyRow(made);
     $("#record").innerHTML = `<h2>Track record <small class="muted">Polymarket's figures</small></h2><p class="pf-note">${esc(RECORD_NOTE)}</p>
-      <dl class="pf-facts">${recordFacts(rec).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}<dt>${m.k}</dt><dd>${m.v ?? "—"} <small class="muted">${esc(m.sub)}</small></dd></dl>
+      <dl class="pf-facts">${recordFacts(rec).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
       ${pos.length ? `<h3 class="pf-sub">Biggest open positions</h3><dl class="pf-facts pf-pos">${pos.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>` : ""}`;
     const box = $("#reccats");
     if (box) box.outerHTML = categoryCard(cats).replace('<section class="pf-card">', '<section class="pf-card" id="reccats">');
   };
   draw();
-  api(`/api/completed/${wallet}`).then((c) => { made = c; }, (e) => { made = readFailed(e); }).then(draw);
   api(`/api/categories/${wallet}`).then((c) => { cats = c; }, (e) => { cats = readFailed(e); }).then(draw);
 }
 function renderUnchecked(s, wallet) {
@@ -2261,7 +2259,7 @@ function renderUnchecked(s, wallet) {
     let full;
     try { full = await api(`/api/worth/${wallet}`); } catch (err) { e.target.disabled = false; e.target.textContent = "Check now"; return toast(esc(err.message)); }
     if (location.hash !== `#/worth/${wallet}`) return;
-    Object.assign(pf, { s: full, detail: null, account: null, completed: null, cats: null, tab: "positions", period: full.periods ? pf.period : "30d", from: "explore" });
+    Object.assign(pf, { s: full, detail: null, account: null, cats: null, tab: "positions", period: full.periods ? pf.period : "30d", from: "explore" });
     renderProfile(); loadProfileExtras(wallet, full);
   };
   bindActions(app);
@@ -2312,15 +2310,14 @@ async function worthTraderPage(wallet) {
   try { s = await api(`/api/worth/${wallet}${peek ? "?score=0" : ""}`); } catch (e) { app.innerHTML = back + errorState(e.message); bindActions(app); return; }
   if (location.hash !== `#/worth/${wallet}`) return;
   if (s.unchecked) return renderUnchecked(s, wallet);
-  Object.assign(pf, { s, detail: null, account: null, completed: null, cats: null, tab: "positions", period: s.periods ? pf.period : "30d" });
+  Object.assign(pf, { s, detail: null, account: null, cats: null, tab: "positions", period: s.periods ? pf.period : "30d" });
   renderProfile();
   loadProfileExtras(wallet, s);
 }
 async function loadProfileExtras(wallet, s) {
   const redraw = () => { if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile(); };
   api(`/api/account/${wallet}`).then((a) => { pf.account = a; }, () => { pf.account = { error: true }; }).then(redraw); // their account now
-  // every position they've closed or that settled (Made money on), and realized profit by category: own reads, kept
-  api(`/api/completed/${wallet}`).then((c) => { pf.completed = c; }, (e) => { pf.completed = readFailed(e); }).then(redraw);
+  // realized profit by category: its own read, kept
   api(`/api/categories/${wallet}`).then((c) => { pf.cats = c; }, (e) => { pf.cats = readFailed(e); }).then(redraw);
   try { pf.detail = await api(`/api/trader/polymarket/${wallet}`); } catch (e) { pf.detail = { error: e.message }; }
   if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile();
@@ -2361,21 +2358,18 @@ const WARN_ICON = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" st
 
 // "Their numbers": a trader's figures, label then value, for the profile's two columns. The definitions are the
 // trader profile audit's ("Trader profile layout and definitions"); the layout draws whatever comes back.
-// A row is { k: its label, v: the value (html; null shows "—", never 0), sub: what it's based on and its period,
+// A row is { k: its label, v: the value (html; null: no row, never 0), sub: what it's based on and its period,
 // weeks: their weekly results for the bars }. `summary` sits at the top (on a phone, before the chart), `groups`
 // below it, `fold` in "How we measure this". Only the hero (realized P&L) and the chart follow 7D/30D/90D.
-// "Made money on" is every position they've closed or that settled, losers never redeemed included (uselayer 0.14's
-// completed_positions, /api/completed), given only when those add up to Polymarket's realized profit; parlays are
-// never in it and it says so. The worst drop from a high is the score's (uselayer 0.14's worst_drop, from every
-// hourly point, so the hour the score was made doesn't set it); a score kept before 0.14 has none and shows "—".
-// Left out: the last closed positions' won/lost/sold record and the share held until the market settles. Also
+// The worst drop from a high is the score's (uselayer 0.14's worst_drop, from every hourly point, so the hour the
+// score was made doesn't set it); a score kept before 0.14 has none and no row.
+// Left out: the last closed positions' won/lost/sold record, the share held until the market settles, and "Made money
+// on X of N positions" (/api/completed; the owner, 19 Oct: a hit rate, not skill, slow for busy traders and given for
+// only 18 of 50 recommended traders, so dropped from both profiles). Also
 // hidden until fixed (the owner's call): the win record of checked trades ("won" is the outcome they bought paying
 // out, even when they sold first at a loss, and its count differs by where the score came from until #124; the
 // Traders list keeps it) and the resting-orders share (its comparison feed stops at 500 rows, so it can read high).
-const POSITIONS_READ = 50; // the trader read's open positions (/api/trader): the SDK's 50 biggest by value now
-// "Made money on X of N positions" from /api/completed: only when every position they've had was read and they add
-// up to Polymarket's realized profit; otherwise the SDK's own line says why there's no record. Positions, never
-// "predictions" (Polymarket's word for markets traded).
+const POSITIONS_READ = 500; // the trader read's open positions (/api/trader): Polymarket's 500 biggest by value now
 // A read that failed: busy (the site's limits on reads, a 429) says so plainly, never as an error or $0.
 const BUSY_TEXT = "Busy, try again in a minute.";
 const readFailed = (e) => ({ error: true, busy: e?.status === 429 });
@@ -2387,12 +2381,6 @@ const UNREAD_VALUE = `<span class="lb-none">couldn't be read</span>`;
 const profileAccount = (s, account) => account && !account.error ? account
   : { cash_usd: s.cash_usd ?? null, positions_usd: s.positions_usd ?? null, read_at: s.account_at ?? null,
     missing: account?.error ? ["positions", "cash"] : Array.isArray(s.unread) ? ["positions", "cash"].filter((k) => s.unread.includes(`${k}_usd`)) : undefined };
-function madeMoneyRow(c) {
-  const ok = c && !c.error && c.reconciles && c.count;
-  return { k: "Made money on", v: c == null ? "…" : ok ? `${c.made_money.toLocaleString()} of ${plural(c.count, "position")}` : null,
-    sub: c == null ? "reading every position they've had" : c.busy ? BUSY_TEXT : c.error ? "their positions couldn't be read just now"
-      : ok ? `every position they've closed or that settled${c.parlays_excluded ? " · parlays not included" : ""}` : c.summary };
-}
 // The worst fall in trading profit from a high (the score's worst_drop, from every hourly point), as a loss; "—" for a
 // score kept before it had one.
 const worstDrop = (s, n) => { const w = s.worst_drop?.[n]; return w && w.usd != null ? (w.usd > 0 ? pl(-w.usd, usd(-w.usd, true)) : usd(0)) : null; };
@@ -2408,10 +2396,14 @@ function profileNumbers(s, d, acct, n) {
   // figure for each (as its profile page shows them), added up from the positions this page reads. Never its
   // summary figure, which can be hours or months old, and never the score's 30-day change in open value. The read
   // is their POSITIONS_READ biggest by value now: when it's full and even the smallest is still worth something,
-  // an open one may be missing, so it says so rather than give part of a total. Unknown is "—", never $0.
+  // an open one may be missing (the server says so, positions_cut, from Polymarket's own list before settled ones
+  // are taken out), so there's no total rather than part of one. Unknown has no row, never $0.
   const held = d && !d.error && Array.isArray(d.positions) ? d.positions : null;
-  const open = held ? held.filter((p) => !SETTLED.has(p.status)) : null;
-  const cut = held != null && held.length >= POSITIONS_READ && Math.min(...held.map((p) => p.value ?? 0)) > 0;
+  // Still open is priced between 0 and 1: one at 2¢ or 98¢ hasn't settled and its loss or gain counts (its "lost"/"won"
+  // status is about buying in, not the market; leaving those out read flawfence's +$113K as +$137K, 19 Oct).
+  const isOpen = (p) => p.current_price != null ? p.current_price > 0 && p.current_price < 1 : !SETTLED.has(p.status);
+  const open = held ? held.filter(isOpen) : null;
+  const cut = held != null && (d.positions_cut ?? (held.length >= POSITIONS_READ && Math.min(...held.map((p) => p.value ?? 0)) > 0));
   const openPnl = open && !cut && open.every((p) => p.pnl != null) ? open.reduce((a, p) => a + p.pnl, 0) : null;
   // Their wallet: cash (read on-chain) plus open positions, read now (else as the check read them), with when.
   // A total only when both parts were read: one part alone is said to be one part, never shown as the wallet.
@@ -2449,7 +2441,6 @@ function profileNumbers(s, d, acct, n) {
         sub: reading ? "reading their wallet" : wallet != null ? `cash ${usd(cash)} + open positions ${usd(inPositions)}, ${when}`
           : cash != null ? `cash ${usd(cash)}; open positions ${partGone("positions")}` : inPositions != null ? `open positions ${usd(inPositions)}; cash ${partGone("cash")}`
           : unread ? "their cash and open positions" : "couldn't be read just now" },
-      madeMoneyRow(pf.completed),
     ],
     groups: [
       { title: "Record", rows: [
@@ -2484,19 +2475,28 @@ function profileNumbers(s, d, acct, n) {
   };
 }
 const weekBars = (weeks) => `<span class="lb-weeks" aria-hidden="true">${weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span>`;
+// A row with no value (null) isn't drawn: a figure we can't give is left out, never shown as "—". A group whose rows
+// are all left out loses its heading too.
+const numberRows = (rows) => rows.filter((r) => r.v != null).map(numberRow).join("");
 const numberRow = (r) => `<div><dt>${esc(r.k)}${r.sub ? `<small>${esc(r.sub)}</small>` : ""}</dt><dd>${r.weeks ? weekBars(r.weeks) : ""}${r.v ?? `<span class="lb-none">—</span>`}</dd></div>`;
 
 // "Realized profit by category, all time" (/api/categories: Polymarket's leaderboard for this trader, by category):
-// a row per category they traded, "Uncategorised" for markets in none, all except Sports, and all together.
+// a row per category they traded, "Uncategorised" for markets in none, then all except Sports (only when they traded
+// Sports and two or more others) and all together (only with more than one row): never a row that repeats another or a $0
+// for categories they never traded.
 const CATEGORY_NOTE = "Polymarket's figures, updated every few hours. Trades still open aren't counted.";
 function categoryCard(c) {
   const head = `<h2>Realized profit by category, all time</h2>`;
   if (c == null) return `<section class="pf-card">${head}<div class="skel" style="width:60%;height:14px;margin:16px 0"></div></section>`;
   if (c.error) return `<section class="pf-card">${head}<p class="pf-empty">${c.busy ? BUSY_TEXT : "Their profit by category couldn't be read just now."}</p></section>`;
   const money = (x) => x == null ? null : pl(x, usd(x, true));
-  const rows = [...(c.rows || []).map((r) => ({ k: r.category, v: money(r.usd) })),
-    ...(c.overall != null ? [{ k: "All except Sports", v: money(c.except_sports) }, { k: "All categories", v: money(c.overall) }] : [])];
-  return `<section class="pf-card">${head}${rows.length ? `<dl class="pf-rows">${rows.map(numberRow).join("")}</dl>` : `<p class="pf-empty">No realized profit or loss in any category yet.</p>`}
+  const sports = (c.rows || []).some((r) => r.category === "Sports"), others = (c.rows || []).filter((r) => r.category !== "Sports").length;
+  // "Uncategorised" is the leaderboard's total less the categories': under $1 it's rounding (flawfence: +$0.01), no row
+  const rows = [...(c.rows || []).filter((r) => r.category !== "Uncategorised" || Math.abs(r.usd) >= 1).map((r) => ({ k: r.category, v: money(r.usd) })),
+    ...(c.overall != null && (c.rows || []).length > 1 ? [
+      ...(sports && others > 1 ? [{ k: "All except Sports", v: money(c.except_sports) }] : []),
+      { k: "All categories", v: money(c.overall) }] : [])];
+  return `<section class="pf-card">${head}${rows.length ? `<dl class="pf-rows">${numberRows(rows)}</dl>` : `<p class="pf-empty">No realized profit or loss in any category yet.</p>`}
     <p class="pf-statnote">Parlays included. ${esc(CATEGORY_NOTE)}</p></section>`;
 }
 function renderProfile() {
@@ -2555,13 +2555,13 @@ function renderProfile() {
       <section class="pf-card pf-sum" aria-label="Their numbers">
         <div class="pf-card-head"><h2>Their numbers</h2>${period}</div>
         <div class="pf-hero"><span>${esc(nums.hero.k)}</span><b>${nums.hero.v ?? "—"}</b><small>${esc(nums.hero.sub)}</small></div>
-        <dl class="pf-rows">${nums.summary.map(numberRow).join("")}</dl>
+        <dl class="pf-rows">${numberRows(nums.summary)}</dl>
       </section>
       <section class="pf-card pf-chart"><div class="pf-card-head"><h2>Trading profit, ${PF_PERIOD[n]}</h2></div>
         ${chart ? `${chart.svg}<div class="pf-legend"><span><i></i>Below their previous high</span>${worstDrop(s, n) ? `<span>Worst drop: ${worstDrop(s, n)}</span>` : ""}<span>Profit taken plus positions still open</span></div>`
           : `<p class="pf-empty">Their profit history isn't available yet.</p>`}</section>
       <section class="pf-card pf-det" aria-label="More of their numbers">
-        ${nums.groups.map((g) => `<h3>${esc(g.title)}</h3><dl class="pf-rows">${g.rows.map(numberRow).join("")}</dl>`).join("")}
+        ${nums.groups.map((g) => numberRows(g.rows)).map((h, i) => h ? `<h3>${esc(nums.groups[i].title)}</h3><dl class="pf-rows">${h}</dl>` : "").join("")}
         ${s.periods ? `<p class="pf-statnote">Only realized P&L and the chart follow ${Object.keys(PF_PERIOD).map((p) => p.toUpperCase()).join("/")}. Every other figure names its own period.</p>` : ""}
       </section>
       <div class="pf-rest">
@@ -2576,7 +2576,7 @@ function renderProfile() {
           <dl class="pf-facts">${evidenceFacts(s.directory).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl></section>` : ""}
         <div class="pf-tabs" role="tablist">${[["positions", "Positions"], ["activity", "Activity"]].map(([k, l]) => `<button type="button" role="tab" data-pftab="${k}" aria-selected="${pf.tab === k}">${l}</button>`).join("")}</div>
         <div>${body}</div>
-        <details class="fold"><summary>How we measure this</summary><h3 class="pf-more">More figures</h3><dl class="pf-rows">${nums.fold.map(numberRow).join("")}</dl>${worthDetails(s)}</details>
+        <details class="fold"><summary>How we measure this</summary><h3 class="pf-more">More figures</h3><dl class="pf-rows">${numberRows(nums.fold)}</dl>${worthDetails(s)}</details>
       </div>
     </div>`;
   $$("[data-pfperiod]", app).forEach((b) => (b.onclick = () => { pf.period = b.dataset.pfperiod; renderProfile(); }));

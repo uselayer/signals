@@ -236,20 +236,7 @@ def test_the_records_open_profit_is_added_up_from_their_positions_never_the_summ
     assert client.get(f"/api/record/{W}").json()["open"]["pnl"] is None
 
 
-PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "BUSY_TEXT", "readFailed", "madeMoneyRow", "worstDrop", "CATEGORY_NOTE", "categoryCard")
-
-
-def test_made_money_on_is_given_only_when_the_record_adds_up_and_says_positions(run_js: Any) -> None:
-    rows = run_js(PROFILE, """[madeMoneyRow(null), madeMoneyRow({error: true}),
-      madeMoneyRow({reconciles: true, count: 400, made_money: 215, parlays_excluded: true, summary: "x"}),
-      madeMoneyRow({reconciles: true, count: 82, made_money: 43, parlays_excluded: false}),
-      madeMoneyRow({reconciles: false, count: 401, made_money: 215, summary: "Their positions don't add up to Polymarket's total right now; it updates every few hours, so their record can't be given."}),
-      madeMoneyRow({reconciles: true, count: 0, made_money: 0, parlays_excluded: true, summary: "They trade only parlays, which Polymarket doesn't list: no positions to count."})]""")
-    assert rows[0]["v"] == "…" and rows[1]["v"] is None and "couldn't be read" in rows[1]["sub"]
-    assert rows[2]["v"] == "215 of 400 positions" and rows[2]["sub"].endswith("· parlays not included")
-    assert rows[3]["v"] == "43 of 82 positions" and "parlays" not in rows[3]["sub"]
-    assert rows[4]["v"] is None and rows[4]["sub"].startswith("Their positions don't add up")  # the SDK's own line
-    assert rows[5]["v"] is None and "only parlays" in rows[5]["sub"]  # nothing to count: never "0 of 0"
+PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "numberRows", "BUSY_TEXT", "readFailed", "worstDrop", "CATEGORY_NOTE", "categoryCard")
 
 
 def test_the_worst_drop_is_the_scores_and_a_score_from_before_it_shows_a_dash(run_js: Any) -> None:
@@ -270,6 +257,28 @@ def test_the_category_card_has_all_except_sports_and_says_what_it_counts(run_js:
     assert note in html.replace("&#39;", "'")  # the owner's words, as they are
     loading, failed, empty = run_js(PROFILE, "[categoryCard(null), categoryCard({error: true}), categoryCard({rows: [], overall: null})]")
     assert "skel" in loading and "couldn't be read just now" in failed and "No realized profit or loss" in empty
+
+
+def test_the_category_card_never_repeats_a_row_or_shows_a_0_for_categories_never_traded(run_js: Any) -> None:
+    """OhWhenTheReds, 19 Oct: all $673,545 in Sports. One category is that row alone: no "All except Sports" $0.00 and
+    no "All categories" repeating it. Sports and one other: "All except Sports" would be that other row again."""
+    only, two, none = run_js(PROFILE, """[categoryCard({rows: [{category: "Sports", usd: 673545.48}], overall: 673545.48, except_sports: 0}),
+      categoryCard({rows: [{category: "Sports", usd: 500}, {category: "Politics", usd: 200}], overall: 700, except_sports: 200}),
+      categoryCard({rows: [{category: "Politics", usd: 900}, {category: "Crypto", usd: 100}], overall: 1000, except_sports: 1000})]""")
+    assert "<dt>Sports" in only and "All except Sports" not in only and "All categories" not in only and "$0" not in only
+    assert "All except Sports" not in two and "<dt>All categories" in two
+    assert "All except Sports" not in none and "<dt>All categories" in none  # never traded Sports: it would repeat All
+    cent = run_js(PROFILE, """categoryCard({rows: [{category: "Politics", usd: 496188.58}, {category: "Crypto", usd: 8747.88},
+      {category: "Uncategorised", usd: 0.01}], overall: 504936.47, except_sports: 504936.47})""")
+    assert "Uncategorised" not in cent and "<dt>All categories" in cent  # flawfence's +$0.01: rounding, no row
+
+
+def test_a_figure_that_cant_be_given_has_no_row(run_js: Any) -> None:
+    """A row with no value isn't drawn (the owner's call: left out, never "—"); one still loading ("…") is."""
+    html = run_js(PROFILE, """numberRows([{k: "Open P&L", v: null, sub: "they hold over 500 positions"}, {k: "Wallet", v: "$1M"},
+      {k: "Open P&L ", v: "…"}, {k: "Worst drop from a high", v: null}])""")
+    assert "<dt>Wallet" in html and "<dt>Open P&amp;L " in html and "Open P&L" not in html and "Worst drop" not in html
+    assert "—" not in html
 
 
 def test_the_page_says_positions_never_predictions() -> None:
@@ -329,8 +338,5 @@ def test_a_profiles_own_reads_are_under_check_nows_limits_and_busy_says_so(
 
 
 def test_busy_shows_as_busy_on_the_page_never_an_error_or_zero(run_js: Any) -> None:
-    row, card = run_js(PROFILE, "[madeMoneyRow(readFailed({status: 429})), categoryCard(readFailed({status: 429}))]")
-    assert row["v"] is None and row["sub"] == "Busy, try again in a minute."
+    card = run_js(PROFILE, "categoryCard(readFailed({status: 429}))")
     assert "Busy, try again in a minute." in card and "$0" not in card
-    failed = run_js(PROFILE, "madeMoneyRow(readFailed({status: 502}))")
-    assert failed["sub"] == "their positions couldn't be read just now"
