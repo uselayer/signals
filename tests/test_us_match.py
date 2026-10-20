@@ -19,10 +19,10 @@ GAME = "0xgame"  # a game on International: outcome 0 Cleveland, 1 Orlando
 BTTS = "0xbtts"  # a plain Yes/No market: both teams to score?
 
 
-def intl(market_id: str, kalshi: str, token: str, **kw: Any) -> dict[str, Any]:
+def intl(market_id: str, kalshi_id: str, token: str, **kw: Any) -> dict[str, Any]:
     """A Layer match of a Polymarket International market to Kalshi, as ``Client.matches(...).to_dict()`` gives it."""
     return {"tier": "auto_verified", "basis": "identical", "confidence": 0.97, "caveats": [], "caveat_notes": {},
-            "kalshi": {"venue": "kalshi", "market_id": kalshi},
+            "kalshi": {"venue": "kalshi", "market_id": kalshi_id, "url": f"https://kalshi.com/markets/kxnbagame/x/{kalshi_id.lower()}"},
             "polymarket": {"venue": "polymarket", "market_id": market_id, "yes_token_id": token,
                            "url": "https://polymarket.com/market/x"}} | kw  # fmt: skip
 
@@ -67,7 +67,7 @@ def test_a_trade_on_a_matched_outcome_has_its_twin_with_every_stated_difference_
                                   {"code": "carveout_differs", "text": "Polymarket US sends a tie to manual review."}]  # fmt: skip
     other = t.lookup(f"{GAME}:1", "tok-orl", "Orlando Magic", now=1.0)
     assert other is not None and other["outcome"] == "Magic" and other["differences"] == []
-    assert t.counts == {"international": 3, "us": 3, "twins": 3, "dropped": 0}
+    assert t.counts == {"international": 3, "us": 3, "twins": 3, "kalshi": 3, "dropped": 0}
 
 
 def test_the_outcome_must_be_the_one_layer_matched() -> None:
@@ -120,6 +120,44 @@ def test_a_twin_needs_both_matches_verified_the_same_bet_on_the_same_kalshi_mark
     t = built(a, b)
     assert t.lookup(f"{GAME}:0", "tok-cle", "Cleveland Cavaliers", now=1.0) == {"found": False}
     assert t.lookup(f"{GAME}:1", "tok-orl", "Orlando Magic", now=1.0)["found"] is True  # type: ignore[index]  # the rest stand
+
+
+def test_a_trade_has_its_kalshi_match_with_or_without_a_us_twin_and_the_no_is_the_kalshi_markets_no() -> None:
+    a, b = layer()
+    a.append(intl("0xmlb:0", "K-NYY", "tok-nyy", kalshi={"venue": "kalshi", "market_id": "K-NYY", "series": "KXMLBGAME",
+                                                           "url": "https://kalshi.com/markets/kxmlbgame/x/k-nyy"}))  # fmt: skip
+    t = built(a, b)
+    cle = t.kalshi(f"{GAME}:0", "tok-cle", "Cleveland Cavaliers", now=1.0)
+    assert cle is not None and (cle["url"], cle["market_id"], cle["side"]) == ("https://kalshi.com/markets/kxnbagame/x/k-cle", "K-CLE", "yes")
+    assert cle["differences"] == [{"code": "source_differs", "text": us_match.DIFFERENCES["source_differs"]}]  # its own match's only
+    nyy = t.kalshi("0xmlb:0", "tok-nyy", "Yankees", now=1.0)  # matched to Kalshi, no US twin
+    assert nyy is not None and nyy["found"] and t.lookup("0xmlb:0", "tok-nyy", "Yankees", now=1.0) == {"found": False}
+    no = t.kalshi(f"{BTTS}:1", "tok-btts-no", "No", now=1.0)
+    assert no is not None and (no["market_id"], no["side"]) == ("K-BTTS", "no")
+    assert t.kalshi(f"{GAME}:2", "tok-draw", "Draw", now=1.0) == {"found": False}
+    assert t.counts["kalshi"] == 4 and UsTwins().kalshi(f"{GAME}:0", "tok-cle", "x") is None  # never read: no claim
+
+
+@pytest.mark.parametrize("change", [
+    {"tier": "candidate"}, {"basis": "different"},
+    {"kalshi": {"venue": "kalshi", "market_id": "K-CLE", "url": "https://kalshi.example/markets/x"}},  # not kalshi.com
+    {"kalshi": {"venue": "kalshi", "market_id": "K-CLE"}},  # no link
+])  # fmt: skip
+def test_a_kalshi_match_needs_to_be_verified_the_same_bet_and_link_to_kalshi(change: dict[str, Any]) -> None:
+    a, b = layer()
+    a[0] |= change
+    t = built(a, b)
+    assert t.kalshi(f"{GAME}:0", "tok-cle", "Cleveland Cavaliers", now=1.0) == {"found": False}
+    assert t.kalshi(f"{GAME}:1", "tok-orl", "Orlando Magic", now=1.0)["found"] is True  # type: ignore[index]
+
+
+def test_a_kalshi_player_prop_says_kalshi_settles_a_sitting_player_at_a_fair_price() -> None:
+    a, b = layer()
+    a[1] = intl(f"{GAME}:1", "K-ORL", "tok-orl", kalshi={"venue": "kalshi", "market_id": "K-ORL", "series": "KXNHLGOAL",
+                                                          "url": "https://kalshi.com/markets/kxnhlgoal/x/k-orl"})  # fmt: skip
+    got = built(a, b).kalshi(f"{GAME}:1", "tok-orl", "Orlando Magic", now=1.0)
+    assert got is not None and got["differences"][0]["code"] == "player_sits_out"
+    assert "Kalshi settles it at a fair price" in got["differences"][0]["text"] and "Polymarket US" not in got["differences"][0]["text"]
 
 
 def test_nothing_is_claimed_before_the_index_is_built_or_once_it_goes_stale() -> None:
@@ -216,32 +254,53 @@ def test_a_feed_bet_carries_its_twin_and_none_while_layer_cant_be_read(api: Test
 # ---- alerts ----
 
 
-def test_an_alert_says_where_they_traded_and_links_the_us_twin_through_go(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_alert_says_where_they_traded_and_links_kalshi_and_the_us_twin_through_go(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(engine, "_who", lambda wallet: "Sam")
     at = datetime(2026, 10, 13, 14, 2, tzinfo=UTC).timestamp()
     text = engine._alert_text("0xabc", poly(f"{GAME}:0", "tok-cle", "Cleveland"), 0.4, 0.41, 40, at, at + 60, aid="a1")
-    assert engine.US_TWIN_LINE + engine.US_DIFFERS in text.splitlines()
+    assert engine.KALSHI_US_LINE + engine.US_DIFFERS in text.splitlines()
     us_go = f"/go/a1/market_us?to={urllib.parse.quote('https://polymarket.us/event/nba-cle-orl', safe='')}"
-    assert us_go in text and ">View on Polymarket US</a>" in text and ">Buy on Polymarket International</a>" in text
-    assert text.index(">View on Polymarket US</a>") < text.index(">Buy on Polymarket International</a>")  # US leads
+    k_go = f"/go/a1/market_kalshi?to={urllib.parse.quote('https://kalshi.com/markets/kxnbagame/x/k-cle', safe='')}"
+    assert us_go in text and k_go in text and ">Buy on Polymarket International</a>" in text
+    # Kalshi leads the venues, then Polymarket US, then International
+    assert text.index(">View on Kalshi</a>") < text.index(">View on Polymarket US</a>") < text.index(">Buy on Polymarket International</a>")
     plain = engine._alert_text("0xabc", poly(f"{GAME}:1", "tok-orl", "Orlando"), 0.4, 0.41, 40, at, at + 60)
-    assert engine.US_TWIN_LINE in plain.splitlines()  # no stated differences: none claimed
+    assert engine.KALSHI_US_LINE in plain.splitlines()  # no stated differences: none claimed
     none = engine._alert_text("0xabc", poly("0xelse:0", "tok-x", "Yes"), 0.4, 0.41, 40, at, at + 60)
-    assert engine.NO_US_TWIN_LINE in none.splitlines() and "Polymarket US</a>" not in none
+    assert engine.NO_MATCH_LINE in none.splitlines() and "Polymarket US</a>" not in none and "Kalshi</a>" not in none
     sold = engine._sell_text("0xabc", poly(f"{GAME}:0", "tok-cle", "Cleveland", "sell"), 0.4, 40, False, None, at, at + 60)
-    assert ">View on Polymarket US</a>" in sold and ">Open on Polymarket International</a>" in sold
-    assert sold.index(">View on Polymarket US</a>") < sold.index(">Open on Polymarket International</a>")
-    # the words never offer their price on Polymarket US, nor suggest Signals sees trades there
-    for line in (engine.US_TWIN_LINE, engine.NO_US_TWIN_LINE):
-        assert "may differ" in line or "No verified US match found" in line
-        assert "Not on Polymarket US" not in line and "US trader" not in line
+    assert sold.index(">View on Kalshi</a>") < sold.index(">View on Polymarket US</a>") < sold.index(">Open on Polymarket International</a>")
+    group = engine._group_text([("0xa", 0.4, at), ("0xb", 0.41, at)], poly(f"{GAME}:0", "tok-cle", "Cleveland"), 0.41, at + 60)
+    assert engine.KALSHI_US_LINE + engine.US_DIFFERS in group.splitlines() and ">View on Kalshi</a>" in group
+    # the words never offer their price on Kalshi or Polymarket US, nor suggest Signals sees trades there
+    for line in (engine.KALSHI_US_LINE, engine.KALSHI_LINE, engine.NO_MATCH_LINE):
+        assert "may differ" in line or "No verified Kalshi or US match found" in line
+        assert "Not on" not in line and "US trader" not in line
 
 
-def test_go_sends_a_tap_to_polymarket_us_and_nowhere_else(api: TestClient) -> None:
-    assert engine._allowed("https://polymarket.us/event/nba-cle-orl")
+def test_an_alert_on_a_market_matched_to_kalshi_alone_links_kalshi_and_says_no_us_match(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:  # fmt: skip
+    a, b = layer()
+    a.append(intl("0xmlb:0", "K-NYY", "tok-nyy", kalshi={"venue": "kalshi", "market_id": "K-NYY",
+                                                           "url": "https://kalshi.com/markets/kxmlbgame/x/k-nyy"}))  # fmt: skip
+    monkeypatch.setattr(us_match, "twins", built(a, b))
+    monkeypatch.setattr(us_match.twins, "fresh", lambda now=None: True)
+    monkeypatch.setattr(engine, "_who", lambda wallet: "Sam")
+    at = datetime(2026, 10, 13, 14, 2, tzinfo=UTC).timestamp()
+    text = engine._alert_text("0xabc", poly("0xmlb:0", "tok-nyy", "Yankees"), 0.4, 0.41, 40, at, at + 60)
+    assert engine.KALSHI_LINE in text.splitlines()
+    assert 'href="https://kalshi.com/markets/kxmlbgame/x/k-nyy">View on Kalshi</a>' in text and "Polymarket US</a>" not in text
+
+
+def test_go_sends_a_tap_to_polymarket_us_or_kalshi_and_nowhere_else(api: TestClient) -> None:
+    assert engine._allowed("https://polymarket.us/event/nba-cle-orl") and engine._allowed("https://kalshi.com/markets/x/y/z")
     assert not engine._allowed("https://polymarket.us.evil.example/x") and not engine._allowed("http://polymarket.us/x")
+    assert not engine._allowed("https://kalshi.com.evil.example/x") and not engine._allowed("http://kalshi.com/x")
     r = api.get("/go/a1/market_us", params={"to": "https://polymarket.us/event/nba-cle-orl"}, follow_redirects=False)
     assert (r.status_code, r.headers["location"]) == (302, "https://polymarket.us/event/nba-cle-orl")
+    r = api.get("/go/a1/market_kalshi", params={"to": "https://kalshi.com/markets/kxnbagame/x/k-cle"}, follow_redirects=False)
+    assert (r.status_code, r.headers["location"]) == (302, "https://kalshi.com/markets/kxnbagame/x/k-cle")
 
 
 # ---- the page ----
