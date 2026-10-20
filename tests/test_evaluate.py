@@ -404,6 +404,19 @@ def test_the_traders_list_shows_a_win_rate_from_ten_settled_trades_as_the_sort_r
     assert "Close rates: more trades rank higher." in page and "settled · ${readDays(s)} days" not in page
 
 
+def test_every_traders_column_says_its_period_and_the_buttons_say_what_they_change() -> None:
+    """Hyperdash's one button changes every column; ours changes trading profit and trend only, so each header
+    names its own period (those two follow the button) and the buttons say what they move. A row's main category is
+    a neutral tag, never colored."""
+    page = (engine.HERE / "static" / "index.html").read_text()
+    assert 'head("profit", `Trading profit<small>${days} days</small>`)' in page and "<span>Trend<small>${days} days</small></span>" in page
+    assert 'head("consistent", "Weeks up<small>last 12 weeks</small>")' in page and 'head("active", "Usual trade<small>30 days</small>")' in page
+    assert ">Profit and trend over</span>" in page
+    assert '<span class="lb-tag">${esc(main)}</span>' in page
+    tag = next(ln for ln in page.splitlines() if ln.lstrip().startswith(".lb-tag {"))
+    assert "--gain" not in tag and "--loss" not in tag and "--accent" not in tag
+
+
 def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: Any) -> None:
     """A trader buying at about 92¢ picks the winner about 92% of the time by price alone: the stored ``odds`` (their
     average price on the settled ones) is said beside the rate, in the cell and on a phone card, when it's known."""
