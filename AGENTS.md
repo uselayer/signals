@@ -8,9 +8,10 @@ behind Vercel (see README, "Hosting").
 
 - All venue reads, links and copies go through `client.whales` in the SDK. Don't add venue calls or matching
   logic here; put it in the SDK. One approved stopgap: `_open_positions` (the Feed's poller) calls the SDK's
-  internals for a positions-only read until uselayer has a public one (uselayer-sdk#23); don't add others. A
-  second, awaiting the owner's OK: `records._pnl_points` and `records.build` read Polymarket's profit history
-  through the SDK's internals (`_poly.pnl_history`, `_Curve`) for track records until uselayer has a public call.
+  internals for a positions-only read until uselayer has a public one (uselayer-sdk#23). A second, approved by the
+  owner 2026-10-19: `records._pnl_points` and `records.build` read Polymarket's profit history through the SDK's
+  internals (`_poly.pnl_history`, `_Curve`) for track records, until uselayer's public profit-history call is
+  released; then switch to it and drop this. Don't add others.
 - Leaderboard (`SIGNALS_SKILL_TEST` off, the default): Traders is one list of every public wallet with a track
   record (`signals/records.py`: profit, volume, profit per $ traded, win rate from positions closed, weeks up, usual
   trade; about 6 reads), a buy in the last 30 days and 5+ positions closed in 90 days, ranked by what they did
