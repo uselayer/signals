@@ -304,6 +304,10 @@
   .lb-search svg { position: absolute; left: 11px; width: 15px; height: 15px; color: var(--faint); pointer-events: none; }
   .lb-search input { box-sizing: border-box; width: 230px; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 999px; padding: 5px 12px 5px 32px; font: inherit; font-size: 14px; }
   .lb-search input::placeholder { color: var(--faint); }
+  /* the Leaderboard's search: its own row, the bar's full width (names and 0x wallets are long; search comes first) */
+  .lb-search-wide { margin-bottom: 14px; }
+  .lb-search-wide svg { left: 16px; width: 17px; height: 17px; }
+  .lb-search-wide input { width: 100%; padding: 11px 16px 11px 42px; font-size: 15px; border-radius: 12px; }
   .lb-period-what { font-size: 13px; color: var(--muted); white-space: nowrap; margin-right: -4px; }
   .lb-period { display: inline-flex; background: var(--soft); border-radius: 999px; padding: 3px; }
   .lb-period button { border: 0; background: none; padding: 4px 11px; border-radius: 999px; font: inherit; font-size: 14px; font-weight: 500; color: var(--muted); cursor: pointer; }
@@ -1973,13 +1977,13 @@ function renderBoard() {
   }
   const c = bd.counts;
   box.innerHTML = `
+    <label class="lb-search lb-search-wide" for="bdq"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg><input id="bdq" type="search" placeholder="Search any trader by name or 0x wallet" value="${esc(bd.q)}" autocomplete="off" aria-label="Search by trader name or wallet address"></label>
     <div class="lb-toolbar">
       <div class="lb-filters" role="group" aria-label="Filter by market">
         <button type="button" class="lb-chip" data-bdcat="" aria-pressed="${!bd.cat}">All</button>
         ${INTERESTS.map((x) => `<button type="button" class="lb-chip" data-bdcat="${esc(x)}" aria-pressed="${bd.cat === x}">${esc(x)}</button>`).join("")}
       </div>
       <div class="lb-view">
-        <label class="lb-search" for="bdq"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg><input id="bdq" type="search" placeholder="Search name or wallet" value="${esc(bd.q)}" autocomplete="off" aria-label="Search by trader name or wallet address"></label>
         <div class="lb-period" role="group" aria-label="Period">${Object.entries(BOARD_PERIODS).map(([p, l]) => `<button type="button" data-bdperiod="${p}" aria-pressed="${n === p}">${l}</button>`).join("")}</div>
         <select id="bdsort" class="lb-sort" aria-label="Sort traders">${Object.entries(BOARD_SORTS).map(([k, l]) => `<option value="${k}" ${bd.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>
       </div>
