@@ -239,17 +239,29 @@ def trading_now(response: Response, min_usd: float = 250, _: None = Depends(feed
                  if t["venue"] == "polymarket" else {"category": None}) for t in out]
 
 
+# A trader page's open positions: up to Polymarket's most in one read (500), biggest by value first, so Open P&L can
+# add up all of them for anyone holding fewer (at 50, a third of the recommended traders held more and showed none).
+POSITIONS_READ = 500
+
+
+def trader_read(venue: str, trader_id: str) -> Any:
+    """A trader's page (the SDK's ``trader``), kept 15 s: on Polymarket with up to POSITIONS_READ open positions."""
+    more = {"positions": POSITIONS_READ} if venue == "polymarket" else {}
+    return cached(f"trader:{venue}:{trader_id}", 15, lambda: reads.whales.trader(venue, trader_id, trades=40, closed=50, **more))  # type: ignore[arg-type]
+
+
 @app.get("/api/trader/{venue}/{trader_id}")
 def trader(venue: str, trader_id: str) -> dict[str, Any]:
     venue_on(venue)
     try:
-        d = cached(f"trader:{venue}:{trader_id}", 15, lambda: reads.whales.trader(venue, trader_id, trades=40, closed=50))  # type: ignore[arg-type]
+        d = trader_read(venue, trader_id)
     except VenueError as e:
         if e.code == "not_found":
             count("no_profile", target="trader")
         raise venue_error(e) from e
     out = d.to_dict()
-    links = position_links(d.trader.id) if venue == "polymarket" and d.positions else {}
+    rows = held_rows(d.trader.id) if venue == "polymarket" and d.positions else []
+    links = position_links(rows or [])
     out["positions"] = [
         p | {"status": bet_status(p["avg_price"], p["current_price"]), "url": links.get(p["market"])}
         | ({"us": us_of(p["market"], None, p.get("outcome"))} if venue == "polymarket" else {})
@@ -260,6 +272,7 @@ def trader(venue: str, trader_id: str) -> dict[str, Any]:
         if "volume_contracts" not in out["stats"]:  # uselayer 0.12: the trader's volume is contracts too
             out["trader"]["volume_unit"] = "contracts"
         out["stats"] = poly_stats(out["stats"])
+        out["positions_cut"] = positions_cut(rows)
     return out
 
 
@@ -273,17 +286,32 @@ def polymarket_url(event: str | None, market: str | None = None) -> str | None:
     return POLYMARKET_EVENT + event + (f"/{market}" if market and market != event else "")
 
 
-def position_links(wallet: str) -> dict[str, str | None]:
-    """Each open position's page on polymarket.com, by market id. uselayer's positions leave the slugs out,
-    so this reads Polymarket's positions again; drop it once ``WhalePosition`` carries a url."""
+def held_rows(wallet: str) -> list[dict[str, Any]] | None:
+    """Polymarket's own list of a wallet's positions, biggest by value first, up to POSITIONS_READ (one read): the
+    open ones' pages (uselayer's positions leave the slugs out) and whether any were left out. None when it couldn't
+    be read."""
     try:
-        rows = cached(f"poslinks:{wallet}", 15, lambda: reads.whales._poly.positions(wallet, 50))
+        return cached(f"poslinks:{wallet}", 15, lambda: reads.whales._poly.positions(wallet, POSITIONS_READ))  # type: ignore[no-any-return]
     except VenueError:
-        return {}  # the trades still show, just without links
+        return None
+
+
+def position_links(rows: list[dict[str, Any]]) -> dict[str, str | None]:
+    """Each open position's page on polymarket.com, by market id, from ``held_rows``; drop it once ``WhalePosition``
+    carries a url."""
     return {
         f"{p.get('conditionId')}:{int(p.get('outcomeIndex') or 0)}": polymarket_url(p.get("eventSlug"), p.get("slug"))
         for p in rows
     }
+
+
+def positions_cut(rows: list[dict[str, Any]] | None) -> bool:
+    """True when an open position may be missing from the trader read: Polymarket's list came back full and even its
+    smallest is still worth something (settled losers, worth $0, sort last), or it couldn't be read. Open P&L is then
+    unknown, never part of a total."""
+    if rows is None:
+        return True
+    return len(rows) >= POSITIONS_READ and min(float(p.get("currentValue") or 0) for p in rows) > 0
 
 
 @app.get("/api/links/{venue}/{trader_id}")
@@ -294,7 +322,7 @@ def links(venue: str, trader_id: str) -> dict[str, Any]:
     if len(VENUES) < 2:
         raise HTTPException(404, detail="Signals covers one venue right now, so there's no other venue to check.")
     try:
-        t = cached(f"trader:{venue}:{trader_id}", 15, lambda: reads.whales.trader(venue, trader_id, trades=40, closed=50))  # type: ignore[arg-type]
+        t = trader_read(venue, trader_id)
         found = cached(f"links:{venue}:{trader_id}", 600, lambda: reads.whales.links(t.trader))
     except VenueError as e:
         raise venue_error(e) from e

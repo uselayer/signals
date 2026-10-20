@@ -100,20 +100,31 @@ def test_a_traders_page_carries_the_why_lines(api: TestClient) -> None:
 
 def test_open_pnl_is_added_up_from_their_open_positions_and_unknown_is_never_zero(run_js: Any) -> None:
     """Open P&L is the sum of Polymarket's own figure for each position still open, never its summary figure; a
-    read that failed, or one cut off at POSITIONS_READ while even the smallest is still worth something, is unknown
-    ("—" and why), never $0. No open positions is a real $0, and says so."""
+    read that failed, or one the server says was cut off (positions_cut: Polymarket's list came back at POSITIONS_READ
+    while even the smallest is still worth something), is unknown (no value, so no row), never $0. No open positions
+    is a real $0, and says so."""
     s = {"periods": {"30d": {"realized": 1.0}}}
     pos = lambda n, value=10.0, pnl=1.0: [{"status": "in", "pnl": pnl, "value": value}] * n  # noqa: E731
     cases = {"none": {"stats": {"unrealized_pnl": 5400}, "positions": [{"status": "lost", "pnl": -50.0, "value": 0}]},
-             "full": {"stats": {}, "positions": pos(50)},
-             "full_but_settled_last": {"stats": {}, "positions": pos(49, pnl=2.0) + [{"status": "lost", "pnl": -9.0, "value": 0}]},
+             "full": {"stats": {}, "positions": pos(40), "positions_cut": True},
+             "fifty_all_read": {"stats": {}, "positions": pos(50), "positions_cut": False},  # 50 was the old read's limit
+             "full_but_settled_last": {"stats": {}, "positions": pos(49, pnl=2.0) + [{"status": "lost", "pnl": -9.0, "value": 0}], "positions_cut": False},
              "missing_figure": {"stats": {}, "positions": pos(1, pnl=None)},
              "failed": {"error": "x"}}  # fmt: skip
     got = run_js(NUMBERS, "(() => { pf.account = {}; const c = " + json.dumps(cases) + "; return Object.fromEntries("
                  f"Object.entries(c).map(([k, d]) => [k, profileNumbers({s}, d, {{}}, '30d').summary[0]])); }})()")
     assert (got["none"]["v"], got["none"]["sub"]) == ("$0.00", "no open positions")  # a real $0, not the summary's 5,400
-    assert got["full"]["v"] is None and got["full"]["sub"] == "they hold over 50 positions, too many to add up here"
+    assert got["full"]["v"] is None and got["full"]["sub"] == "they hold over 500 positions, too many to add up here"
+    assert "+$50" in got["fifty_all_read"]["v"]
     assert "+$98" in got["full_but_settled_last"]["v"]  # every open one was read: the last is a settled loser
+    # one at 1¢ hasn't settled: its loss counts though its status says "lost" (flawfence, 19 Oct: $24K of these were
+    # left out, so +$113K read +$137K); one at 0 has settled and doesn't
+    near = [{"status": "in", "pnl": 500.0, "value": 900.0, "current_price": 0.5},
+            {"status": "lost", "pnl": -300.0, "value": 3.0, "current_price": 0.01},
+            {"status": "lost", "pnl": -1000.0, "value": 0, "current_price": 0}]  # fmt: skip
+    nearly = run_js(NUMBERS, "(() => { pf.account = {}; return profileNumbers(" + json.dumps(s) + ", "
+                    + json.dumps({"stats": {}, "positions": near, "positions_cut": False}) + ", {}, '30d').summary[0]; })()")
+    assert "+$200" in nearly["v"] and nearly["sub"] == "on 2 positions still open, at today's prices"
     assert got["missing_figure"]["v"] is None and got["missing_figure"]["sub"] == "couldn't be worked out from their positions"
     assert got["failed"]["v"] is None and got["failed"]["sub"] == "their positions couldn't be read just now"
 
@@ -152,7 +163,7 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
 
 
 NUMBERS = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "lbPct", "readDays", "readPeriod", "weeksUp",
-           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "madeMoneyRow", "worstDrop", "profileNumbers")  # fmt: skip
+           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")  # fmt: skip
 
 
 def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_slot(run_js: Any) -> None:
@@ -181,12 +192,11 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     m = rows(month)
     assert month["hero"]["k"] == "Realized P&L, 30 days" and "+$336K" in month["hero"]["v"]
     assert month["hero"]["sub"] == "taken in the last 30 days · +$3.1M all time · after fees"  # Polymarket's headline is before fees
-    assert [r["k"] for r in month["summary"]] == ["Open P&L", "Wallet", "Made money on"]
+    assert [r["k"] for r in month["summary"]] == ["Open P&L", "Wallet"]  # Made money on: dropped (owner, 19 Oct)
     assert "+$899" in m["Open P&L"]["v"] and m["Open P&L"]["sub"] == "on 2 positions still open, at today's prices"  # not the stale $0
     assert m["Wallet"]["v"] == "$1.1M" and m["Wallet"]["sub"].startswith("cash $800K + open positions $300K")
-    assert m["Made money on"]["v"] == "…"  # their whole record of positions is its own read (/api/completed)
     assert [g["title"] for g in month["groups"]] == ["Record", "How they trade"]
-    # the worst drop is the score's own (uselayer 0.14, every hourly point); a score kept before it has none: "—"
+    # the worst drop is the score's own (uselayer 0.14, every hourly point); a score kept before it has none: no row
     assert m["Worst drop from a high"]["v"] is None and m["Worst drop from a high"]["sub"].startswith("last 90 days")
     assert m["Weeks up"]["v"] == "4 of 6" and m["Weeks up"]["sub"] == "since their first trade" and m["Weeks up"]["weeks"]
     assert m["Markets"]["v"] == "Sports 98%" and m["Markets"]["sub"] == "of 42 events checked, last 30 days"  # under 5% left out
@@ -404,7 +414,7 @@ def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: 
 
 
 PROFILE = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "readDays", "readPeriod", "weeksUp", "weeksOf",
-           "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "madeMoneyRow", "worstDrop", "profileNumbers")
+           "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")
 
 
 def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_own(run_js: Any) -> None:
@@ -444,13 +454,13 @@ def test_see_all_checked_traders_lists_recommended_first_and_says_what_it_is(run
     assert 'id="lbrec">See all checked traders</button>' in whole[1] and "lbchecked" not in whole[1]
 
 
-def test_made_money_on_and_the_worst_drop_come_from_uselayer_014(run_js: Any) -> None:
-    """Made money on: every position they've closed or that settled (/api/completed), only when it adds up, with
-    parlays said to be left out; the worst drop from a high: the score's worst_drop over 90 days, as a loss."""
+def test_the_worst_drop_comes_from_uselayer_014_and_made_money_on_is_gone(run_js: Any) -> None:
+    """The worst drop from a high: the score's worst_drop over 90 days, as a loss. "Made money on" (a hit rate, not
+    skill; the owner dropped it 19 Oct) is on neither profile."""
     s = {"periods": {"30d": {"realized": 1}}, "worst_drop": {"90d": {"usd": 425504.66, "peak_at": "x", "trough_at": "y"}}}
-    done = {"reconciles": True, "count": 400, "made_money": 215, "parlays_excluded": True, "summary": "x"}
-    got = run_js(NUMBERS, f"(() => {{ pf.account = {{}}; pf.completed = {json.dumps(done)}; return profileNumbers({json.dumps(s)}, null, {{}}, '30d'); }})()")
+    got = run_js(NUMBERS, f"(() => {{ pf.account = {{}}; return profileNumbers({json.dumps(s)}, null, {{}}, '30d'); }})()")
     rows = {x["k"]: x for g in [{"rows": got["summary"]}, *got["groups"]] for x in g["rows"]}
-    assert rows["Made money on"]["v"] == "215 of 400 positions"
-    assert rows["Made money on"]["sub"] == "every position they've closed or that settled · parlays not included"
+    assert "Made money on" not in rows
+    page = (engine.HERE / "static" / "index.html").read_text()
+    assert "/api/completed" not in page.replace("(/api/completed;", "")  # no read of it from the page
     assert rows["Worst drop from a high"]["v"] == '<span class="loss">−$426K</span>'
