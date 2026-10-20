@@ -234,26 +234,26 @@ const End = () => (
 
 // Sound: public/tick.wav and ping.wav (made with ffmpeg, nothing to license) on the beats above, and
 // public/music.mp3 under it when there is one. MUSIC_FROM skips the track's intro, in seconds.
-const MUSIC_FROM = 0;
+const MUSIC_FROM = 15.4;  // "FREE THUGER (Gunna Trap Type Beat)", Pixabay: its drop, so the video opens on the beat
 const hasMusic = getStaticFiles().some((f) => f.name === "music.mp3");
 const TICKS: [number, number][] = [
-  ...Array.from({ length: 10 }, (_, i) => [i * 4, 0.35 - i * 0.025] as [number, number]),  // the count-up
-  ...[70, 82, 94, 106].map((d) => [RECORD + d, 0.4] as [number, number]),  // each record tile
-  [VERDICT + 34, 0.4], [VERDICT + 46, 0.4],  // the two bars
+  ...Array.from({ length: 10 }, (_, i) => [i * 4, 0.5 - i * 0.03] as [number, number]),  // the count-up
+  ...[70, 82, 94, 106].map((d) => [RECORD + d, 0.55] as [number, number]),  // each record tile
+  [VERDICT + 34, 0.55], [VERDICT + 46, 0.55],  // the two bars
 ];
 const Sound = () => {
   const { fps } = useVideoConfig();
   return (
     <>
       {hasMusic && (
-        <Audio src={staticFile("music.mp3")} trimBefore={MUSIC_FROM * fps}
-          volume={(f) => interpolate(f, [0, 12, DURATION - 30, DURATION], [0, 0.55, 0.55, 0],
+        <Audio src={staticFile("music.mp3")} trimBefore={Math.round(MUSIC_FROM * fps)}
+          volume={(f) => interpolate(f, [0, 3, DURATION - 30, DURATION], [0, 0.55, 0.55, 0],
             { extrapolateLeft: "clamp", extrapolateRight: "clamp" })} />
       )}
       {TICKS.map(([at, vol]) => (
         <Sequence key={at} from={at} durationInFrames={6}><Audio src={staticFile("tick.wav")} volume={vol} /></Sequence>
       ))}
-      <Sequence from={ALERT + 16} durationInFrames={30}><Audio src={staticFile("ping.wav")} volume={0.8} /></Sequence>
+      <Sequence from={ALERT + 16} durationInFrames={30}><Audio src={staticFile("ping.wav")} volume={1} /></Sequence>
     </>
   );
 };

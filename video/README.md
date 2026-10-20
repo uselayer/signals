@@ -12,4 +12,9 @@ npm run studio             # preview and scrub in the browser
 npm run render             # out/trader-story.mp4
 ```
 
+Sound: `public/tick.wav` and `public/ping.wav` are made with ffmpeg. Music is `public/music.mp3`, not in git
+(Pixabay's licence doesn't allow sharing the file on its own): download "FREE THUGER (Gunna Trap Type Beat)" from
+[Pixabay](https://pixabay.com/music/beats-free-thuger-gunna-trap-type-beat-262219/) and save it there. Without it
+the video renders with the sound effects only.
+
 Remotion is free for individuals and companies of up to 3 people; past that it needs a company licence.
