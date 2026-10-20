@@ -234,7 +234,7 @@ const End = () => (
 
 // Sound: public/tick.wav and ping.wav (made with ffmpeg, nothing to license) on the beats above, and
 // public/music.mp3 under it when there is one. MUSIC_FROM skips the track's intro, in seconds.
-const MUSIC_FROM = 15.4;  // "FREE THUGER (Gunna Trap Type Beat)", Pixabay: its drop, so the video opens on the beat
+const MUSIC_FROM = 15.95;  // "GRAM (Gunna Trap Type Beat)", Pixabay: its drop, so the video opens on the beat
 const hasMusic = getStaticFiles().some((f) => f.name === "music.mp3");
 const TICKS: [number, number][] = [
   ...Array.from({ length: 10 }, (_, i) => [i * 4, 0.5 - i * 0.03] as [number, number]),  // the count-up
@@ -247,7 +247,7 @@ const Sound = () => {
     <>
       {hasMusic && (
         <Audio src={staticFile("music.mp3")} trimBefore={Math.round(MUSIC_FROM * fps)}
-          volume={(f) => interpolate(f, [0, 3, DURATION - 30, DURATION], [0, 0.55, 0.55, 0],
+          volume={(f) => interpolate(f, [0, 3, DURATION - 30, DURATION], [0, 0.45, 0.45, 0],
             { extrapolateLeft: "clamp", extrapolateRight: "clamp" })} />
       )}
       {TICKS.map(([at, vol]) => (
