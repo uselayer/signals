@@ -97,7 +97,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     # first, before anything opens the store (a volume out of inodes can't open directory.db), but only the oldest
     # PRICE_CACHE_LAUNCH_MOST: enough room in seconds, inside Railway's 120 s health check; the monitor does the rest
     _store_housekeeping(most=PRICE_CACHE_LAUNCH_MOST)
-    threading.Thread(target=_worth_loop, daemon=True).start()  # last result shows at once; refresh behind it
+    if SKILL_TEST:  # the Leaderboard shows no check: its 200 scores a day would be reads nobody sees
+        threading.Thread(target=_worth_loop, daemon=True).start()  # last result shows at once; refresh behind it
     threading.Thread(target=_live_loop, daemon=True).start()  # keeps the Feed's and alerts' trader reads filled
     _directory_later(_directory_import)  # the scores kept before the directory had them (once: then a no-op)
     if DIRECTORY_ON:  # finds wallets for the trader directory, once a day, at a rate that leaves the site its reads
@@ -371,7 +372,10 @@ def _worth_load(interests: tuple[str, ...] = ()) -> dict[str, Any] | None:
     """What Traders, the Feed's Recommended, alerts and trader pages read as the traders checked: the directory's
     latest scores with SIGNALS_DISCOVERY=directory (``discovery_result``, the picked ``interests`` first), else,
     or while the directory has none, the Worth following check's (``_check_load``). Same shape either way, and
-    either way only those Recommended can vouch for keep a recommended tier (``_vouched``)."""
+    either way only those Recommended can vouch for keep a recommended tier (``_vouched``). None with the skill test
+    off (the Leaderboard): no tier, label or copy status reaches the Feed, alerts or a trader's page."""
+    if not SKILL_TEST:
+        return None
     if DISCOVERY == "directory" and (got := discovery_result(interests)) is not None:
         return _vouched(got)
     return _vouched(_check_load())
@@ -844,7 +848,7 @@ def evaluate_record(item: dict[str, Any]) -> str:
     d, w, now = directory(), item["wallet"], time.time()
     try:
         got = background().trades("polymarket", w, limit=QUICK_TRADES)
-        trades = [(t.at.timestamp(), t.action == "buy", t.market.partition(":")[0], t.usd) for t in got]
+        trades = _record_trades(got)
         look = quick_look(trades, now, read_all=len(got) < QUICK_TRADES, scored_at=item.get("scored_at"))
         if not look.buys_30d:
             reason = "dormant" if look.reason == "dormant" else "not_trading_lately"
@@ -859,6 +863,12 @@ def evaluate_record(item: dict[str, Any]) -> str:
         return "failed"
     d.keep_record(w, rec)
     return "recorded"
+
+
+def _record_trades(got: list[Any]) -> list[tuple[Any, ...]]:
+    """Trades as the quick check reads them (time, bought, market, dollars), with each one's price and outcome after
+    for the record's average price paid (``records._paid``)."""
+    return [(t.at.timestamp(), t.action == "buy", t.market.partition(":")[0], t.usd, t.price, t.market) for t in got]
 
 
 def _seed_records() -> None:
@@ -1797,6 +1807,8 @@ def worth_wallet(wallet: str, request: Request, score: int = 1) -> dict[str, Any
     fresh score isn't scored: its page shows what's known and a "Check now" button instead. With Explore on, the
     wallet's directory row comes too (``directory``: the evidence, where it was found)."""
     w = wallet.lower()
+    if not SKILL_TEST:  # the Leaderboard: their track record, never a score
+        return record_page(w, request)
     data = _worth_load()
     s = next((x for x in (data or {}).get("scores", []) if x["wallet"] == w), None)
     row = _explore_row(w) if EXPLORE_ON and _WALLET.fullmatch(w) else None
@@ -1940,6 +1952,8 @@ def _stored_score(wallet: str, now: float | None = None) -> dict[str, Any] | Non
     ``fresh_for`` (12 hours for one people are shown, 48 for any other: twice how often each is scored again), any
     other's for STORED_FRESH_S. Else None."""
     now = time.time() if now is None else now
+    if not SKILL_TEST:  # the Leaderboard: no verdict anywhere
+        return None
     try:
         s = directory().score(wallet)
     except (sqlite3.Error, OSError):
@@ -2189,12 +2203,18 @@ def _client(request: Request | None) -> str:
 
 
 def check_now(wallet: str, request: Request | None = None) -> dict[str, Any]:
-    """A wallet scored on the spot (``_score_of``), as a trader page does for one nobody has scored lately. One
-    score per wallet at a time (others asking wait for it), CHECKS_AT_ONCE site-wide, and hosted, CHECKS_PER_CLIENT
-    from one address: past those, a 429 with a plain "try again", so pages never queue up the site's reads."""
+    """A wallet scored on the spot (``_score_of``), as a trader page does for one nobody has scored lately."""
     w = wallet.lower()
-    if w in _worth_one:
-        return _worth_one[w]
+    return _on_the_spot(w, request, lambda: _worth_one.get(w), lambda: _score_of(w))  # type: ignore[no-any-return]
+
+
+def _on_the_spot(w: str, request: Request | None, kept: Callable[[], Any], work: Callable[[], Any]) -> Any:
+    """``work`` for wallet ``w`` now, on the checks' reads (a score, or with the skill test off a record), unless
+    ``kept`` already has it. One per wallet at a time (others asking wait for it and get what it got), CHECKS_AT_ONCE
+    site-wide, and hosted, CHECKS_PER_CLIENT from one address: past those, a 429 with a plain "try again", so pages
+    never queue up the site's reads."""
+    if (got := kept()) is not None:
+        return got
     if HOSTED:
         who, (most, per) = _client(request), CHECKS_PER_CLIENT
         now = time.time()
@@ -2206,12 +2226,12 @@ def check_now(wallet: str, request: Request | None = None) -> dict[str, Any]:
             _check_times.clear()
     lock = _check_locks.setdefault(w, threading.Lock())
     with lock:
-        if w in _worth_one:  # someone else just checked it
-            return _worth_one[w]
+        if (got := kept()) is not None:  # someone else just checked it
+            return got
         if not _checks.acquire(timeout=CHECK_WAIT_S):
             raise HTTPException(429, detail="Lots of traders are being checked right now. Try again in a minute.")
         try:
-            return _score_of(w)
+            return work()
         finally:
             _checks.release()
             if len(_check_locks) > 5000:
@@ -2238,6 +2258,105 @@ def _win_of(rec: dict[str, Any], period: str) -> dict[str, Any] | None:
     return None
 
 
+# A trader's page with the skill test off: their track record, the Leaderboard's facts and a little more (the profit
+# line, the worst drop, the weeks), never a tier or verdict. A record read within RECORD_PAGE_FRESH_S is shown as it
+# is; an older one, one copied from a score (no win rate) or none is read now (about 6 to 8 reads, ``records``) on the
+# checks' budget, as "Check now" scores, and kept for the Leaderboard. If that read can't be made (busy, or Polymarket
+# failed) an older record is shown, with when it was read; with none, the page says why.
+RECORD_PAGE_FRESH_S = 6 * 3600
+_record_one: dict[str, dict[str, Any]] = {}  # records read for a page, kept here too: the writer keeps them later
+
+
+def _directory_name(wallet: str) -> str | None:
+    """A wallet's name as the directory has it, unless it's only its address."""
+    try:
+        row = directory().wallet(wallet)
+    except (sqlite3.Error, OSError):
+        return None
+    name = (row or {}).get("name")
+    return str(name) if name and not str(name).startswith("0x") else None
+
+
+def _fresh_record(rec: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
+    """``rec`` if a trader's page may show it as it is: read (not copied from a score) within RECORD_PAGE_FRESH_S."""
+    ok = rec is not None and rec.get("via") == "read" and now - (rec.get("read_at") or 0) < RECORD_PAGE_FRESH_S
+    return rec if ok else None
+
+
+def record_now(w: str, request: Request | None = None) -> dict[str, Any]:
+    """A wallet's record read now (their latest trades, then ``records.read``) on the checks' reads, kept for the
+    Leaderboard by the writer thread."""
+
+    def work() -> dict[str, Any]:
+        got = checker().trades("polymarket", w, limit=QUICK_TRADES)
+        rec = records.read(checker(), w, _record_trades(got))
+        if len(_record_one) >= WORTH_ONE_KEEP:
+            _record_one.clear()
+        _record_one[w] = rec | {"via": "read"}
+        _directory_later(lambda d: d.keep_record(w, rec))
+        return _record_one[w]
+
+    return _on_the_spot(w, request, lambda: _fresh_record(_record_one.get(w), time.time()), work)  # type: ignore[no-any-return]
+
+
+def record_page(w: str, request: Request | None = None) -> dict[str, Any]:
+    """``/api/worth/{wallet}`` with the skill test off: the wallet's record as a trader's page shows it."""
+    if not _WALLET.fullmatch(w):
+        raise HTTPException(400, detail="That isn't a Polymarket wallet address.")
+    now = time.time()
+    rec = _fresh_record(_record_one.get(w), now)
+    if rec is None:
+        try:
+            kept = directory().record(w)
+        except (sqlite3.Error, OSError):
+            kept = None
+        rec = _fresh_record(kept, now)
+        if rec is None:
+            try:
+                rec = record_now(w, request)
+            except HTTPException:  # busy: an older record, said to be older, if there is one
+                if kept is None:
+                    raise
+                rec = kept
+            except VenueError as e:
+                if kept is None:
+                    if e.code == "not_found":
+                        count("no_profile", target="trader")
+                    raise venue_error(e) from e
+                rec = kept
+    try:
+        row = directory().wallet(w)
+    except (sqlite3.Error, OSError):
+        row = None
+    if row is None:
+        _directory_note_later([Seen(w, "search")])
+    return record_profile(w, rec, row or {})
+
+
+def record_profile(w: str, rec: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:
+    """A record in the shape a trader's page reads (a score's names where they mean the same: ``periods``,
+    ``pnl_weeks``, ``pnl_daily``, ``worst_drop``, ``typical_usd``, ``stored_at``), with ``record`` True and no tier,
+    label, checks or copy status. ``win`` is each period's win rate (``_win_of``), ``paid_30d`` the average price
+    paid on their buys over 30 days: the win rate their prices implied."""
+
+    def iso(t: Any) -> str | None:
+        return None if t is None else datetime.fromtimestamp(float(t), UTC).isoformat()
+
+    per, read_at = rec.get("periods") or {}, rec.get("read_at") or time.time()
+    return {
+        "wallet": w, "record": True, "via": rec.get("via"), "name": _directory_name(w),
+        "category": row.get("category") or row.get("seen_category"),
+        "stored_at": read_at, "window": [iso(read_at - 90 * 86400), iso(read_at)],
+        "periods": {p: per.get(p) or {} for p in ("7d", "30d", "90d")}, "all": per.get("all") or {},
+        "win": {p: _win_of(rec, p) for p in ("7d", "30d", "90d")}, "paid_30d": rec.get("paid_30d"),
+        "positions_complete": rec.get("positions_complete"),
+        "pnl_since": iso(rec.get("since")), "pnl_weeks": rec.get("pnl_weeks"), "weeks_up": rec.get("weeks_up"),
+        "weeks_known": rec.get("weeks_known"), "pnl_daily": rec.get("pnl_daily"), "worst_drop": rec.get("worst_drop"),
+        "typical_usd": rec.get("typical_usd"), "trades_per_day": rec.get("markets_per_day"),
+        "last_buy": iso(rec.get("last_buy")),
+    }  # fmt: skip
+
+
 @app.get("/api/leaderboard")
 def leaderboard(period: str = "30d", sort: str = "profit", category: str = "", q: str = "", new: int = 0,
                 offset: int = 0) -> dict[str, Any]:  # fmt: skip
@@ -2254,7 +2373,7 @@ def leaderboard(period: str = "30d", sort: str = "profit", category: str = "", q
     counts = cached("board:counts", LEADERBOARD_TTL_S, lambda: directory().record_counts())
     rows = [{k: r.get(k) for k in ("wallet", "name", "category", "via", "read_at", "periods", "pnl_weeks", "weeks_up",
                                    "weeks_known", "pnl_daily", "typical_usd", "markets_per_day", "last_buy",
-                                   "positions_complete", "new_account")}
+                                   "positions_complete", "new_account", "paid_30d")}
             | {"win": _win_of(r, period)} for r in page["rows"]]  # fmt: skip
     return {"rows": rows, "total": page["total"], "more": page["more"], "offset": offset, "counts": counts,
             "new_hidden": page["new_hidden"]}
@@ -2363,6 +2482,11 @@ def with_links(s: dict[str, Any]) -> dict[str, Any]:
 # the current price of their open position. Polymarket's public trade feed runs a few minutes behind.
 
 FEED_SEGMENTS = RECOMMENDED  # Traders' Sharps ("inactive" isn't in it)
+# With the skill test off, the Feed's second part is Top traders: the Leaderboard's first FEED_TOP by trading profit
+# over 30 days, the same list Traders opens on, as facts (no tier, copying offered for nobody), about as many as
+# Recommended had, so the poller reads them as often.
+FEED_TOP = 100
+FEED_TOP_TTL_S = 600
 RECOMMENDED_MIN_USD = 1000.0  # the Feed's Recommended shows only trades this big: fewer, bigger trades
 FEED_HOURS = 24
 GET_IN = 0.03  # at most this far above their price you can still get in: an alert's "$10 gets you" limit too
@@ -2568,9 +2692,31 @@ def _live_kept(wallet: str) -> tuple[float, Any] | None:
     return _cache.get(f"live:{wallet}")
 
 
+def _feed_pool() -> list[dict[str, Any]]:
+    """The traders in the Feed's second part, each with its name, segment, label and copy fields: Recommended's
+    (Traders' Sharps) with the skill test, else Top traders (``_top_traders``)."""
+    if SKILL_TEST:
+        return [s | copy_fields(s) for s in (_worth_load() or {}).get("scores", []) if s["segment"] in FEED_SEGMENTS]
+    return [dict(t) for t in _top_traders()]
+
+
+def _top_traders() -> list[dict[str, Any]]:
+    """The Leaderboard's first FEED_TOP by trading profit over 30 days (``Directory.leaderboard``, no read), as Feed
+    traders: no tier, and copying isn't offered for anyone. Empty while the directory can't be read."""
+    def read() -> list[dict[str, Any]]:
+        rows = directory().leaderboard("30d", "profit", limit=FEED_TOP)["rows"]
+        return [{"wallet": r["wallet"], "name": r.get("name"), "segment": None, "label": None} | copy_fields(None)
+                for r in rows]  # fmt: skip
+
+    try:
+        return cached("feed:top", FEED_TOP_TTL_S, read)  # type: ignore[no-any-return]
+    except (sqlite3.Error, OSError):
+        return []
+
+
 def _live_wanted() -> tuple[set[str], set[str]]:
-    """The traders whose trades the Feed and alerts read: everyone someone follows, and Recommended's."""
-    rec = {s["wallet"] for s in (_worth_load() or {}).get("scores", []) if s["segment"] in FEED_SEGMENTS}
+    """The traders whose trades the Feed and alerts read: everyone someone follows, and the Feed's second part's."""
+    rec = {s["wallet"] for s in _feed_pool()}
     return {w for u in _load_follows()["users"].values() for w in u.get("follows") or []}, rec
 
 
@@ -2761,14 +2907,15 @@ def one_bet(wallet: str, market: str, response: Response, _: None = Depends(feed
 
 @app.get("/api/live")
 def live(response: Response, _: None = Depends(feed_reader)) -> dict[str, Any]:
-    """The Feed's Recommended: trades of RECOMMENDED_MIN_USD or more over the last FEED_HOURS from the traders in
-    Traders' Sharps. Quiet on purpose: fewer, bigger trades."""
+    """The Feed's second part: trades of RECOMMENDED_MIN_USD or more over the last FEED_HOURS from its traders
+    (``_feed_pool``: Recommended's, or with the skill test off the Leaderboard's top FEED_TOP, ``pool`` "top").
+    Quiet on purpose: fewer, bigger trades."""
     _private(response)
-    data = _worth_load()
-    people = [s | copy_fields(s) for s in (data or {}).get("scores", []) if s["segment"] in FEED_SEGMENTS]
+    people = _feed_pool()
     got = _feed(people, RECOMMENDED_MIN_USD)
     return {"traders": [{k: s[k] for k in ("wallet", "name", "segment", "label", "copy_ok", "copy_label")} for s in people],
-            "hours": FEED_HOURS, "min_usd": RECOMMENDED_MIN_USD} | got  # fmt: skip
+            "hours": FEED_HOURS, "min_usd": RECOMMENDED_MIN_USD, "pool": "recommended" if SKILL_TEST else "top",
+            "top": FEED_TOP} | got  # fmt: skip
 
 
 def _feed(people: list[dict[str, Any]], min_usd: float = 0.0, sells: bool = False) -> dict[str, Any]:
@@ -3291,6 +3438,8 @@ def _who(wallet: str) -> str:
     for s in (_worth_load() or {}).get("scores", []):
         if s["wallet"] == wallet and s.get("name") and not str(s["name"]).startswith("0x"):
             return str(s["name"])
+    if not SKILL_TEST and (name := _directory_name(wallet)):
+        return name
     return f"Trader {wallet[:4]}…{wallet[-2:]}"
 
 
@@ -3462,7 +3611,10 @@ def _bot_loop() -> None:
 
 
 def _scored(wallet: str) -> bool:
-    """Whether the last check scored this wallet: then Signals has a page with their record."""
+    """Whether Signals has a page with their record: the last check scored them, or (the Leaderboard) any wallet,
+    whose page reads its record."""
+    if not SKILL_TEST:
+        return bool(_WALLET.fullmatch(wallet))
     return any(s["wallet"] == wallet for s in (_worth_load() or {}).get("scores", []))
 
 

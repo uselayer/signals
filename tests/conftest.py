@@ -98,6 +98,16 @@ def vouch_for_sample_traders(request: pytest.FixtureRequest, monkeypatch: pytest
 
 
 @pytest.fixture(autouse=True)
+def skill_test_world(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most tests are of the skill test's world (SIGNALS_SKILL_TEST=1, the way back: Recommended, tiers, copy
+    status), so they run with it on. The Leaderboard's tests (test_records.py, test_leaderboard_world.py) turn it off
+    themselves."""
+    from signals import app as engine
+
+    monkeypatch.setattr(engine, "SKILL_TEST", True)
+
+
+@pytest.fixture(autouse=True)
 def no_us_twins(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test starts with no Polymarket US index (as before Layer's matches are read): no test sees another's."""
     monkeypatch.setattr(us_match, "twins", us_match.UsTwins())
