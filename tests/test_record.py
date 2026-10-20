@@ -4,6 +4,7 @@ kept for minutes, and a page that keeps the record apart from our skill test (no
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -236,7 +237,8 @@ def test_the_records_open_profit_is_added_up_from_their_positions_never_the_summ
     assert client.get(f"/api/record/{W}").json()["open"]["pnl"] is None
 
 
-PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "numberRows", "BUSY_TEXT", "readFailed", "worstDrop", "CATEGORY_NOTE", "categoryCard")
+PROFILE = ("usd", "pl", "esc", "plural", "weekBars", "numberRow", "numberRows", "BUSY_TEXT", "readFailed", "worstDrop", "CATEGORY_NOTE",
+           "UNCATEGORISED", "catLabel", "categoryCard")
 
 
 def test_the_worst_drop_is_the_scores_and_a_score_from_before_it_shows_a_dash(run_js: Any) -> None:
@@ -250,7 +252,7 @@ def test_the_category_card_has_all_except_sports_and_says_what_it_counts(run_js:
     html = run_js(PROFILE, """categoryCard({rows: [{category: "Sports", usd: 5000}, {category: "Uncategorised", usd: 50},
       {category: "Crypto", usd: -300}], overall: 4750, except_sports: -250})""")
     assert "Realized profit by category, all time" in html
-    for row in ("Sports", "Uncategorised", "Crypto", "All except Sports", "All categories"):
+    for row in ("Sports", "Other markets", "Crypto", "All except Sports", "All categories"):
         assert f"<dt>{row}" in html, row
     assert '<span class="loss">−$250</span>' in html and '<span class="gain">+$4.8K</span>' in html
     note = "Parlays included. Polymarket's figures, updated every few hours. Trades still open aren't counted."
@@ -270,7 +272,17 @@ def test_the_category_card_never_repeats_a_row_or_shows_a_0_for_categories_never
     assert "All except Sports" not in none and "<dt>All categories" in none  # never traded Sports: it would repeat All
     cent = run_js(PROFILE, """categoryCard({rows: [{category: "Politics", usd: 496188.58}, {category: "Crypto", usd: 8747.88},
       {category: "Uncategorised", usd: 0.01}], overall: 504936.47, except_sports: 504936.47})""")
-    assert "Uncategorised" not in cent and "<dt>All categories" in cent  # flawfence's +$0.01: rounding, no row
+    assert "Other markets" not in cent and "<dt>All categories" in cent  # flawfence's +$0.01: rounding, no row
+
+
+def test_other_markets_is_uncategorised_in_plain_words_and_noise_against_their_total_has_no_row(run_js: Any) -> None:
+    """The owner, 19 Oct, on +$1.17 beside $9.1M: "what is uncategorized?" It's markets Polymarket puts in no category,
+    read as "Other markets"; under 0.1% of their total it's noise, so no row. The kept data keeps the engine's name."""
+    noise, real = run_js(PROFILE, """[categoryCard({rows: [{category: "Sports", usd: 9.1e6}, {category: "Politics", usd: 4600},
+      {category: "Culture", usd: -39700}, {category: "Uncategorised", usd: 1.17}], overall: 9.1e6, except_sports: -35100}),
+      categoryCard({rows: [{category: "Politics", usd: 900}, {category: "Uncategorised", usd: 40}], overall: 940, except_sports: 940})]""")
+    assert "Other markets" not in noise and "Uncategorised" not in noise and "<dt>Culture" in noise
+    assert "<dt>Other markets" in real and "Uncategorised" not in real
 
 
 def test_a_figure_that_cant_be_given_has_no_row(run_js: Any) -> None:
@@ -340,3 +352,37 @@ def test_a_profiles_own_reads_are_under_check_nows_limits_and_busy_says_so(
 def test_busy_shows_as_busy_on_the_page_never_an_error_or_zero(run_js: Any) -> None:
     card = run_js(PROFILE, "categoryCard(readFailed({status: 429}))")
     assert "Busy, try again in a minute." in card and "$0" not in card
+
+
+POSITIONS = ("usd", "pl", "esc", "cents", "tenths", "centsPair", "ago", "marketLink", "usLink", "usInline", "STATUS", "statusLine", "OPEN",
+             "neutralStatus", "tradeStatus", "openPositionRow", "closedPositionRow", "TAB_NOTES")  # fmt: skip
+
+
+def test_a_position_says_what_they_put_in_and_what_its_worth_or_what_they_got_back(run_js: Any) -> None:
+    """The owner, 19 Oct: "how much did they put in?" An open position says what they put in and what it's worth now,
+    in dollars, with the price they paid and the price now staying the neutral status (no colour). A closed one says
+    what they put in, at what price, what they got back, and how it ended with Polymarket's profit after fees."""
+    open_, won, sold, checked = run_js(POSITIONS, """[openPositionRow({title: "Will Manchester City win?", outcome: "No", size: 454676,
+        price: 0.71, now: 0.84, value: 381928, status: "moved", url: "https://polymarket.com/event/x", us: {found: false}}),
+      closedPositionRow({title: "Commanders vs. 49ers", outcome: "49ers", size: 311333, avg_price: 0.81, exit_price: 1, pnl: 56800,
+        result: "won", settled: true, closed_at: null, url: null}),
+      closedPositionRow({title: "Sold early", outcome: "Yes", size: 1000, avg_price: 0.4, exit_price: 0.3, pnl: -100.5,
+        result: "sold", settled: false, closed_at: null, url: null}),
+      closedPositionRow({title: "Checked", outcome: "Yes", price: 0.43, usd: 5900, payout: 1})]""")
+    assert "Put in $252K at 81¢ · got back $311K" in won and "Won</span>" in won and '<span class="gain">+$56.8K</span>' in won
+    assert "Put in $400 at 40¢ · sold at 30¢ · got back $300" in sold and "Closed</span>" in sold and '<span class="loss">−$101</span>' in sold
+    assert "Put in $5.9K at 43¢" in checked and "got back" not in checked
+    assert "Put in $323K</span> · worth $382K now" in open_ and 'title="454,676 contracts at 71¢"' in open_
+    assert "Now 84¢ · they paid 71¢" in open_ and "gain" not in open_ and "loss" not in open_  # an open position stays neutral
+    assert "now 84¢" not in open_  # the price now is the status's, once
+    nothing = run_js(POSITIONS, """openPositionRow({title: "T", outcome: null, size: null, price: null, now: null, value: null, status: "in"})""")
+    assert "Put in" not in nothing and "worth" not in nothing and "undefined" not in nothing and "NaN" not in nothing
+    notes = run_js(POSITIONS, "TAB_NOTES")
+    assert "added up" in notes["positions"] and "Several trades can make up one position" in notes["activity"]
+
+
+def test_the_profile_tabs_are_positions_and_recent_trades() -> None:
+    page = (Path(engine.__file__).parent / "static" / "index.html").read_text()
+    assert '[["positions", "Positions"], ["activity", "Recent trades"]]' in page and '"Activity"]' not in page
+    assert "See recent trades" in page and "See activity" not in page and " · profit after fees" in page
+    assert "REALIZED_CATS.map((c) => [c, catLabel(c)])" in page  # the picker reads "Other markets" too

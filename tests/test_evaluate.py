@@ -148,7 +148,7 @@ def test_a_score_made_on_a_traders_page_says_when_and_the_page_shows_it(monkeypa
 def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient) -> None:
     page = api.get("/").text
     for words in ('class="pf-verdict"', 'class="pf-warn"', 'class="pf-facts"', "Their numbers", 'class="pf-grid"', 'class="pf-rows"',
-                  "<dt>Last bought</dt>", "See activity", "How we measure this",
+                  "<dt>Last bought</dt>", "See recent trades", "How we measure this",
                   "What buying now costs", "not a guaranteed fill", "is for sale within 3¢ of the cheapest price",
                   "Priced up to 3¢ above the cheapest price for sale", "Estimated slippage: your average fill",
                   "Order book and market status read at", "Your estimated price: ", "Market price now",
