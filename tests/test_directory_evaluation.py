@@ -195,7 +195,7 @@ def test_recommended_traders_come_first_then_the_newest_found_then_the_rest(d: D
     d.keep_scores([score(DAN, "no_edge")], "check", at=T0 - RECHECK_SCORED_S - 1)  # a recheck
     got = d.due(10, now=T0)
     assert [(g["wallet"], g["kind"]) for g in got] == [(AMY, "recommended"), (CAL, "new"), (BEN, "new"), (DAN, "recheck")]
-    assert d.due_counts(now=T0) == {"presented": 0, "recommended": 1, "new": 2, "recheck": 1}
+    assert d.due_counts(now=T0) == {"presented": 0, "recommended": 1, "new": 2, "recheck": 1, "board": 0}
     assert [g["wallet"] for g in d.due(2, now=T0)] == [AMY, CAL]
 
 
@@ -207,7 +207,7 @@ def test_a_recommended_trader_people_are_shown_is_rescored_every_6_hours_any_oth
     got = d.due(10, now=T0, presented={AMY, CAL})
     # shown: every 6 hours, whatever tier the stored score says (the list may serve an old score re-tiered)
     assert sorted((g["wallet"], g["kind"]) for g in got) == [(AMY, "presented"), (CAL, "presented")]
-    assert d.due_counts(now=T0, presented={AMY}) == {"presented": 1, "recommended": 0, "new": 0, "recheck": 0}
+    assert d.due_counts(now=T0, presented={AMY}) == {"presented": 1, "recommended": 0, "new": 0, "recheck": 0, "board": 0}
     assert d.due(10, now=T0, presented={BEN})[0]["kind"] == "presented"
     assert [g["wallet"] for g in d.due(10, now=T0 + DAY, presented={AMY})] == [AMY, BEN]
 
@@ -582,7 +582,7 @@ def test_the_owner_sees_how_the_evaluation_is_going_in_counts_only(store: Any, m
     engine.directory().quick_checked(BEN, QuickLook(False, "not_enough_recent_evidence", 2, 9, None, None))
     s = TestClient(engine.app, client=("127.0.0.1", 50000)).get("/api/directory").json()
     e = s["evaluation"]
-    assert e["due_now"] == {"presented": 0, "recommended": 0, "new": 1, "recheck": 0}
+    assert e["due_now"] == {"presented": 0, "recommended": 0, "new": 1, "recheck": 0, "board": 0}
     assert e["by_status"]["checked"] == 1 and e["looked_at_last_day"]["checked"] == 1
     assert e["not_recommended"]["not_enough_recent_evidence"] == 1 and e["selective"] == 1
     assert s["evaluating"]["on"] is engine.EVALUATE_ON and "since_launch" in s["evaluating"]

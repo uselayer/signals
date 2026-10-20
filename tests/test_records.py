@@ -135,11 +135,11 @@ def test_each_sort_ranks_by_what_they_did_and_a_small_sample_never_tops_a_rate(d
     d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in (AMY, BEN, CAL)])
     d.keep_record(AMY, rec(500, won=9, closed=10, vol30=100_000), at=NOW)
     d.keep_record(BEN, rec(900, won=60, closed=80, vol30=900), at=NOW)  # under $1K traded: no profit per dollar
-    d.keep_record(CAL, rec(100, won=8, closed=8, vol30=2_000, weeks=(3, 3)), at=NOW)  # 8 of 8: too few to rank
+    d.keep_record(CAL, rec(100, won=10, closed=12, vol30=2_000, weeks=(3, 3)), at=NOW)
     order = lambda sort: [r["wallet"] for r in d.leaderboard("30d", sort, new=True, now=NOW)["rows"]]  # noqa: E731
     assert order("profit") == [BEN, AMY, CAL]
     assert order("return") == [CAL, AMY, BEN]  # 5% beats 0.5%; BEN's $900 traded ranks last
-    assert order("win") == [BEN, AMY, CAL]  # 60 of 80 beats 9 of 10 on the bottom of its range; 8 of 8 unranked
+    assert order("win") == [BEN, AMY, CAL]  # 60 of 80 beats 9 of 10 and 10 of 12 on the bottom of its range
     assert order("volume") == [AMY, CAL, BEN]
     assert order("weeks") == [AMY, BEN, CAL]  # 3 of 3 weeks is under 4 weeks of history: unranked
 
@@ -153,6 +153,48 @@ def test_new_accounts_are_hidden_unless_asked_for_and_the_list_says_how_many(d: 
     shown = d.leaderboard(new=True, now=NOW)
     assert [(r["wallet"], r["new_account"]) for r in shown["rows"]] == [(BEN, True), (AMY, False)]
     assert shown["new_hidden"] == 0
+
+
+def test_only_rows_with_every_column_are_listed_and_a_search_still_finds_the_rest(d: Directory) -> None:
+    """The owner, 19 Oct: "if they don't have all values for all columns, remove them". A record copied from a score
+    (no win rate yet), one whose positions couldn't be read, under 10 closed in the period, or no usual trade waits;
+    the list says how many. A busy trader whose 30 days weren't read in full shows their 7 days, as the row does."""
+    ws = (AMY, BEN, CAL, DAN, "0x" + "e5" * 20, "0x" + "f6" * 20)
+    d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in ws])
+    d.keep_record(AMY, rec(500), at=NOW)
+    d.keep_record(BEN, rec(900, won=None, closed=None), via="score", at=NOW)  # copied from a score: not read yet
+    d.keep_record(CAL, rec(800, won=None, closed=None), at=NOW)  # positions couldn't be read
+    d.keep_record(DAN, rec(700, won=8, closed=8), at=NOW)  # 8 closed: no win rate
+    d.keep_record(ws[4], rec(600) | {"typical_usd": None}, at=NOW)  # no usual trade
+    busy = rec(400)
+    busy["periods"]["30d"] |= {"won": None, "closed": None}
+    busy["periods"]["90d"] |= {"won": None, "closed": None}
+    d.keep_record(ws[5], busy, at=NOW)  # 30 and 90 days not read in full: their 7 days' 6 of 10 stands in
+    got = d.leaderboard(now=NOW)
+    assert [r["wallet"] for r in got["rows"]] == [AMY, ws[5]] and got["total"] == 2 and got["incomplete"] == 4
+    assert [r["wallet"] for r in d.leaderboard("7d", now=NOW)["rows"]] == [AMY, ws[5]]
+    found = d.leaderboard(q=BEN[:10], now=NOW)
+    assert [r["wallet"] for r in found["rows"]] == [BEN] and found["incomplete"] == 0  # a search finds anyone
+
+
+def test_traders_the_leaderboard_waits_on_are_read_next_the_most_profitable_first(d: Directory) -> None:
+    """Copied records have no win rate, so they aren't listed until read: right after the traders people are shown,
+    ahead of wallets never looked at, the most profit over 30 days first; made due at launch, and only once."""
+    d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in (AMY, BEN, CAL)] + [Seen(DAN, "search")])
+    for w, pnl in ((AMY, 100), (BEN, 900), (DAN, 5000)):  # DAN: never found anywhere public, so never listed
+        d.keep_record(w, rec(pnl, won=None, closed=None), via="score", at=NOW - DAY)
+    d.keep_record(CAL, rec(50), at=NOW)  # CAL's own record was read
+    with d._db() as con:  # as their scores left them: next looked at in a day
+        con.execute("UPDATE wallets SET status = 'scored', next_check = ? WHERE wallet != ?", (NOW + DAY, CAL))
+    d.add([Seen("0x" + "e5" * 20, "leaderboard", "PNL MONTH OVERALL")], at=NOW)  # a wallet never looked at
+    assert d.due(10, now=NOW + 1)[0]["wallet"] != BEN  # not due before launch makes them so
+    assert d.board_due_now(NOW) == 2 and d.board_due_now(NOW) == 0  # BEN and AMY, once
+    due = d.due(10, now=NOW + 1)
+    assert [(x["wallet"], x["kind"]) for x in due[:2]] == [(BEN, "board"), (AMY, "board")]
+    assert due[2]["kind"] == "new" and d.due(10, now=NOW + 1, new_first=True)[0]["wallet"] == BEN
+    assert d.due_counts(now=NOW + 1)["board"] == 2
+    d.keep_record(BEN, rec(900), at=NOW + 2)  # read: off the queue, due again with everyone else's next look
+    assert [x["wallet"] for x in d.due(10, now=NOW + 3) if x["kind"] == "board"] == [AMY]
 
 
 def test_a_record_read_schedules_the_next_look_and_says_nothing_against_them(d: Directory) -> None:

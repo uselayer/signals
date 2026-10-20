@@ -14,7 +14,11 @@ behind Vercel (see README, "Hosting").
 - Leaderboard (`SIGNALS_SKILL_TEST` off, the default): Traders is one list of every public wallet with a track
   record (`signals/records.py`: profit, volume, profit per $ traded, win rate from positions closed, weeks up, usual
   trade; about 6 reads), a buy in the last 30 days and 5+ positions closed in 90 days, ranked by what they did
-  (`/api/leaderboard`). Facts only: no tier, no "recommended", nothing about whether they'll make money next. The
+  (`/api/leaderboard`). A row is listed only with every column (owner, 19 Oct: "if they don't have all values for
+  all columns, remove them"): a profit for the period, a usual trade and a win rate from 10 positions closed
+  (`_complete`); a search still finds anyone, and the foot says how many wait. Records copied from scores have no
+  win rate, so the evaluation reads those first (`board` in `due`, right after presented traders, the most profit
+  over 30 days first, made due at launch by `board_due_now`). Facts only: no tier, no "recommended", nothing about whether they'll make money next. The
   background reads a record for each wallet instead of the skill test; `SIGNALS_SKILL_TEST=1` brings back the skill
   test, Recommended and Explore as they were. With it off, no verdict reaches anything (`_worth_load` and
   `_stored_score` give nothing, and the once-a-day check doesn't run): the Feed's second part is **Top traders**

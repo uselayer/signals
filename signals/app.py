@@ -875,7 +875,7 @@ def _seed_records() -> None:
     """Every kept score's profit history into the Leaderboard's records (``Directory.seed_records``), a batch at a
     time with the directory free in between, so the Leaderboard has the traders already scored at once. Never over
     a record already read, and no reads: each wallet's own record replaces it when the evaluation gets to it."""
-    after, copied = "", 0
+    after, copied, due = "", 0, 0
     try:
         while not _directory_stop.is_set():
             n, last = directory().seed_records(after)
@@ -883,10 +883,14 @@ def _seed_records() -> None:
                 break
             after, copied = last, copied + n
             _directory_stop.wait(0.05)
+        # the ones the Leaderboard would list wait for their own read (no win rate till then): due now, top profit first
+        due = directory().board_due_now()
     except (sqlite3.Error, OSError) as e:
         print(f"leaderboard: copying scores into records stopped: {type(e).__name__}: {e}", flush=True)
     if copied:
         print(f"leaderboard: {copied} kept scores copied into records", flush=True)
+    if due:
+        print(f"leaderboard: {due} copied records due a read of their own, most profit first", flush=True)
 
 
 def evaluate_round(stop: threading.Event | None = None) -> dict[str, Any]:
@@ -2379,7 +2383,7 @@ def leaderboard(period: str = "30d", sort: str = "profit", category: str = "", q
                                    "positions_complete", "new_account", "paid_30d")}
             | {"win": _win_of(r, period)} for r in page["rows"]]  # fmt: skip
     return {"rows": rows, "total": page["total"], "more": page["more"], "offset": offset, "counts": counts,
-            "new_hidden": page["new_hidden"]}
+            "new_hidden": page["new_hidden"], "incomplete": page["incomplete"]}
 
 
 @app.get("/api/traders")
