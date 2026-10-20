@@ -10,12 +10,10 @@ Reads, about 5 to 8 a wallet where a full score takes about 50:
 
 - their latest trades (the evaluation's quick check, already read: ``trades``): usual trade, markets a day, last buy,
   and the average price they paid (the market's chance for what they bought: the context a win rate needs)
-- Polymarket's profit history (1 read): profit, volume and the weeks, from the same history the score reads
+- Polymarket's profit history (``whales.profit_history``, 1 read): profit, volume, the weeks, the profit line and
+  the worst drop, the same history (and the same code) a score reads
 - their completed positions (``whales.completed_positions``: their stats, positions held, closed positions, 3 to 6
   reads): the win rate, by when each closed (a position never redeemed, by when its market ended)
-
-The profit history has no public SDK call yet: ``_pnl_points`` reads it through the SDK's internals, the second
-stopgap beside the Feed's ``_open_positions`` (AGENTS.md), until uselayer has a public one.
 """
 
 from __future__ import annotations
@@ -24,9 +22,7 @@ import statistics
 from datetime import UTC, datetime
 from typing import Any
 
-from uselayer import Whales
-# stopgap: the score's own reading of the profit history (module docstring)
-from uselayer.whale_scores import _Curve, _trading
+from uselayer import ProfitHistory, Whales
 
 PERIODS = (7, 30, 90)  # days: the Leaderboard's 7D, 30D and 90D
 WEEKS = 12  # weeks up, of the last 12, as Recommended showed them
@@ -34,11 +30,6 @@ CLOSED_PAGES = 4  # closed positions read, 50 a page, newest first: 200, enough 
 HELD_PAGES = 1  # positions held, 500 a page: the ones settled but never redeemed (mostly losers) count too
 MERGE_S = 60  # fills of one market this close together are one trade, as the SDK's score merges them
 DAY = 86400
-
-
-def _pnl_points(whales: Whales, wallet: str) -> list[dict[str, Any]]:
-    """Polymarket's hourly profit history for ``wallet`` (one read on the background's budget). Stopgap: see above."""
-    return whales._poly.pnl_history(wallet)  # type: ignore[attr-defined, no-any-return]
 
 
 def _when(v: Any) -> float | None:
@@ -126,15 +117,15 @@ def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
     }
 
 
-def build(points: list[dict[str, Any]], positions: Any, trades: list[tuple[Any, ...]],
-          now: float) -> dict[str, Any]:  # fmt: skip
-    """A record from what was read: the profit history's ``points``, ``positions`` (the SDK's PositionRecord, or
-    None when it couldn't be read) and their latest ``trades``. Every figure that wasn't read is None, never 0."""
-    curve, end = _Curve(points), int(now)
+def build(history: ProfitHistory, positions: Any, trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
+    """A record from what was read: their profit ``history`` (the SDK's ProfitHistory), ``positions`` (the SDK's
+    PositionRecord, or None when it couldn't be read) and their latest ``trades``. Every figure that wasn't read is
+    None, never 0 (an empty history gives None for each)."""
+    end, since = int(now), history.since
     periods: dict[str, dict[str, Any]] = {}
     wins = _wins(positions.positions, positions.complete, now) if positions is not None else {}
     for d in PERIODS:
-        p = curve.period(end - d * DAY, end) if points else {}
+        p = history.period(end - d * DAY, end)
         won = wins.get(d)
         periods[f"{d}d"] = {
             "trading_pnl": p.get("trading_pnl"),
@@ -145,26 +136,20 @@ def build(points: list[dict[str, Any]], positions: Any, trades: list[tuple[Any, 
             "closed": None if won is None else won[1],
         }
     # all time: from their first trade (the history starts there, at 0)
-    periods["all"] = curve.period(curve.since - 1, end) if points and curve.since is not None else {}
-    weeks = curve.known_steps(end - WEEKS * 7 * DAY, end, 7 * DAY) if points else None
-    daily = None
-    if points:
-        marks = [(datetime.fromtimestamp(t, UTC).date().isoformat(), curve.at(t, _trading))
-                 for t in range(end - 90 * DAY, end + 1, DAY)]  # fmt: skip
-        base = curve.at(end - 90 * DAY, _trading)
-        if base is not None and all(v is not None for _, v in marks):
-            daily = [[day, round(v - base, 2)] for day, v in marks]  # type: ignore[operator]
+    periods["all"] = history.period(since - 1, end) if since is not None else {}
+    weeks = history.weekly(end - WEEKS * 7 * DAY, end)
+    daily = history.daily(end - 90 * DAY, end)
     known = [w for w in weeks or [] if w is not None]
     return {
         "read_at": now,
-        "since": curve.since,
+        "since": since,
         "periods": periods,
         # the biggest fall from a high, hour by hour, as a score gives it (a trader's page shows it)
-        "worst_drop": {f"{d}d": curve.worst_drop(end - d * DAY, end) for d in PERIODS} if points else None,
+        "worst_drop": {f"{d}d": history.worst_drop(end - d * DAY, end) for d in PERIODS} if since is not None else None,
         "pnl_weeks": weeks,
         "weeks_up": sum(1 for w in known if w > 0) if weeks is not None else None,
         "weeks_known": len(known) if weeks is not None else None,
-        "pnl_daily": daily,
+        "pnl_daily": [list(x) for x in daily] if daily is not None else None,
         "positions_complete": None if positions is None else bool(positions.complete),
         **_style(trades, now),
     }
@@ -176,9 +161,9 @@ def read(whales: Whales, wallet: str, trades: list[tuple[Any, ...]],
     completed positions may fail on their own (Polymarket's firewall, a list that slipped), leaving the win rate
     unknown rather than the whole record."""
     now = datetime.now(UTC).timestamp() if now is None else now
-    points = _pnl_points(whales, wallet)
+    history = whales.profit_history(wallet)
     try:
         positions = whales.completed_positions(wallet, max_pages=CLOSED_PAGES, held_pages=HELD_PAGES)
     except Exception:  # VenueError mostly: the record goes on without a win rate
         positions = None
-    return build(points, positions, trades, now)
+    return build(history, positions, trades, now)

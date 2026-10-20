@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from uselayer import ProfitHistory
 
 from signals import app as engine
 from signals import records
@@ -99,9 +100,9 @@ def test_a_traders_page_without_a_fresh_record_reads_one_and_keeps_it_for_the_le
     asked: list[str] = []
     fill = SimpleNamespace(at=datetime.fromtimestamp(now - 3600, UTC), action="buy", market="0xm1:0", usd=90.0, price=0.9)
     monkeypatch.setattr(engine.reads.whales, "trades", lambda venue, w, limit: asked.append("trades") or [fill])
-    monkeypatch.setattr(records, "_pnl_points", lambda wh, w: asked.append("pnl") or [
+    monkeypatch.setattr(engine.reads.whales, "profit_history", lambda w: asked.append("pnl") or ProfitHistory([
         {"timestamp": int(now - 40 * DAY), "realized_pnl": 0, "unrealized_pnl": 0, "volume_usdc": 0},
-        {"timestamp": int(now - DAY), "realized_pnl": 30, "unrealized_pnl": 0, "volume_usdc": 900}])
+        {"timestamp": int(now - DAY), "realized_pnl": 30, "unrealized_pnl": 0, "volume_usdc": 900}]))
     monkeypatch.setattr(engine.reads.whales, "completed_positions", lambda w, **k: asked.append("positions") or SimpleNamespace(positions=[], complete=True), raising=False)
     got = TestClient(engine.app).get(f"/api/worth/{AMY}").json()
     assert asked == ["trades", "pnl", "positions"]
@@ -154,7 +155,7 @@ def test_the_average_price_paid_counts_each_outcome_once_whatever_its_size() -> 
               (now - 40, True, "0xm2", 10.0, 0.2, "0xm2:1"),
               (now - 40 * DAY, True, "0xm3", 10.0, 0.01, "0xm3:0"),  # older than 30 days
               (now - 30, False, "0xm4", 10.0, 0.5, "0xm4:0")]  # a sell  # fmt: skip
-    got = records.build([], None, trades, now)
+    got = records.build(ProfitHistory([]), None, trades, now)
     # 0xm1:0: $1,000 for 1,100 contracts (91¢); 0xm2:1: 20¢; each outcome once, not by dollars
     assert got["paid_30d"] == pytest.approx((1000 / 1100 + 0.2) / 2, abs=1e-4)
-    assert records.build([], None, [t[:4] for t in trades], now)["paid_30d"] is None  # no prices read: unknown
+    assert records.build(ProfitHistory([]), None, [t[:4] for t in trades], now)["paid_30d"] is None  # no prices read: unknown
