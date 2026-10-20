@@ -147,6 +147,12 @@ def kalshi_of(market: str | None, token: str | None = None, outcome: str | None 
     return us_match.twins.kalshi(market, token, outcome)
 
 
+
+def twins_of(market: str | None, token: str | None = None, outcome: str | None = None) -> dict[str, Any]:
+    """A Polymarket International outcome's matches the page shows: ``us`` (``us_of``) and ``kalshi`` (``kalshi_of``),
+    where the trade page prices a buy when there is one."""
+    return {"us": us_of(market, token, outcome), "kalshi": kalshi_of(market, token, outcome)}
+
 # ---- a small cache, so clicking around doesn't re-read the venues ----
 
 _cache: dict[str, tuple[float, Any]] = {}
@@ -248,7 +254,7 @@ def trading_now(response: Response, min_usd: float = 250, _: None = Depends(feed
     except VenueError:
         cats = {}  # the trades still show, under All
     _feed_note(rows[:100], cats)
-    return [t | ({"category": cats.get(t["market"]), "us": us_of(t["market"], t.get("token"), t.get("outcome"))}
+    return [t | ({"category": cats.get(t["market"]), **twins_of(t["market"], t.get("token"), t.get("outcome"))}
                  if t["venue"] == "polymarket" else {"category": None}) for t in out]
 
 
@@ -277,11 +283,11 @@ def trader(venue: str, trader_id: str) -> dict[str, Any]:
     links = position_links(rows or [])
     out["positions"] = [
         p | {"status": bet_status(p["avg_price"], p["current_price"]), "url": links.get(p["market"])}
-        | ({"us": us_of(p["market"], None, p.get("outcome"))} if venue == "polymarket" else {})
+        | (twins_of(p["market"], None, p.get("outcome")) if venue == "polymarket" else {})
         for p in out["positions"]
     ]
     if venue == "polymarket":
-        out["trades"] = [t | {"us": us_of(t["market"], t.get("token"), t.get("outcome"))} for t in out["trades"]]
+        out["trades"] = [t | twins_of(t["market"], t.get("token"), t.get("outcome")) for t in out["trades"]]
         if "volume_contracts" not in out["stats"]:  # uselayer 0.12: the trader's volume is contracts too
             out["trader"]["volume_unit"] = "contracts"
         out["stats"] = poly_stats(out["stats"])
@@ -2867,7 +2873,7 @@ def _bets_of(d: Any, who: dict[str, Any], since: datetime | None = None) -> list
              "at": t.at, "usd": 0.0, "size": 0.0, "price_now": now.get(t.market), "token": t.token},
         )  # fmt: skip
         b["at"], b["usd"], b["size"] = max(b["at"], t.at), b["usd"] + t.usd, b["size"] + t.size
-    return [b | {"price": b["usd"] / b["size"], "at": b["at"].isoformat(), "us": us_of(b["market"], b["token"], b["outcome"])}
+    return [b | {"price": b["usd"] / b["size"], "at": b["at"].isoformat(), **twins_of(b["market"], b["token"], b["outcome"])}
             for b in one.values()]  # fmt: skip
 
 
@@ -2887,7 +2893,7 @@ def _sells_of(d: Any, who: dict[str, Any], since: datetime) -> list[dict[str, An
              "usd": 0.0, "size": 0.0, "held": t.market in now, "price_now": now.get(t.market), "token": t.token},
         )  # fmt: skip
         b["at"], b["usd"], b["size"] = max(b["at"], t.at), b["usd"] + t.usd, b["size"] + t.size
-    return [b | {"price": b["usd"] / b["size"], "at": b["at"].isoformat(), "us": us_of(b["market"], b["token"], b["outcome"])}
+    return [b | {"price": b["usd"] / b["size"], "at": b["at"].isoformat(), **twins_of(b["market"], b["token"], b["outcome"])}
             for b in one.values()]  # fmt: skip
 
 
@@ -3020,26 +3026,46 @@ def _their_trade(req: OneTrade, price: float | None = None) -> WhaleTrade:
 
 @app.post("/api/trade/preview")
 def trade_preview(req: OneTrade) -> dict[str, Any]:
-    """What buying this outcome now would cost and pay on Polymarket, for anyone's trade: an estimate, never an
-    order or a promised fill. Read here, never taken from the page: the market's status (the SDK says, in
-    ``reason``, when Polymarket lists it closed or isn't taking orders) and the order book, priced up to
-    ``BUY_LIMIT`` above the cheapest price for sale now (``best_price``; ``limit`` is the most a contract is
-    priced at). ``price_changed``: the book moved between the reads, so there's no quote, only "refresh". Their
-    price (``their_price``) is context only. ``priced_at``: when it was read. Sends nothing; each quote is counted
-    (``quotes``: outcome, reads, time taken), with nothing about who asked or which trade."""
+    """What buying this outcome now would cost and pay, for anyone's trade: an estimate, never an order or a
+    promised fill. On Kalshi when the outcome has a verified Kalshi match (``kalshi_of``, looked up here, never
+    taken from the page; ``venue`` "kalshi", ``kalshi`` the match), else on Polymarket International. Read here,
+    never taken from the page: the market's status (the SDK says, in ``reason``, when the exchange lists it closed
+    or isn't taking orders) and the order book, priced up to ``BUY_LIMIT`` above the cheapest price for sale now
+    (``best_price``; ``limit`` is the most a contract is priced at). When Kalshi doesn't list the matched market or
+    isn't taking orders on it, it's priced on International instead, with Kalshi's reason (``kalshi_closed``).
+    ``price_changed``: International's book moved between the reads, so there's no quote, only "refresh". Their
+    price (``their_price``) is context only (it was on International). ``priced_at``: when it was read. Sends
+    nothing; each quote is counted (``quotes``: outcome, reads, time taken), with nothing about who asked or
+    which trade."""
     if req.spend is not None and req.spend <= 0:
         raise HTTPException(400, detail="Enter an amount above $0.")
     size: dict[str, Any] = {"spend": req.spend} if req.spend else {"size": float(PREVIEW_SIZE)}
     t0, reads_made = time.monotonic(), [0]
+    k = kalshi_of(req.market, req.token, req.outcome)
+    extra: dict[str, Any] = {}
     try:
-        p = _buy_now(req, size, reads_made)
+        p = _buy_on_kalshi(req, k, size, reads_made) if k and k.get("found") else None
+        if p is not None and not p.ok and _quote_outcome(p, False) == "closed":
+            extra, p = {"kalshi_closed": p.reason}, None
+        elif p is not None:
+            extra = {"kalshi": k}
+        if p is None:
+            p = _buy_now(req, size, reads_made)
     except VenueError as e:
         count_quote("rate_limited" if e.code == "rate_limited" else "error", reads_made[0], t0)
         raise venue_error(e) from e
     changed = _price_changed(p)
     count_quote(_quote_outcome(p, changed), reads_made[0], t0)
-    return p.to_dict() | {"their_price": req.price, "priced_at": datetime.now(UTC).isoformat(),  # type: ignore[no-any-return]
-                          "price_changed": changed}  # fmt: skip
+    return p.to_dict() | extra | {"their_price": req.price, "priced_at": datetime.now(UTC).isoformat(),  # type: ignore[no-any-return]
+                                  "price_changed": changed}  # fmt: skip
+
+
+def _buy_on_kalshi(req: OneTrade, k: dict[str, Any] | None, size: dict[str, Any], reads_made: list[int]) -> Any:
+    """The SDK prices the buy on its verified Kalshi match (``k``: the ticker and the side there), from Kalshi's
+    public book up to ``BUY_LIMIT`` above the cheapest ask now, in one market read and one book read."""
+    assert k is not None
+    reads_made[0] += 2
+    return reads.whales.preview_kalshi(_their_trade(req), k["market_id"], k["side"], **size, max_slippage=BUY_LIMIT)
 
 
 def _buy_now(req: OneTrade, size: dict[str, Any], reads_made: list[int]) -> Any:

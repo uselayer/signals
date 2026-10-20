@@ -1016,9 +1016,30 @@ function usBox(b, { inQuote = false } = {}) {
     </details></div>`;
 }
 // Under "What buying now costs": the button for the exchange the estimate is for, right under it, then Polymarket US.
-function buyButtons(b) {
-  const intl = b.url ? `<a class="btn wide" id="buyon" href="${esc(b.url)}" target="_blank" rel="noopener" style="display:block;text-align:center">Buy on ${INTL} ↗</a>
-    <p class="fine">Signals places no orders. You buy on the exchange yourself.</p>` : "";
+// With a verified Kalshi match the estimate is Kalshi's (``p.venue``; before the first quote, ``b.kalshi``), so
+// "Buy on Kalshi" leads, how the two may pay out differently in view, and International, where they traded, is a
+// link under it. A quote priced on International (Kalshi not taking orders, ``p.kalshi_closed``) gets its button.
+const KALSHI = "Kalshi";
+const onKalshi = (b, p) => p ? p.venue === "kalshi" : !!b.kalshi?.found;
+const venueOf = (p) => p?.venue === "kalshi" ? KALSHI : INTL;
+const FINE = `<p class="fine">Signals places no orders. You buy on the exchange yourself.</p>`;
+const bigBuy = (url, name) => `<a class="btn wide" id="buyon" href="${esc(url)}" target="_blank" rel="noopener" style="display:block;text-align:center">Buy on ${name} ↗</a>`;
+function kalshiBox(b, k) {
+  const diffs = k.differences || [];
+  return `<div class="usline">
+    ${diffs.length ? `<p>How Kalshi and ${INTL} may pay out differently:</p><ul>${diffs.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>` : ""}
+    ${b.url ? `<a class="ext" id="buyintl" href="${esc(b.url)}" target="_blank" rel="noopener">Or buy on ${INTL}, where they traded ↗</a>` : ""}
+    <details class="qmore"><summary>Match details</summary>
+      <p>Layer matched this market on Kalshi: you'd buy <b>${k.side === "no" ? "No" : "Yes"}</b> there.${diffs.length ? "" : " Layer lists no differences in how the two pay out."}</p>
+      <p>This trade was made on ${INTL}. Signals follows traders there and doesn't see trades on Kalshi, so this trader's price isn't one to expect there.</p>
+    </details></div>`;
+}
+function buyButtons(b, p) {
+  if (onKalshi(b, p)) {
+    const k = p?.kalshi || b.kalshi;
+    return bigBuy(k.url, KALSHI) + FINE + kalshiBox(b, k) + usBox(b, { inQuote: true });
+  }
+  const intl = b.url ? bigBuy(b.url, INTL) + FINE : "";
   return intl + (b.venue === "kalshi" ? "" : usBox(b, { inQuote: true }));
 }
 
@@ -1102,7 +1123,8 @@ function priceLine(p, b) {
   const several = p.worst_price != null && p.worst_price > p.price + 0.0005;
   const fee = p.contracts ? ` (${c1(p.total / p.contracts)} with the fee)` : "";
   const how = !p.depth_checked ? ", the cheapest price for sale now" : several ? " on average" : "";
-  return `Your estimated price: ${c1(p.price)} a contract${how}${fee}.${b.price != null ? ` Trader paid ${cents(b.price)}.` : ""}`;
+  const where = p.venue === "kalshi" ? ` on ${INTL}` : "";
+  return `Your estimated price: ${c1(p.price)} a contract${how}${fee}.${b.price != null ? ` Trader paid ${cents(b.price)}${where}.` : ""}`;
 }
 // When the amount can't be priced (p.ok false). Only when it's MORE than the book holds within the limit is it
 // "Only $340 is for sale…", with "Use $340 instead" from $1; a closed market, an amount too small for Polymarket's
@@ -1130,7 +1152,7 @@ function freshLine(p) {
   return `<p class="fine">${when}${TRADE_TIME}</p>`;
 }
 // The one line always shown under a quote: whose book it is, how fresh, and that it's no promise.
-const quoteNote = (p) => `<p class="qnote">${INTL} estimate${readAt(p) ? ` · read ${readAt(p)}` : ""} · not a guaranteed fill</p>`;
+const quoteNote = (p) => `${p.kalshi_closed ? `<p class="qnote">${esc(sdkText(p.kalshi_closed))} This is ${INTL}'s estimate.</p>` : ""}<p class="qnote">${venueOf(p)} estimate${readAt(p) ? ` · read ${readAt(p)}` : ""} · not a guaranteed fill</p>`;
 // Everything behind the numbers, folded: the facts as rows, then the rules in a sentence each. ``twin``: Polymarket US
 // is said once, in its own line under the button, so the fold doesn't say it again.
 function quoteFold(p, twin = false) {
@@ -1146,8 +1168,9 @@ function quoteFold(p, twin = false) {
     </dl>
     ${p.best_price != null && p.limit != null ? `<p>Priced up to 3¢ above the cheapest price for sale: offers above ${c1(p.limit)} aren't counted.</p>` : ""}
     <p>Each contract pays $1 if it wins and nothing if it loses.</p>
-    <p>The order book can change before your order reaches ${INTL}, so it may fill higher, only in part, or not at all.</p>
-    ${twin ? "" : `<p>This estimate is for ${INTL} only. Polymarket US has its own order book and fees, so it doesn't apply there.</p>`}
+    <p>The order book can change before your order reaches ${venueOf(p)}, so it may fill higher, only in part, or not at all.</p>
+    ${p.venue === "kalshi" ? `<p>This estimate is for Kalshi only. ${INTL} and Polymarket US have their own order books and fees, so it doesn't apply there.</p>`
+      : twin ? "" : `<p>This estimate is for ${INTL} only. Polymarket US has its own order book and fees, so it doesn't apply there.</p>`}
     <p>${TRADE_TIME}</p>
   </details>`;
 }
@@ -1189,9 +1212,9 @@ async function costBox(box, b, amount = 10) {
     <div class="amount"><label class="box"><span class="muted">$</span><input id="amt" inputmode="decimal" autocomplete="off" aria-label="Amount in dollars" value="${amount}"></label>
       ${PICKS.map((v) => `<button type="button" data-amt="${v}" aria-pressed="${v === amount}">$${v}</button>`).join("")}</div>
     <div id="pv"><div class="skel" style="width:70%;height:14px"></div></div>
-    ${buyButtons(b)}`;
-  const input = $("#amt", box), pv = $("#pv", box);
-  let seq = 0, timer = null;
+    <div id="buys">${buyButtons(b)}</div>`;
+  const input = $("#amt", box), pv = $("#pv", box), buys = $("#buys", box);
+  let seq = 0, timer = null, kalshiShown = onKalshi(b);
   const spendNow = () => { const v = parseFloat(String(input.value).replace(/[$,\s]/g, "")); return Number.isFinite(v) ? Math.round(v * 100) / 100 : null; };
   const show = async () => {
     const spend = spendNow(), my = ++seq;
@@ -1206,6 +1229,7 @@ async function costBox(box, b, amount = 10) {
       return;
     }
     if (my !== seq || !box.isConnected) return; // a newer amount is on its way
+    if (onKalshi(b, p) !== kalshiShown) { kalshiShown = onKalshi(b, p); buys.innerHTML = buyButtons(b, p); } // the engine priced the other exchange
     if (!p.ok && p.price_changed) { // the book moved between the engine's reads: no estimate, never a stale price
       pv.innerHTML = `<p><b>Price changed—refresh quote</b></p><p>The cheapest price for sale moved while we read Polymarket's order book, so there's no estimate right now.</p>
         <p><button type="button" class="btn ghost small" id="requote">Refresh quote</button></p>${freshLine(p)}`;
