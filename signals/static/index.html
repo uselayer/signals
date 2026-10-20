@@ -1747,7 +1747,7 @@ const lbPct = (x) => {
 // Realized profit by category, all time (Polymarket's leaderboard, parlays included), kept once a day for the traders
 // we recommend (the engine's daily job): the category picker sorts by it and can keep only those who made money in
 // it. A trader not read yet, or with none in that category (they never traded it), has "—", never $0.
-const REALIZED_CATS = ["Sports", "Politics", "Crypto", "Esports", "Economics", "Finance", "Culture", "Tech", "Weather", "Mentions", "Uncategorised", "All except Sports"];
+const REALIZED_CATS = ["Sports", "Politics", "Crypto", "Esports", "Economics", "Finance", "Culture", "Tech", "Weather", "Mentions", "Uncategorised"];
 // The engine's name for markets Polymarket puts in no category (kept that way in directory.db), as a visitor reads it.
 const UNCATEGORISED = "Uncategorised";
 const catLabel = (c) => c === UNCATEGORISED ? "Other markets" : c;

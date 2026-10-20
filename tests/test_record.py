@@ -149,17 +149,17 @@ def test_made_money_on_comes_from_every_position_they_have_had_and_is_kept(
     assert client.get("/api/completed/0x" + "b" * 40).status_code >= 400
 
 
-def test_realized_profit_by_category_names_them_plainly_with_all_except_sports() -> None:
+def test_realized_profit_by_category_names_them_plainly() -> None:
     v = engine.category_view({"categories": {"SPORTS": 5000.0, "POLITICS": 1200.5, "GEOPOLITICS": 10.0, "CRYPTO": -300.0},
                               "overall": 5950.5, "uncategorised": 40.0, "read_at": "2026-10-19T00:00:00+00:00"})  # fmt: skip
     # a category Polymarket adds that we don't know yet is uncategorised, with markets in none
     assert v["rows"] == [{"category": "Sports", "usd": 5000.0}, {"category": "Politics", "usd": 1200.5},
                          {"category": "Uncategorised", "usd": 50.0}, {"category": "Crypto", "usd": -300.0}]  # fmt: skip
-    assert (v["overall"], v["except_sports"]) == (5950.5, 950.5)
+    assert v["overall"] == 5950.5 and "except_sports" not in v  # no "All except Sports" (the owner, 20 Oct)
     none = engine.category_view({"categories": {"ESPORTS": 80.0}, "overall": 80.0, "uncategorised": 0.0, "read_at": None})
-    assert none["rows"] == [{"category": "Esports", "usd": 80.0}] and none["except_sports"] == 80.0  # $0 left out
+    assert none["rows"] == [{"category": "Esports", "usd": 80.0}]   # $0 left out
     unread = engine.category_view({"categories": {}, "overall": None, "uncategorised": None, "read_at": None})
-    assert (unread["rows"], unread["except_sports"]) == ([], None)
+    assert (unread["rows"], unread["overall"]) == ([], None)
 
 
 def test_realized_profit_by_category_is_read_on_the_checks_budget_and_kept(
@@ -181,7 +181,7 @@ def test_realized_profit_by_category_is_read_on_the_checks_budget_and_kept(
     monkeypatch.setattr(fake, "realized_by_category", realized_by_category, raising=False)
     r = client.get(f"/api/categories/{W}").json()
     assert r["rows"] == [{"category": "Sports", "usd": 900.0}, {"category": "Politics", "usd": 100.0}]
-    assert (r["overall"], r["except_sports"]) == (1000.0, 100.0)
+    assert r["overall"] == 1000.0
     client.get(f"/api/categories/{W}")
     assert asked == [("polymarket", W)]  # 12 reads, kept CATEGORY_TTL_S
     assert client.get("/api/categories/0x12").status_code == 400
