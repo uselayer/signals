@@ -350,20 +350,21 @@ def record_of_score(s: dict[str, Any], at: float) -> dict[str, Any] | None:
     weeks = s.get("pnl_weeks") if isinstance(s.get("pnl_weeks"), list) else None
     known = [w for w in weeks or [] if w is not None]
     all_pnl, all_vol = _num(s.get("trading_pnl")), _num(s.get("volume"))
-    per = {p: {"trading_pnl": (periods.get(p) or {}).get("trading_pnl"), "volume": (periods.get(p) or {}).get("volume"),
-               "return_per_dollar": (periods.get(p) or {}).get("return_per_dollar"), "won": None, "closed": None}
-           for p in ("7d", "30d", "90d")}  # fmt: skip
+    per = {p: {k: (periods.get(p) or {}).get(k) for k in ("trading_pnl", "realized", "volume", "return_per_dollar")}
+           | {"won": None, "closed": None} for p in ("7d", "30d", "90d")}  # fmt: skip
     per["all"] = {"trading_pnl": all_pnl, "volume": all_vol,
                   "return_per_dollar": round(all_pnl / all_vol, 5) if all_pnl is not None and all_vol else None}  # fmt: skip
     return {
         "read_at": at,
         "since": None,
         "periods": per,
+        "worst_drop": s.get("worst_drop") if isinstance(s.get("worst_drop"), dict) else None,
         "pnl_weeks": weeks,
         "weeks_up": sum(1 for w in known if w > 0) if weeks is not None else None,
         "weeks_known": len(known) if weeks is not None else None,
         "pnl_daily": s.get("pnl_daily"),
         "positions_complete": None,
+        "paid_30d": None,
         "typical_usd": _num(s.get("typical_usd")),
         "buys_30d": None,
         "markets_per_day": _style(s)[1],

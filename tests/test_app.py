@@ -288,6 +288,7 @@ def test_signals_reads_polymarket_only_unless_kalshi_is_switched_on(
     monkeypatch.setattr(engine.reads.whales, "trader", lambda *a, **k: asked.append(("trader", a[0])) or None)
     monkeypatch.setattr(engine.reads.whales, "links", lambda *a, **k: asked.append(("links",)) or [])
     assert engine.VENUES == ("polymarket",)  # the default
+    monkeypatch.setattr(engine, "SKILL_TEST", False)  # the default: the Leaderboard
     assert api.get("/api/config").json() == {
         "venues": ["polymarket"], "clerk_key": None, "alerts": False, "explore": False, "leaderboard": True,
         "posthog_key": None}

@@ -48,6 +48,7 @@ def test_a_record_has_profit_volume_and_profit_per_dollar_for_each_period_and_al
     rec = records.build(history(100, 10.0), positions([]), [], NOW)
     p = rec["periods"]
     assert p["7d"]["trading_pnl"] == 70 and p["7d"]["volume"] == 7000 and p["7d"]["return_per_dollar"] == 0.01
+    assert p["30d"]["realized"] == 300  # profit taken (history() has nothing open), a trader's page's headline
     assert p["30d"]["trading_pnl"] == 300 and p["90d"]["trading_pnl"] == 900
     assert p["all"]["trading_pnl"] == 1000 and p["all"]["volume"] == 100_000  # from their first trade
     assert rec["since"] == int(NOW - 100 * DAY)
@@ -173,8 +174,8 @@ def test_a_score_kept_before_profit_by_period_isnt_copied() -> None:
 # ---- the evaluation ----
 
 
-def trade(at: float, action: str = "buy", market: str = "0xm1", usd: float = 100.0) -> Any:
-    return SimpleNamespace(at=datetime.fromtimestamp(at, UTC), action=action, market=f"{market}:0", usd=usd)
+def trade(at: float, action: str = "buy", market: str = "0xm1", usd: float = 100.0, price: float = 0.5) -> Any:
+    return SimpleNamespace(at=datetime.fromtimestamp(at, UTC), action=action, market=f"{market}:0", usd=usd, price=price)
 
 
 @pytest.fixture

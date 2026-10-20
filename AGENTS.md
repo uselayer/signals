@@ -16,7 +16,14 @@ behind Vercel (see README, "Hosting").
   trade; about 6 reads), a buy in the last 30 days and 5+ positions closed in 90 days, ranked by what they did
   (`/api/leaderboard`). Facts only: no tier, no "recommended", nothing about whether they'll make money next. The
   background reads a record for each wallet instead of the skill test; `SIGNALS_SKILL_TEST=1` brings back the skill
-  test, Recommended and Explore as they were.
+  test, Recommended and Explore as they were. With it off, no verdict reaches anything (`_worth_load` and
+  `_stored_score` give nothing, and the once-a-day check doesn't run): the Feed's second part is **Top traders**
+  (`#/recommended`, `/api/live` with `pool` "top": the Leaderboard's first `FEED_TOP` by trading profit over 30 days,
+  neutral cards, copying offered for nobody); a trader's page is their record (`record_page`: one read within 6
+  hours as kept, else read now on the checks' budget, under "Check now"'s limits; no tier, "Why they're here" or
+  checks); alerts name traders from the directory. A win rate always shows the average price they paid over 30
+  days beside it (`paid_30d`, from the trades the quick check reads, each outcome once): a price is the market's
+  chance, so paying 97¢ wins about 97% of the time by buying alone.
 - Signals is Polymarket-only for now; the SDK stays multi-venue. `SIGNALS_VENUES` (`VENUES` in `app.py`, default
   `polymarket`; `polymarket,kalshi` adds Kalshi back) is the one switch: every read passes it to the SDK
   (`big_trades(venues=…)`, `top(venue=…)`), and a venue that's off is refused, never read and then hidden. The
