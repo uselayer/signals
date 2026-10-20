@@ -248,13 +248,15 @@ def test_the_worst_drop_is_the_scores_and_a_score_from_before_it_shows_a_dash(ru
     assert got[0] == '<span class="loss">−$691K</span>' and got[1] == "$0.00" and got[2] is None and got[3] is None
 
 
-def test_the_category_card_has_all_except_sports_and_says_what_it_counts(run_js: Any) -> None:
+def test_the_category_card_says_what_it_counts_with_no_all_except_sports(run_js: Any) -> None:
+    """The owner, 20 Oct, on BreakTheBank's card: "what do we mean by all except sports?" It was the rows above it
+    added up, read as a category: no row."""
     html = run_js(PROFILE, """categoryCard({rows: [{category: "Sports", usd: 5000}, {category: "Uncategorised", usd: 50},
       {category: "Crypto", usd: -300}], overall: 4750, except_sports: -250})""")
     assert "Realized profit by category, all time" in html
-    for row in ("Sports", "Other markets", "Crypto", "All except Sports", "All categories"):
+    for row in ("Sports", "Other markets", "Crypto", "All categories"):
         assert f"<dt>{row}" in html, row
-    assert '<span class="loss">−$250</span>' in html and '<span class="gain">+$4.8K</span>' in html
+    assert "All except Sports" not in html and "−$250" not in html and '<span class="gain">+$4.8K</span>' in html
     note = "Parlays included. Polymarket's figures, updated every few hours. Trades still open aren't counted."
     assert note in html.replace("&#39;", "'")  # the owner's words, as they are
     loading, failed, empty = run_js(PROFILE, "[categoryCard(null), categoryCard({error: true}), categoryCard({rows: [], overall: null})]")
@@ -262,8 +264,7 @@ def test_the_category_card_has_all_except_sports_and_says_what_it_counts(run_js:
 
 
 def test_the_category_card_never_repeats_a_row_or_shows_a_0_for_categories_never_traded(run_js: Any) -> None:
-    """OhWhenTheReds, 19 Oct: all $673,545 in Sports. One category is that row alone: no "All except Sports" $0.00 and
-    no "All categories" repeating it. Sports and one other: "All except Sports" would be that other row again."""
+    """OhWhenTheReds, 19 Oct: all $673,545 in Sports. One category is that row alone: no "All categories" repeating it."""
     only, two, none = run_js(PROFILE, """[categoryCard({rows: [{category: "Sports", usd: 673545.48}], overall: 673545.48, except_sports: 0}),
       categoryCard({rows: [{category: "Sports", usd: 500}, {category: "Politics", usd: 200}], overall: 700, except_sports: 200}),
       categoryCard({rows: [{category: "Politics", usd: 900}, {category: "Crypto", usd: 100}], overall: 1000, except_sports: 1000})]""")
