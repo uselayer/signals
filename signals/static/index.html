@@ -860,7 +860,7 @@ const NOT_A_TIP = "Use their trades to learn what they're doing, not as a signal
 // (Following, Recommended), or Polymarket's feed of every trade, which runs 3–5 minutes behind (Big trades).
 // "Updated" is measured: when the oldest of what's shown was read. Each card's time is when the trade was made.
 const LAGS = {
-  traders: ["Typically read every 30–60 s", "Signals typically reads each of these traders' trades on Polymarket every 30 seconds (Recommended traders about once a minute); it can take longer when Polymarket is busy. “Updated” is when the oldest of them was last read; each trade's time is when it was made."],
+  traders: ["Typically read every 30–60 s", "Signals typically reads each of these traders' trades on Polymarket every 30 seconds (traders nobody follows about once a minute); it can take longer when Polymarket is busy. “Updated” is when the oldest of them was last read; each trade's time is when it was made."],
   big: ["Typically 3–5 min behind", "Big trades come from Polymarket's feed of every trade, which typically runs 3–5 minutes behind, so they show up here a few minutes after they're made."],
 };
 const lag = (kind) => `<span class="lag"><button type="button" class="lag-btn" aria-describedby="lagtip">${LAGS[kind][0]}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></button><span class="lag-tip" role="tooltip" id="lagtip">${LAGS[kind][1]}</span></span>`;
@@ -1244,17 +1244,19 @@ function bindActions(root) {
 // and Recommended (#/recommended: $1,000 or more from Traders' three sections, quieter on purpose and
 // never above Following). Both show your markets, the ones picked at onboarding or with Traders' chips; the chips
 // live on Traders only, the Feed says which markets it shows and Change opens the same picker as onboarding.
-// Big trades (#/big: $250 or more right now) stays reachable from the foot of Recommended.
+// Big trades (#/big: $250 or more right now) stays reachable from the foot of Recommended. With the skill test off
+// (boardOn) the second part is Top traders, at the same address: big trades from the Leaderboard's top traders by
+// trading profit over 30 days, as facts, with no tier and no "we recommend".
 const feed = { data: null, at: 0, err: null, mine: null, mineAt: 0, mineErr: null, onlyIn: true, big: null, bigAt: 0, bigErr: null, seq: 0 };
 let feedTimer = null;
 const onFeed = () => routeName().startsWith("feed");
 const feedView = () => ({ "feed:big": "big", "feed:rec": "rec" })[routeName()] || "follow";
-const FEED_PARTS = [["follow", "#/", "Following"], ["rec", "#/recommended", "Recommended"]];
+const feedParts = () => [["follow", "#/", "Following"], ["rec", "#/recommended", boardOn ? "Top traders" : "Recommended"]];
 // What each view keeps: [data, updated at, error] keys in `feed`.
 const FEED_KEYS = { follow: ["mine", "mineAt", "mineErr"], rec: ["data", "at", "err"], big: ["big", "bigAt", "bigErr"] };
 
 async function feedPage(view) {
-  $("#app").innerHTML = `<nav class="seg" aria-label="Feed">${FEED_PARTS
+  $("#app").innerHTML = `<nav class="seg" aria-label="Feed">${feedParts()
     .map(([k, href, l]) => `<a href="${href}" class="${view === k ? "on" : ""}"${view === k ? ' aria-current="page"' : ""}>${l}</a>`).join("")}</nav>
     <div id="fbar"></div><div id="flist">${skelCards(3)}</div>`;
   if (feed[FEED_KEYS[view][0]] || (view === "follow" && !canFollowFeed())) renderFeed();
@@ -1314,19 +1316,22 @@ function renderFeed() {
   if (view === "follow") return renderFollowing();
   const r = feed.data;
   if (!r) { $("#fbar").innerHTML = ""; $("#flist").innerHTML = errorState(feed.err || "No answer from the app."); bindActions($("#flist")); return; }
+  const top = r.pool === "top";
   if (!r.traders.length) {
     $("#fbar").innerHTML = "";
-    $("#flist").innerHTML = emptyState("No traders to recommend yet",
+    $("#flist").innerHTML = top ? emptyState("No top traders yet", "Top traders fills in as the leaderboard reads traders' records.", `<a class="btn ghost" href="#/traders">See the leaderboard</a>`)
+      : emptyState("No traders to recommend yet",
       "The first check of Polymarket traders takes 20–30 minutes. Recommended fills in once it finds traders worth following.",
       `<a class="btn ghost" href="#/traders">See the traders</a>`);
     return;
   }
   const min = `$${Math.round(r.min_usd ?? 1000).toLocaleString("en-US")}`; // "$1,000", as everywhere else
   renderTrades(r, feed.at, feed.err, {
-    who: `${plural(r.traders.length, "trader")} we recommend`,
-    note: `<p class="foot-note" style="margin:0 0 12px">Only trades of ${min} or more from Sharps. ${NOT_A_TIP}</p>`,
-    none: [`No trades of ${min} or more in the last ${r.hours} hours`, "Recommended shows only bigger trades, so it's often quiet. Trades show up here a few minutes after they're made."],
-    sheet: () => followingSheet(r.traders, "rec"),
+    who: top ? `${plural(r.traders.length, "top trader")}` : `${plural(r.traders.length, "trader")} we recommend`,
+    note: `<p class="foot-note" style="margin:0 0 12px">${top ? `Only trades of ${min} or more from the ${r.traders.length} traders with the most trading profit over the last 30 days. Past results, not a prediction.`
+      : `Only trades of ${min} or more from Sharps.`} ${NOT_A_TIP}</p>`,
+    none: [`No trades of ${min} or more in the last ${r.hours} hours`, `${top ? "Top traders" : "Recommended"} shows only bigger trades, so it's often quiet. Trades show up here a few minutes after they're made.`],
+    sheet: () => followingSheet(r.traders, top ? "top" : "rec"),
     foot: `<p class="foot-note"><a class="link" href="#/big">All big trades right now</a></p>`,
   });
 }
@@ -1336,8 +1341,8 @@ function renderFeed() {
 function renderFollowing() {
   if (!canFollowFeed()) {
     $("#fbar").innerHTML = "";
-    const rec = `<a class="btn ghost" href="#/recommended">See Recommended</a>`;
-    $("#flist").innerHTML = !auth.wanted ? emptyState("Following needs signing in", "Signing in isn't switched on here. Recommended shows trades from the traders we recommend.", rec)
+    const rec = `<a class="btn ghost" href="#/recommended">See ${boardOn ? "Top traders" : "Recommended"}</a>`;
+    $("#flist").innerHTML = !auth.wanted ? emptyState("Following needs signing in", `Signing in isn't switched on here. ${boardOn ? "Top traders shows big trades from the top of the leaderboard." : "Recommended shows trades from the traders we recommend."}`, rec)
       : auth.meErr ? `<div class="state err"><b>Couldn't load who you follow</b><p>${esc(auth.meErr)}</p><button class="btn ghost" id="meretry">Try again</button></div>`
       : skelCards(3);
     const again = $("#meretry"); if (again) again.onclick = async () => { auth.meErr = null; renderFollowing(); await readMe(); loadFeed(); };
@@ -1474,13 +1479,14 @@ function oneCardPerTrade(bets) {
 }
 
 function followingSheet(traders, kind = "rec") {
-  const panel = sheet(`<h2>${plural(traders.length, "trader")} ${kind === "follow" ? "you follow" : "we recommend"}</h2>
+  const panel = sheet(`<h2>${kind === "top" ? plural(traders.length, "top trader") : `${plural(traders.length, "trader")} ${kind === "follow" ? "you follow" : "we recommend"}`}</h2>
     <p class="explain">${kind === "follow" ? "Following shows every trade of theirs from the last day. Follow or unfollow from a trader's page."
-      : "Recommended shows trades of $1,000 or more from the traders in Sharps."} <button class="link" id="howlink">How we pick traders</button></p>
+      : kind === "top" ? "Top traders shows trades of $1,000 or more from the traders with the most trading profit over the last 30 days, the top of the leaderboard."
+      : "Recommended shows trades of $1,000 or more from the traders in Sharps."} ${kind === "top" ? `<a class="link" href="#/traders">See the leaderboard</a>` : `<button class="link" id="howlink">How we pick traders</button>`}</p>
     <div class="list" style="margin-top:16px">${traders.map((t) => `<a class="trow norank" href="#/worth/${esc(t.wallet)}">${avatar(t.wallet, 36)}
       <span class="tmain"><span class="name">${esc(displayName(t.name, t.wallet))}</span></span>${tier(t.segment)}</a>`).join("")}</div>`);
   $$("a", panel).forEach((a) => a.addEventListener("click", closeSheet));
-  $("#howlink", panel).onclick = () => howSheet();
+  const how = $("#howlink", panel); if (how) how.onclick = () => howSheet();
 }
 
 // "How we pick traders": The checks (what we look at) and The tiers (what passing earns, and where it's listed).
@@ -1933,14 +1939,18 @@ async function boardView(more = false) {
 }
 
 // Positions closed in profit out of positions closed, from WIN_MIN; the days it covers when a busy trader closed more
-// than a record reads in the period picked ("last 7 days"). Neutral: 50% isn't break-even on Polymarket.
+// than a record reads in the period picked ("last 7 days"). Neutral: 50% isn't break-even on Polymarket. Beside it, the
+// average price they paid over 30 days (paid_30d): a price is the market's chance for the outcome, so someone who pays
+// 97¢ wins about 97% of the time by buying alone. That's the context a win rate needs.
+const paidText = (p) => p == null ? "" : `pays ${cents(p)} on average`;
 function boardWin(s) {
   const w = s.win;
   if (!w) return { cell: `<span class="lb-none">—</span><span class="lb-sub">${s.via === "score" ? "not read yet" : s.positions_complete === false ? "too many to count" : "couldn't be read"}</span>`, meta: "" };
   const days = PERIOD_DAYS[bd.period] ?? 90, span = w.days < days || bd.period === "all" ? `<span class="lb-sub">last ${w.days} days</span>` : "";
   if (w.closed < WIN_MIN) return { cell: `<span class="lb-main lb-none">—</span><span class="lb-sub">${w.closed ? `only ${w.closed} closed` : "none closed"}</span>${span}`, meta: "" };
-  const pct = `${Math.round((100 * w.won) / w.closed)}%`;
-  return { cell: `<span class="lb-main">${pct}</span><span class="lb-sub">${w.won} of ${w.closed} in profit</span>${span}`, meta: `${WIN_LABEL} ${pct} (${w.won} of ${w.closed} positions closed in profit${w.days < days || bd.period === "all" ? `, last ${w.days} days` : ""})` };
+  const pct = `${Math.round((100 * w.won) / w.closed)}%`, paid = paidText(s.paid_30d);
+  return { cell: `<span class="lb-main">${pct}</span><span class="lb-sub">${w.won} of ${w.closed} in profit</span>${span}${paid ? `<span class="lb-sub">${paid}</span>` : ""}`,
+    meta: `${WIN_LABEL} ${pct} (${w.won} of ${w.closed} positions closed in profit${w.days < days || bd.period === "all" ? `, last ${w.days} days` : ""}${paid ? `; ${paid}` : ""})` };
 }
 
 function renderBoard() {
@@ -1991,13 +2001,13 @@ function renderBoard() {
         <select id="bdsort" class="lb-sort" aria-label="Sort traders">${Object.entries(BOARD_SORTS).map(([k, l]) => `<option value="${k}" ${bd.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>
       </div>
     </div>
-    ${bd.sort === "win" && bd.rows.length ? `<p class="lb-note">Win rate ranks from ${WIN_MIN} positions closed, more closed ranking higher at the same rate.</p>` : ""}
+    ${bd.sort === "win" && bd.rows.length ? `<p class="lb-note">Win rate ranks from ${WIN_MIN} positions closed, more closed ranking higher at the same rate. A high one often comes from buying outcomes that were already likely: someone who pays 97¢ wins about 97% of the time just by buying. Compare it with what they pay on average, under each rate.</p>` : ""}
     ${bd.sort === "return" && bd.rows.length ? `<p class="lb-note">Profit per $ traded ranks from $1,000 traded in the period.</p>` : ""}
     ${body}
     <p class="lb-foot">${bd.total != null ? `${plural(bd.total, "trader")} with a buy in the last 30 days and at least 5 positions closed in 90 days` : ""}
       ${bd.newHidden ? ` · ${plural(bd.newHidden, "new account")} (under 4 weeks of history) hidden · <button class="link" id="bdnewfoot">Show them</button>` : bd.newOn ? " · New accounts included" : ""}
       · Past results, not a prediction: what each trader did, read from Polymarket every 2 days
-      · Win rate is positions closed in profit (sold or settled); 50% isn't break-even when prices differ
+      · Win rate is positions closed in profit (sold or settled); 50% isn't break-even when prices differ, so each shows the average price they paid over 30 days
       ${c ? `<br>${c.read.toLocaleString("en-US")} records read so far${c.from_scores ? `, ${c.from_scores.toLocaleString("en-US")} more from earlier checks (no win rate until read)` : ""}` : ""}
       · <a class="link" href="#/traders/top">Top profit</a></p>`;
 
@@ -2420,7 +2430,7 @@ async function worthTraderPage(wallet) {
   const app = $("#app");
   const back = `<a class="back" href="#/traders">← Traders</a>`;
   app.innerHTML = `${back}<div class="pf-head">${avatar(wallet, 64)}<div class="grow"><div class="skel" style="width:40%;height:24px"></div><div class="skel" style="width:25%;height:14px;margin-top:10px"></div></div></div>
-    <p class="muted" style="margin-top:24px">Checking this trader's trades (usually under a minute)…</p>`;
+    <p class="muted" style="margin-top:24px">${boardOn ? "Reading this trader's record (usually a few seconds)…" : "Checking this trader's trades (usually under a minute)…"}</p>`;
   let s;
   const peek = exploreOn && exOpen === wallet; // opened from Explore: check only when asked ("Check now")
   exOpen = null;
@@ -2562,6 +2572,7 @@ function profileNumbers(s, d, acct, n) {
     ],
     groups: [
       { title: "Record", rows: [
+        ...(s.record ? recordRows(s) : []),
         { k: "Weeks up", v: up != null && known ? `${up} of ${known}` : null, sub: known && known < 12 ? "since their first trade" : "last 12 weeks",
           weeks: up != null && known ? weeks : null },
         // their current run of weeks up or down, from 2 weeks; none is no row (not a "—")
@@ -2592,6 +2603,33 @@ function profileNumbers(s, d, acct, n) {
     ],
   };
 }
+// A track record's own rows (the Leaderboard's facts, s.record: the skill test off): win rate over the longest period
+// read in full up to 90 days, with the average price they paid beside it, and what they traded over 90 days. None
+// that wasn't read: no row, never 0.
+function recordRows(s) {
+  const w = s.win?.["90d"], p = s.periods?.["90d"] || {};
+  const win = w && w.closed >= WIN_MIN ? `${Math.round((100 * w.won) / w.closed)}%` : null;
+  return [
+    { k: WIN_LABEL, v: win, sub: w ? `${w.won} of ${w.closed} positions closed in profit (sold or settled), last ${w.days} days` : "" },
+    { k: "Average price paid", v: s.paid_30d != null ? cents(s.paid_30d) : null,
+      sub: "last 30 days · the market's chance for what they bought, so about the win rate buying alone would give" },
+    { k: "Traded", v: p.volume != null ? usd(p.volume) : null, sub: "last 90 days, bought and sold" },
+    { k: "Profit per $ traded", v: p.return_per_dollar != null ? pl(p.return_per_dollar, lbPct(p.return_per_dollar)) : null, sub: "last 90 days · trading profit over dollars traded" },
+  ];
+}
+// "How we measure this" for a track record: what each figure is and where it comes from, no checks or tests.
+function recordDetails(s) {
+  return `<p class="note">From Polymarket's profit history and their positions closed · read ${s.stored_at ? ago(s.stored_at * 1000) : "now"}
+      · <a class="ext" href="https://polymarket.com/profile/${esc(s.wallet)}" target="_blank" rel="noopener">${INTL} profile ↗</a></p>
+    <h3>What the numbers mean</h3><ul>
+      <li><b>Realized P&L and trading profit:</b> after fees, from Polymarket's own profit history. Trading profit adds the change in what their open positions are worth; rewards and rebates aren't counted.</li>
+      <li><b>${WIN_LABEL}:</b> positions closed in profit, out of positions closed: sold, or settled (including losers they never cashed out). A busy trader's is over the longest period we could read in full.</li>
+      <li><b>Average price paid:</b> what they paid for each outcome they bought in the last 30 days, averaged. A price is the market's chance, so a trader who mostly pays 90¢ or more wins most positions by buying alone.</li>
+      <li><b>Usual trade:</b> the middle of their buys over the last 30 days, one order's fills added up.</li>
+      <li><b>Weeks up:</b> weeks with trading profit above zero, of the last 12 (or since their first trade).</li>
+    </ul>
+    <p class="note">Past results, not a prediction. Nothing here says whether they'll make money next.</p>`;
+}
 const weekBars = (weeks) => `<span class="lb-weeks" aria-hidden="true">${weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span>`;
 // A row with no value (null) isn't drawn: a figure we can't give is left out, never shown as "—". A group whose rows
 // are all left out loses its heading too.
@@ -2621,8 +2659,9 @@ function renderProfile() {
   const s = pf.s, d = pf.detail, n = pf.period, app = $("#app");
   if (!s || !app) return;
   if (pf.tab === "stats") pf.tab = "positions"; // the Stats tab's figures are in Their numbers now
-  const name = displayName(s.name, s.wallet);
-  const cats = s.categories || [];
+  // a track record (the skill test off) has no name of its own when the directory has none: Polymarket's, once read
+  const name = displayName(s.name || (s.record && d && !d.error ? d.trader?.name : null), s.wallet);
+  const cats = s.categories || (s.category ? [{ category: s.category }] : []);
   const acct = profileAccount(s, pf.account);
   const nums = profileNumbers(s, d, acct, n);
   // when the figures from their check (chart, realized P&L, record, how they trade) were worked out: every score
@@ -2667,7 +2706,7 @@ function renderProfile() {
 
   app.innerHTML = `${pf.from === "explore" ? `<a class="back" href="#/traders/explore">← Explore</a>` : `<a class="back" href="#/traders">← Traders</a>`}
     <div class="pf-head">${avatar(s.wallet, 64)}
-      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `checked ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
+      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "record read" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div></div></div>
     <div class="pf-grid">
       <section class="pf-card pf-sum" aria-label="Their numbers">
@@ -2683,18 +2722,18 @@ function renderProfile() {
         ${s.periods ? `<p class="pf-statnote">Only realized P&L and the chart follow ${Object.keys(PF_PERIOD).map((p) => p.toUpperCase()).join("/")}. Every other figure names its own period.</p>` : ""}
       </section>
       <div class="pf-rest">
-        <section class="pf-card"><h2>Why they're here</h2>
+        ${s.record && !lastAt ? "" : `<section class="pf-card"><h2>${s.record ? "Lately" : "Why they're here"}</h2>
           ${why.listed ? `<p class="pf-verdict">${esc(why.listed)}</p>` : ""}
           ${risks.length ? `<div class="pf-warn">${WARN_ICON}<p>${risks.map(esc).join(" ")}</p></div>` : ""}
           ${lastAt ? `<dl class="pf-facts"><dt>Last bought</dt><dd>${ago(lastAt)} · <button type="button" class="link" id="pfactivity">See activity</button></dd></dl>` : ""}
-        </section>
+        </section>`}
         ${categoryCard(pf.cats)}
         ${s.directory && s.directory.group === "limited" && s.directory.evidence === "quick" ? `<section class="pf-card"><h2>What we know so far</h2>
           <p class="pf-note">Limited evidence: fewer than 8 markets traded in the last 30 days, which is too few to judge skill either way.</p>
           <dl class="pf-facts">${evidenceFacts(s.directory).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl></section>` : ""}
         <div class="pf-tabs" role="tablist">${[["positions", "Positions"], ["activity", "Activity"]].map(([k, l]) => `<button type="button" role="tab" data-pftab="${k}" aria-selected="${pf.tab === k}">${l}</button>`).join("")}</div>
         <div>${body}</div>
-        <details class="fold"><summary>How we measure this</summary><h3 class="pf-more">More figures</h3><dl class="pf-rows">${numberRows(nums.fold)}</dl>${worthDetails(s)}</details>
+        <details class="fold"><summary>How we measure this</summary><h3 class="pf-more">More figures</h3><dl class="pf-rows">${numberRows(nums.fold)}</dl>${s.record ? recordDetails(s) : worthDetails(s)}</details>
       </div>
     </div>`;
   $$("[data-pfperiod]", app).forEach((b) => (b.onclick = () => { pf.period = b.dataset.pfperiod; renderProfile(); }));

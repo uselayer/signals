@@ -8,7 +8,8 @@ buy into. Nothing in it says whether they're skilled or will make money next: th
 
 Reads, about 5 to 8 a wallet where a full score takes about 50:
 
-- their latest trades (the evaluation's quick check, already read: ``trades``): usual trade, markets a day, last buy
+- their latest trades (the evaluation's quick check, already read: ``trades``): usual trade, markets a day, last buy,
+  and the average price they paid (the market's chance for what they bought: the context a win rate needs)
 - Polymarket's profit history (1 read): profit, volume and the weeks, from the same history the score reads
 - their completed positions (``whales.completed_positions``: their stats, positions held, closed positions, 3 to 6
   reads): the win rate, by when each closed (a position never redeemed, by when its market ended)
@@ -71,13 +72,14 @@ def _wins(positions: list[Any], complete: bool, now: float) -> dict[int, tuple[i
     return out
 
 
-def _decisions(buys: list[tuple[float, bool, str, float | None]]) -> list[float]:
+def _decisions(buys: list[tuple[Any, ...]]) -> list[float]:
     """Dollars per trade, a trade being their buys of one market each within MERGE_S of the one before: one order
     fills in many pieces, so a single fill's dollars would make a $25K trader look like a $100 one (the SDK's
     score merges fills into decisions the same way)."""
     out: list[float] = []
     last: dict[str, tuple[float, int]] = {}  # market -> (time of its latest fill, index of its trade in out)
-    for t, _, market, usd in sorted(buys):
+    for b in sorted(buys, key=lambda b: b[0]):
+        t, market, usd = b[0], b[2], b[3]
         if usd is None:
             continue
         seen = last.get(market)
@@ -90,10 +92,26 @@ def _decisions(buys: list[tuple[float, bool, str, float | None]]) -> list[float]
     return out
 
 
-def _style(trades: list[tuple[float, bool, str, float | None]], now: float) -> dict[str, Any]:
-    """From their latest trades (``(time, bought, market, dollars)``, newest first, as the quick check reads them):
-    their usual trade (the middle of their buys over 30 days, in dollars), new markets a day over the days read (30,
-    or fewer when a busy trader's 500 latest trades reach back less far), and their last buy."""
+def _paid(buys: list[tuple[Any, ...]]) -> float | None:
+    """The average price they paid, each outcome bought once (its fills' dollars over its contracts), from buys
+    that carry their price and outcome (``(…, price, outcome)``). A price is the market's chance for that outcome,
+    so this is about the win rate their prices implied: someone who buys at 97¢ wins about 97% of the time by
+    buying alone. None when no buy carries a price."""
+    usd: dict[str, float] = {}
+    contracts: dict[str, float] = {}
+    for t in buys:
+        if len(t) > 5 and t[3] and t[4]:
+            usd[t[5]] = usd.get(t[5], 0.0) + t[3]
+            contracts[t[5]] = contracts.get(t[5], 0.0) + t[3] / t[4]
+    prices = [usd[k] / contracts[k] for k in usd if contracts[k]]
+    return round(statistics.fmean(prices), 4) if prices else None
+
+
+def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
+    """From their latest trades (``(time, bought, market, dollars)``, newest first, as the quick check reads them,
+    optionally with each one's price and outcome after): their usual trade (the middle of their buys over 30 days,
+    in dollars), new markets a day over the days read (30, or fewer when a busy trader's 500 latest trades reach
+    back less far), the average price they paid over 30 days (``_paid``) and their last buy."""
     month = now - 30 * DAY
     buys = [t for t in trades if t[1] and t[0] >= month]
     usds = _decisions(buys)
@@ -103,11 +121,12 @@ def _style(trades: list[tuple[float, bool, str, float | None]], now: float) -> d
         "typical_usd": round(statistics.median(usds), 2) if usds else None,
         "buys_30d": len({t[2] for t in buys}),
         "markets_per_day": round(len({t[2] for t in buys}) / days, 2),
+        "paid_30d": _paid(buys),
         "last_buy": max((t[0] for t in trades if t[1]), default=None),
     }
 
 
-def build(points: list[dict[str, Any]], positions: Any, trades: list[tuple[float, bool, str, float | None]],
+def build(points: list[dict[str, Any]], positions: Any, trades: list[tuple[Any, ...]],
           now: float) -> dict[str, Any]:  # fmt: skip
     """A record from what was read: the profit history's ``points``, ``positions`` (the SDK's PositionRecord, or
     None when it couldn't be read) and their latest ``trades``. Every figure that wasn't read is None, never 0."""
@@ -119,6 +138,7 @@ def build(points: list[dict[str, Any]], positions: Any, trades: list[tuple[float
         won = wins.get(d)
         periods[f"{d}d"] = {
             "trading_pnl": p.get("trading_pnl"),
+            "realized": p.get("realized"),  # profit taken: a trader's page's headline
             "volume": p.get("volume"),
             "return_per_dollar": p.get("return_per_dollar"),
             "won": None if won is None else won[0],
@@ -139,6 +159,8 @@ def build(points: list[dict[str, Any]], positions: Any, trades: list[tuple[float
         "read_at": now,
         "since": curve.since,
         "periods": periods,
+        # the biggest fall from a high, hour by hour, as a score gives it (a trader's page shows it)
+        "worst_drop": {f"{d}d": curve.worst_drop(end - d * DAY, end) for d in PERIODS} if points else None,
         "pnl_weeks": weeks,
         "weeks_up": sum(1 for w in known if w > 0) if weeks is not None else None,
         "weeks_known": len(known) if weeks is not None else None,
@@ -148,7 +170,7 @@ def build(points: list[dict[str, Any]], positions: Any, trades: list[tuple[float
     }
 
 
-def read(whales: Whales, wallet: str, trades: list[tuple[float, bool, str, float | None]],
+def read(whales: Whales, wallet: str, trades: list[tuple[Any, ...]],
          now: float | None = None) -> dict[str, Any]:  # fmt: skip
     """A wallet's record, read now on ``whales``' budget (the background's). The profit history must be read; the
     completed positions may fail on their own (Polymarket's firewall, a list that slipped), leaving the win rate
