@@ -86,6 +86,18 @@ def no_pace_reads(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def vouch_for_sample_traders(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Most tests' sample traders have no profit history or win record, so Recommended, which vouches only for a
+    trader with a figure in every column and VOUCH_WEEKS of history (``engine.held_back``), would hold them all
+    back: tests of the Feed, alerts and copying take a recommended tier as it is. Tests marked ``vouching`` check
+    the real rule."""
+    from signals import app as engine
+
+    if request.node.get_closest_marker("vouching") is None:
+        monkeypatch.setattr(engine, "held_back", lambda s: [])
+
+
+@pytest.fixture(autouse=True)
 def no_us_twins(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test starts with no Polymarket US index (as before Layer's matches are read): no test sees another's."""
     monkeypatch.setattr(us_match, "twins", us_match.UsTwins())

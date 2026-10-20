@@ -632,6 +632,35 @@ def test_the_traders_list_carries_each_traders_section(api: TestClient, monkeypa
     assert got["0xr"][1] == "rising"  # the SDK's segment stays in the API: only the section and the page's words change
 
 
+# every column of the Traders list with a figure, and 12 weeks of history
+FULL = {"pnl_weeks": [10.0] * 12, "pnl_daily": [["2026-10-01", 0.0], ["2026-10-02", 5.0]],
+        "periods": {"30d": {"trading_pnl": 500.0}}, "won": 8, "settled": 12, "typical_usd": 50.0}
+
+
+@pytest.mark.vouching
+def test_recommended_vouches_only_for_a_trader_with_every_column_and_four_weeks_of_history(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The owner: no brand-new accounts, and nobody missing a column. Held back as Limited evidence wherever the
+    checked traders are read, with the tier they were given and why; what's kept is never changed."""
+    full = SCORE | FULL | {"wallet": "0xf", "segment": "rising"}
+    new = full | {"wallet": "0xn", "pnl_weeks": [None] * 11 + [800.0]}  # one week since their first trade
+    early = full | {"wallet": "0xe", "won": 3, "settled": 3}  # 3 settled: no win rate yet
+    assert engine.held_back(full) == [] and engine.held_back(new) == ["weeks"] and engine.held_back(early) == ["win_rate"]
+    assert engine.held_back(SCORE | {"sample": []}) == ["weeks", "profit", "trend", "win_rate", "usual_trade"]
+    assert engine.held_back(full | {"pnl_weeks": [None] * 8 + [1.0] * 4}) == []  # 4 weeks: enough
+
+    lucky = SCORE | {"wallet": "0xl", "segment": "lucky"}
+    monkeypatch.setattr(engine, "_worth_data", {"scores": [full, new, early, lucky]})
+    got = {s["wallet"]: (s["segment"], s["section"], s.get("held_back_from"), s.get("held_back"))
+           for s in api.get("/api/worth").json()["result"]["scores"]}  # fmt: skip
+    assert got == {"0xf": ("rising", "sharp", None, None), "0xn": ("too_few", None, "rising", ["weeks"]),
+                   "0xe": ("too_few", None, "rising", ["win_rate"]), "0xl": ("lucky", None, None, None)}  # fmt: skip
+    # the Feed's Recommended, its poller and alerts read the same list: only the trader it vouches for
+    assert {s["wallet"] for s in engine._worth_load()["scores"] if s["segment"] in engine.FEED_SEGMENTS} == {"0xf"}
+    assert engine._worth_data["scores"][1]["segment"] == "rising"  # what the check kept is unchanged
+
+
 def test_the_page_has_the_sections_and_no_copy_cue(api: TestClient) -> None:
     page = api.get("/").text
     for words in ('"Sharps"', '"Sharp"', '"Quiet sharp"', '"Big profit, edge unproven"',

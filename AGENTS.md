@@ -140,7 +140,11 @@ behind Vercel (see README, "Hosting").
     keeps the page's words free of "Copy", "Copyable" and "Copying". Bringing it back is the owner's call.
   - Traders lists the traders we recommend in one section, **Sharps** (the engine's `section_of`: every recommended
     tier), with its ranks and "Show more" in the sort picked (by default Recommended's tier order); "See all checked
-    traders" is one flat list. The SDK's Proven and Rising both read "Sharp" (chip and colour), and Quiet reads
+    traders" is one flat list. Recommended never vouches for a brand-new account or one it can't show in full (owner,
+    19 Oct): a recommended tier needs a figure in every column (trading profit, trend, a win rate from 10 settled
+    trades, usual trade) and 4 weeks of history (`VOUCH_WEEKS`), or `held_back` moves the trader to Limited evidence
+    wherever the checked traders are read (`_worth_load`: Traders, the Feed's Recommended, alerts, their page),
+    keeping `held_back_from` and why. The SDK's Proven and Rising both read "Sharp" (chip and colour), and Quiet reads
     "Quiet sharp", a style (fewer, bigger trades): the owner, 19 Oct, after Sharp and Rising had indistinguishable
     next-month results. Presentation only: the segment ("rising" stays in the data and the API), which tiers are
     recommended and the thresholds are the SDK's. Nothing a visitor reads says "Rising" (a guard test), and no new
