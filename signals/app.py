@@ -141,6 +141,12 @@ def us_of(market: str | None, token: str | None = None, outcome: str | None = No
     return us_match.twins.lookup(market, token, outcome)
 
 
+def kalshi_of(market: str | None, token: str | None = None, outcome: str | None = None) -> dict[str, Any] | None:
+    """A Polymarket International outcome's verified Kalshi match (``found``, with the ``side`` on that Kalshi
+    market), a checked "none" (``found`` False), or None when Layer's matches can't be read right now."""
+    return us_match.twins.kalshi(market, token, outcome)
+
+
 # ---- a small cache, so clicking around doesn't re-read the venues ----
 
 _cache: dict[str, tuple[float, Any]] = {}
@@ -3853,26 +3859,32 @@ def _cents(p: float) -> str:
 
 
 LINK_TARGETS = {"Buy on Polymarket International": "market", "Open on Polymarket International": "market",
-                "View on Polymarket US": "market_us", "Their record": "record", "Check current price": "check",
-                "Open your Feed": "feed"}  # fmt: skip
+                "View on Polymarket US": "market_us", "View on Kalshi": "market_kalshi", "Their record": "record",
+                "Check current price": "check", "Open your Feed": "feed"}  # fmt: skip
 
 # Where the trade happened, said on every alert: the traders Signals follows trade on Polymarket International.
-# With a verified Polymarket US twin (us_match), that it's the same market, never the same price.
+# With a verified Kalshi match or Polymarket US twin (us_match), that it's the same market, never the same price.
 TRADED_INTL = "Traded on Polymarket International."
-US_TWIN_LINE = (f"{TRADED_INTL} The same market is on Polymarket US (matched through Layer), where prices and"
-                " liquidity may differ.")  # fmt: skip
+SAME_MARKET = f"{TRADED_INTL} The same market is on {{}} (matched through Layer), where prices and liquidity may differ."
+KALSHI_US_LINE = SAME_MARKET.format("Kalshi and Polymarket US")
+KALSHI_LINE = SAME_MARKET.format("Kalshi") + " No verified US match found."
 US_DIFFERS = " Some settlement rules differ."
-NO_US_TWIN_LINE = f"{TRADED_INTL} No verified US match found."
+NO_MATCH_LINE = f"{TRADED_INTL} No verified Kalshi or US match found."
 
 
-def _venue_line(t: WhaleTrade) -> tuple[str, str | None]:
-    """The alert's line on where the trade happened, and the Polymarket US link when there's a verified twin."""
-    us = us_of(t.market, t.token, t.outcome)
-    if us is None:
-        return TRADED_INTL, None
-    if not us["found"]:
-        return NO_US_TWIN_LINE, None
-    return US_TWIN_LINE + (US_DIFFERS if us["differences"] else ""), us["url"]
+def _venue_line(t: WhaleTrade) -> tuple[str, str | None, str | None]:
+    """The alert's line on where the trade happened, and the Kalshi and Polymarket US links when there's a verified
+    match there."""
+    k, us = kalshi_of(t.market, t.token, t.outcome), us_of(t.market, t.token, t.outcome)
+    if k is None and us is None:
+        return TRADED_INTL, None, None
+    found = [v for v in (k, us) if v and v["found"]]
+    if not found:
+        return NO_MATCH_LINE, None, None
+    names = " and ".join(n for n, v in (("Kalshi", k), ("Polymarket US", us)) if v and v["found"])
+    line = SAME_MARKET.format(names) + ("" if us and us["found"] else " No verified US match found.")
+    return (line + (US_DIFFERS if any(v["differences"] for v in found) else ""),
+            us["url"] if us and us["found"] else None, k["url"] if k and k["found"] else None)  # fmt: skip
 
 
 def _go(aid: str, target: str, url: str) -> str:
@@ -3903,19 +3915,20 @@ def _trade_text(head: str, wallet: str, t: WhaleTrade, paid: float, now: float, 
     """What happened, the same for every trader: ``head`` (who bought which outcome, at what price, for how much),
     the market, the price now (", price already moved" outside the "can still get in" range, ``bet_status``), and
     when they traded, measured against this alert, and where (``_venue_line``:
-    Polymarket International, and its Polymarket US twin when there's a verified one). Nothing about copying: the
-    copy estimate isn't shown anywhere. Links: "Check current price" (the trade's own page
-    on Signals, neutral for every trader), their record, "View on Polymarket US" with a twin (it leads the venues),
-    "Buy on Polymarket International" (it only opens the market: Signals places no orders); then ``delay``, how late
-    this kind of alert can be (FOLLOW_DELAY, or BIG_DELAY for a big trade)."""
+    Polymarket International, and its Kalshi match and Polymarket US twin when there's a verified one). Nothing about
+    copying: the copy estimate isn't shown anywhere. Links: "Check current price" (the trade's own page
+    on Signals, neutral for every trader), their record, "View on Kalshi" and "View on Polymarket US" with a match
+    (they lead the venues), "Buy on Polymarket International" (it only opens the market: Signals places no orders);
+    then ``delay``, how late this kind of alert can be (FOLLOW_DELAY, or BIG_DELAY for a big trade)."""
     e = html.escape
     status = bet_status(paid, now)
-    where, us_url = _venue_line(t)
+    where, us_url, k_url = _venue_line(t)
     lines = [head, e(t.title or "A Polymarket market"), f"Now {_cents(now)}{', price already moved' if status != 'in' else ''}.",
              _traded(at, seen), where]  # fmt: skip
     links = _links(("Check current price", f"{SITE}/#/check/{wallet}/{t.market}"),
                    ("Their record", f"{SITE}/#/worth/{wallet}" if record else None),
-                   ("View on Polymarket US", us_url), ("Buy on Polymarket International", t.url), aid=aid)  # fmt: skip
+                   ("View on Kalshi", k_url), ("View on Polymarket US", us_url),
+                   ("Buy on Polymarket International", t.url), aid=aid)  # fmt: skip
     return "\n".join([*lines, links, delay])
 
 
@@ -3940,10 +3953,10 @@ def _group_text(members: list[tuple[str, float, float]], t: WhaleTrade, now: flo
         lines.append(f"· {e(_who(w))} paid {_cents(price)} at {datetime.fromtimestamp(at, UTC):%H:%M} UTC")
     last, _, last_at = members[-1]  # the latest buyer: their price is the closest to now
     moved = bet_status(members[-1][1], now) != "in"
-    where, us_url = _venue_line(t)
+    where, us_url, k_url = _venue_line(t)
     lines += [f"Now {_cents(now)}{', price already moved' if moved else ''}.", f"Latest buy {_lag(last_at, seen)} before this alert.",
-              where, _links(("Check current price", f"{SITE}/#/check/{last}/{t.market}"), ("View on Polymarket US", us_url),
-                            ("Buy on Polymarket International", t.url), aid=aid),
+              where, _links(("Check current price", f"{SITE}/#/check/{last}/{t.market}"), ("View on Kalshi", k_url),
+                            ("View on Polymarket US", us_url), ("Buy on Polymarket International", t.url), aid=aid),
               FOLLOW_DELAY]  # fmt: skip
     return "\n".join(lines)
 
@@ -3992,11 +4005,11 @@ def _sell_text(wallet: str, t: WhaleTrade, price: float, usd: float, held: bool,
     still = ("They still hold some." if now is None else f"Now {_cents(now)}. They still hold some.") if held else EXITED
     lines = [f"<b>{e(_who(wallet))}</b> sold <b>{e(t.outcome or 'Yes')}</b> at {_cents(price)} (${usd:,.0f})",
              e(t.title or "A Polymarket market"), still, _traded(at, seen)]  # fmt: skip
-    where, us_url = _venue_line(t)
+    where, us_url, k_url = _venue_line(t)
     lines.append(where)
     links = _links(("Check current price", f"{SITE}/#/check/{wallet}/{t.market}" if held else None),
-                   ("Their record", f"{SITE}/#/worth/{wallet}"), ("View on Polymarket US", us_url),
-                   ("Open on Polymarket International", t.url), aid=aid)  # fmt: skip
+                   ("Their record", f"{SITE}/#/worth/{wallet}"), ("View on Kalshi", k_url),
+                   ("View on Polymarket US", us_url), ("Open on Polymarket International", t.url), aid=aid)  # fmt: skip
     return "\n".join([*lines, links, FOLLOW_DELAY])
 
 
@@ -4661,7 +4674,7 @@ def _alert_known(alert_id: str) -> bool:
 
 
 def _allowed(url: str) -> bool:
-    """Where a /go link may send someone: Polymarket (International or US), or Signals itself. Nowhere else
+    """Where a /go link may send someone: Polymarket (International or US), Kalshi, or Signals itself. Nowhere else
     (no open redirect)."""
     try:
         u = urllib.parse.urlsplit(url)
@@ -4669,7 +4682,7 @@ def _allowed(url: str) -> bool:
         host = u.hostname
     except ValueError:  # a malformed link (a bad port, a broken IPv6 host): Signals itself, never a 500
         return False
-    return u.scheme == "https" and (host in ("polymarket.com", "polymarket.us") or (u.scheme, u.netloc) == (site.scheme, site.netloc))
+    return u.scheme == "https" and (host in ("polymarket.com", "polymarket.us", "kalshi.com") or (u.scheme, u.netloc) == (site.scheme, site.netloc))
 
 
 @app.get("/go/{alert_id}/{target}")

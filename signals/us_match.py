@@ -18,6 +18,9 @@ Every difference either match states (settlement source, timing, edge cases such
 with the twin, so the page can say how the two markets may settle differently. A twin is the same market, never the
 same price: the trader's entry was on International, and Polymarket US has its own order book.
 
+The International market's Kalshi match itself is kept too (``kalshi``): the same checks on that one match, the
+link going to kalshi.com. Every Polymarket US twin has one, and many markets have a Kalshi match but no US twin.
+
 ``lookup`` answers None while the index hasn't been built or has gone stale (Layer can't be read, or there's no
 Layer key): unknown, which the page shows as no claim either way. ``{"found": False}`` is a checked "no verified US
 match"; it never means the market isn't listed on Polymarket US.
@@ -67,6 +70,7 @@ SITS_OUT = {
     "text": "If the player doesn't play, the two can pay differently: Polymarket International usually settles this line as "
             "No (Under), or 50-50 for a pitcher's strikeouts, while Polymarket US settles it at a fair price from before the game.",
 }  # fmt: skip
+SITS_OUT_KALSHI = SITS_OUT | {"text": SITS_OUT["text"].replace("Polymarket US settles", "Kalshi settles")}
 
 
 def _player_prop(m: dict[str, Any]) -> bool:
@@ -83,6 +87,14 @@ def _us_url_ok(url: str | None) -> bool:
     except ValueError:
         return False
     return u.scheme == "https" and u.hostname == "polymarket.us"
+
+
+def _kalshi_url_ok(url: str | None) -> bool:
+    try:
+        u = urllib.parse.urlsplit(url or "")
+    except ValueError:
+        return False
+    return u.scheme == "https" and u.hostname == "kalshi.com"
 
 
 def _ok(m: dict[str, Any], venue: str) -> bool:
@@ -119,13 +131,55 @@ def _twin(intl: dict[str, Any], us: dict[str, Any], side: str, checked_at: str) 
     }
 
 
+def _kalshi(intl: dict[str, Any], side: str, checked_at: str) -> dict[str, Any]:
+    """The Kalshi market a trade on ``intl``'s outcome (``side`` "same") or on its No (``side`` "no") is matched to:
+    a Kalshi market is one Yes/No contract, so the trade is its Yes, or its No."""
+    k = intl["kalshi"]
+    return {
+        "found": True,
+        "url": k["url"],
+        "market_id": k["market_id"],
+        "side": "yes" if side == "same" else "no",
+        "confidence": float(intl.get("confidence") or 0),
+        "differences": ([dict(SITS_OUT_KALSHI)] if _player_prop(intl) else []) + _differences(intl),
+        "checked_at": checked_at,
+    }
+
+
+Index = tuple[dict[str, Any], dict[str, Any], dict[str, Any]]  # (by token, by id, plain Yes/No by condition id)
+
+
+def _find(index: Index, market: str, token: str | None, outcome: str | None) -> tuple[Any, str] | None:
+    """A trade's outcome in ``index``: its entry, and "same" (the matched outcome) or "no" (the No of a matched
+    plain Yes/No market); None when it has none. An entry is an (International, US) pair or a lone International match."""
+    by_token, by_id, yes_no = index
+    said = (outcome or "").strip().lower()
+    hit = by_token.get(token) if token else None
+    if hit is None and not token:  # no token to go on: Layer's id for the same outcome
+        hit = by_id.get(market)
+    if hit is not None:
+        return hit, "same"
+    cid = _cid(market)
+    yn = yes_no.get(cid)
+    if yn is not None:
+        intl = (yn[0] if isinstance(yn, tuple) else yn)["polymarket"]
+        # its Yes when the token is the matched one; with no token, outcome 0 named Yes
+        if token is None and market == f"{cid}:0" and said == _YES:
+            return yn, "same"
+        if said == _NO and token != intl.get("yes_token_id") and market != f"{cid}:0":
+            return yn, "no"
+    return None
+
+
 class UsTwins:
-    """International outcome → its verified Polymarket US twin, rebuilt from Layer's two match lists."""
+    """International outcome → its verified Polymarket US twin, and its verified Kalshi match, rebuilt from Layer's
+    two match lists."""
 
     def __init__(self) -> None:
         self._by_token: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}  # matched outcome token → (intl, us)
         self._by_id: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}  # Layer's International market id → same
         self._yes_no: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}  # condition id of a plain Yes/No pair
+        self._kalshi: Index = ({}, {}, {})  # the same three, to the International↔Kalshi match alone
         self._built: float | None = None
         self._checked_at = ""
         self._lock = threading.Lock()
@@ -145,16 +199,25 @@ class UsTwins:
         by_token: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         by_id: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
         yes_no: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+        k_token: dict[str, dict[str, Any]] = {}
+        k_id: dict[str, dict[str, Any]] = {}
+        k_yes_no: dict[str, dict[str, Any]] = {}
         intl_n = 0
         for m in intl_matches:
             intl_n += 1
             if not _ok(m, "polymarket"):
                 dropped += 1
                 continue
+            pid = m["polymarket"]["market_id"]
+            if _kalshi_url_ok(m["kalshi"].get("url")):
+                k_id[pid] = m
+                if m["polymarket"].get("yes_token_id"):
+                    k_token[str(m["polymarket"]["yes_token_id"])] = m
+                if ":" not in pid:  # a plain Yes/No market matched on its Yes: its No is the Kalshi market's No
+                    k_yes_no[pid] = m
             us = us_by_kalshi.get(m["kalshi"]["market_id"])
             if us is None:
                 continue
-            pid = m["polymarket"]["market_id"]
             pair = (m, us)
             by_id[pid] = pair
             if m["polymarket"].get("yes_token_id"):
@@ -165,10 +228,12 @@ class UsTwins:
                 yes_no[pid] = pair
         with self._lock:
             self._by_token, self._by_id, self._yes_no = by_token, by_id, yes_no
+            self._kalshi = (k_token, k_id, k_yes_no)
             self._built = time.monotonic() if now is None else now
             self._checked_at = datetime.now(UTC).isoformat()
             self.error = None
-            self.counts = {"international": intl_n, "us": len(us_by_kalshi), "twins": len(by_id), "dropped": dropped}
+            self.counts = {"international": intl_n, "us": len(us_by_kalshi), "twins": len(by_id),
+                           "kalshi": len(k_id), "dropped": dropped}  # fmt: skip
 
     def fresh(self, now: float | None = None) -> bool:
         now = time.monotonic() if now is None else now
@@ -182,23 +247,20 @@ class UsTwins:
         if not market or not self.fresh(now):
             return None
         with self._lock:
-            by_token, by_id, yes_no, at = self._by_token, self._by_id, self._yes_no, self._checked_at
-        said = (outcome or "").strip().lower()
-        pair = by_token.get(token) if token else None
-        if pair is None and not token:  # no token to go on: Layer's id for the same outcome
-            pair = by_id.get(market)
-        if pair is not None:
-            return _twin(*pair, side="same", checked_at=at)
-        cid = _cid(market)
-        yn = yes_no.get(cid)
-        if yn is not None:
-            intl = yn[0]["polymarket"]
-            # its Yes when the token is the matched one; with no token, outcome 0 named Yes
-            if token is None and market == f"{cid}:0" and said == _YES:
-                return _twin(*yn, side="same", checked_at=at)
-            if said == _NO and token != intl.get("yes_token_id") and market != f"{cid}:0":
-                return _twin(*yn, side="no", checked_at=at)
-        return {"found": False}
+            index, at = (self._by_token, self._by_id, self._yes_no), self._checked_at
+        hit = _find(index, market, token, outcome)
+        return {"found": False} if hit is None else _twin(*hit[0], side=hit[1], checked_at=at)
+
+    def kalshi(self, market: str | None, token: str | None = None, outcome: str | None = None,
+               now: float | None = None) -> dict[str, Any] | None:  # fmt: skip
+        """The verified Kalshi match of a trade's outcome (``found`` True, ``side`` "yes" or "no" on that Kalshi
+        market), a checked "none" (``found`` False), or None with nothing to go on; arguments as ``lookup``."""
+        if not market or not self.fresh(now):
+            return None
+        with self._lock:
+            index, at = self._kalshi, self._checked_at
+        hit = _find(index, market, token, outcome)
+        return {"found": False} if hit is None else _kalshi(hit[0], side=hit[1], checked_at=at)
 
 
 twins = UsTwins()
