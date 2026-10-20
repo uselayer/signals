@@ -28,6 +28,7 @@ from collections import Counter, deque
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -52,9 +53,11 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import monitoring, us_match
+from signals import monitoring, records, us_match
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
+    BOARD_PERIODS,
+    BOARD_SORTS,
     BOTS,
     CHECK_BOARDS,
     EVIDENCE,
@@ -101,6 +104,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         threading.Thread(target=_directory_loop, daemon=True).start()
     if EVALUATE_ON:  # looks at every wallet in the directory, in turn, on the same background budget as the sweep
         threading.Thread(target=_evaluate_loop, daemon=True).start()
+    if not SKILL_TEST:  # the Leaderboard: kept scores' profit history copied into records, once (no reads)
+        threading.Thread(target=_seed_records, daemon=True).start()
     if TG_TOKEN:  # alerts: the bot's messages (connecting a chat, /list, /stop), and new buys of followed traders
         threading.Thread(target=_bot_loop, daemon=True).start()
         threading.Thread(target=_alert_loop, daemon=True).start()
@@ -178,6 +183,7 @@ def config() -> dict[str, Any]:
     key when signing in (to follow traders) is switched on, and PostHog's project key when analytics is. Both keys
     are public by design."""
     return {"venues": list(VENUES), "clerk_key": CLERK_KEY or None, "alerts": bool(TG_TOKEN), "explore": EXPLORE_ON,
+            "leaderboard": not SKILL_TEST,
             "posthog_key": POSTHOG_KEY or None}
 
 
@@ -707,7 +713,12 @@ EVALUATE_FAILS_IN_A_ROW = 5  # this many failed tries in a row and Polymarket is
 EVALUATE_PAUSE_S = 600  # ...so it waits this long before the next
 EVALUATE_LOG_S = 3600  # a line in the logs this often
 LISTED_KEEP_S = 6 * 3600  # the boards read directly, when the sweep's are stale, are kept this long (31 reads)
-OUTCOMES = ("scored", "not_enough_recent_evidence", "not_trading_lately", "dormant", "failed")
+OUTCOMES = ("scored", "recorded", "not_enough_recent_evidence", "not_trading_lately", "dormant", "failed")
+# The skill test (a full score: whether the price moves their way after they buy, about 50 reads) runs on every wallet
+# only with SIGNALS_SKILL_TEST=1, the way back. Off (the default), each wallet gets a track record instead (about 6
+# reads, signals/records.py) for the Leaderboard: what they did, ranked, never a verdict on whether they're skilled.
+SKILL_TEST = os.environ.get("SIGNALS_SKILL_TEST", "0") == "1"
+RECORD_READS = 6  # a track record's reads after the quick check, about (measured 5–8 on live wallets, 2026-10-20)
 # Rescoring recommended traders comes first, but it mustn't take everything: while any wallet has never been looked
 # at, at least NEW_SHARE of the evaluation's reads go to those (a round takes them before other recommended traders
 # whenever their share has fallen below it). Reads are estimated: a quick look is 1, a full score SCORE_READS.
@@ -749,8 +760,8 @@ def _reserve_new() -> bool:
 
 
 def _count_reads(kind: str, outcome: str) -> None:
-    quick = 0 if kind in ("presented", "recommended") else 1
-    reads = quick + (SCORE_READS if outcome == "scored" else 0)
+    quick = 0 if kind in ("presented", "recommended") and SKILL_TEST else 1
+    reads = quick + (SCORE_READS if outcome == "scored" else RECORD_READS if outcome == "recorded" else 0)
     _evaluate_state["reads"]["new" if kind == "new" else "other"] += reads
 
 
@@ -804,6 +815,8 @@ def evaluate_one(item: dict[str, Any]) -> str:
     """One due wallet (from ``Directory.due``): the quick check, then, if it's worth a score, its score, kept in
     the directory. Returns what came of it, one of OUTCOMES. Any error is kept as a failed try, so one wallet
     never holds up the rest: it's tried again later each time it fails again in a row."""
+    if not SKILL_TEST:
+        return evaluate_record(item)
     d, w = directory(), item["wallet"]
     try:
         if item["kind"] not in ("presented", "recommended"):
@@ -823,6 +836,49 @@ def evaluate_one(item: dict[str, Any]) -> str:
     return "scored"
 
 
+def evaluate_record(item: dict[str, Any]) -> str:
+    """One due wallet's track record: the quick check (one read of their latest trades), then, when they bought
+    anything in the last 30 days, their record (``records.read``), kept in the directory for the Leaderboard. One
+    who didn't is ``checked`` (dormant, or not trading lately) and looked at again later, as before. Returns what
+    came of it, one of OUTCOMES; an error is kept as a failed try, as ``evaluate_one``'s are."""
+    d, w, now = directory(), item["wallet"], time.time()
+    try:
+        got = background().trades("polymarket", w, limit=QUICK_TRADES)
+        trades = [(t.at.timestamp(), t.action == "buy", t.market.partition(":")[0], t.usd) for t in got]
+        look = quick_look(trades, now, read_all=len(got) < QUICK_TRADES, scored_at=item.get("scored_at"))
+        if not look.buys_30d:
+            reason = "dormant" if look.reason == "dormant" else "not_trading_lately"
+            d.quick_checked(w, replace(look, score=False, reason=reason))
+            return reason
+        d.quick_checked(w, replace(look, score=True, reason=None))
+        rec = records.read(background(), w, trades, now)
+    except Exception as e:  # VenueError mostly (the read's retries already spent)
+        if _directory_stop.is_set() or sys.is_finalizing():  # a deploy stopping the app, not the wallet: it stays due
+            raise
+        d.score_failed(w, f"{type(e).__name__}: {e}")
+        return "failed"
+    d.keep_record(w, rec)
+    return "recorded"
+
+
+def _seed_records() -> None:
+    """Every kept score's profit history into the Leaderboard's records (``Directory.seed_records``), a batch at a
+    time with the directory free in between, so the Leaderboard has the traders already scored at once. Never over
+    a record already read, and no reads: each wallet's own record replaces it when the evaluation gets to it."""
+    after, copied = "", 0
+    try:
+        while not _directory_stop.is_set():
+            n, last = directory().seed_records(after)
+            if last is None:
+                break
+            after, copied = last, copied + n
+            _directory_stop.wait(0.05)
+    except (sqlite3.Error, OSError) as e:
+        print(f"leaderboard: copying scores into records stopped: {type(e).__name__}: {e}", flush=True)
+    if copied:
+        print(f"leaderboard: {copied} kept scores copied into records", flush=True)
+
+
 def evaluate_round(stop: threading.Event | None = None) -> dict[str, Any]:
     """The next EVALUATE_BATCH due wallets, EVALUATE_WORKERS at a time. Stops early after EVALUATE_FAILS_IN_A_ROW
     failed tries in a row. Returns how many were due, what came of those looked at (by outcome), and how many
@@ -832,7 +888,7 @@ def evaluate_round(stop: threading.Event | None = None) -> dict[str, Any]:
     for k in reads:
         reads[k] *= READS_DECAY
     due = directory().due(EVALUATE_BATCH, presented=presented_wallets(), new_first=_reserve_new())
-    if due:
+    if due and SKILL_TEST:  # only a score reads on_leaderboard
         _on_leaderboard(due)
     done = dict.fromkeys(OUTCOMES, 0)
     lock = threading.Lock()
@@ -2160,6 +2216,46 @@ def check_now(wallet: str, request: Request | None = None) -> dict[str, Any]:
             _checks.release()
             if len(_check_locks) > 5000:
                 _check_locks.clear()
+
+
+# ---- the Leaderboard: every active trader's track record, ranked (SIGNALS_SKILL_TEST off, the default) ----
+# Facts only (Directory.leaderboard): trading profit, profit per dollar traded, win rate, volume and weeks up over
+# the period picked. No tier and no verdict: it says what they did, never whether they're skilled or will make money.
+LEADERBOARD_PAGE = 50
+LEADERBOARD_MAX_OFFSET = 5000
+LEADERBOARD_TTL_S = 60
+
+
+def _win_of(rec: dict[str, Any], period: str) -> dict[str, Any] | None:
+    """The win rate shown for ``period``: positions closed in profit out of positions closed, over the period, or,
+    when a busy trader closed more than a record reads, over the longest shorter period read in full (``days``
+    says which). None when no period was read in full. All time shows 90 days: older positions aren't all read."""
+    days = {"7d": 7, "30d": 30, "90d": 90, "all": 90}[period]
+    for d in (x for x in (90, 30, 7) if x <= days):
+        p = (rec.get("periods") or {}).get(f"{d}d") or {}
+        if p.get("closed") is not None:
+            return {"won": p["won"], "closed": p["closed"], "days": d}
+    return None
+
+
+@app.get("/api/leaderboard")
+def leaderboard(period: str = "30d", sort: str = "profit", category: str = "", q: str = "",
+                offset: int = 0) -> dict[str, Any]:  # fmt: skip
+    """A page of the Leaderboard, from directory.db only (each wallet's latest track record), never Polymarket."""
+    if SKILL_TEST:
+        raise HTTPException(404, detail="Not found")
+    if period not in BOARD_PERIODS or sort not in BOARD_SORTS or not 0 <= offset <= LEADERBOARD_MAX_OFFSET:
+        raise HTTPException(400, detail="Unknown period, sort or page.")
+    q = q.strip()[:64]
+    args = (period, sort, category, q.lower(), offset)
+    page = cached(f"board:{args}", LEADERBOARD_TTL_S, lambda: directory().leaderboard(
+        period, sort, category=category or None, q=q, limit=LEADERBOARD_PAGE, offset=offset))  # fmt: skip
+    counts = cached("board:counts", LEADERBOARD_TTL_S, lambda: directory().record_counts())
+    rows = [{k: r.get(k) for k in ("wallet", "name", "category", "via", "read_at", "periods", "pnl_weeks", "weeks_up",
+                                   "weeks_known", "pnl_daily", "typical_usd", "markets_per_day", "last_buy",
+                                   "positions_complete")}
+            | {"win": _win_of(r, period)} for r in page["rows"]]  # fmt: skip
+    return {"rows": rows, "total": page["total"], "more": page["more"], "offset": offset, "counts": counts}
 
 
 @app.get("/api/traders")

@@ -145,6 +145,11 @@ CREATE INDEX IF NOT EXISTS score_categories_by_category ON score_categories (cat
 CREATE TABLE IF NOT EXISTS daily (day TEXT NOT NULL, metric TEXT NOT NULL, key TEXT NOT NULL, n REAL NOT NULL,
   PRIMARY KEY (day, metric, key));
 CREATE TABLE IF NOT EXISTS realized_categories (wallet TEXT PRIMARY KEY, read_at REAL NOT NULL, view TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS records (wallet TEXT PRIMARY KEY, read_at REAL NOT NULL, via TEXT NOT NULL, last_buy REAL,
+  pnl_7d REAL, pnl_30d REAL, pnl_90d REAL, pnl_all REAL, vol_7d REAL, vol_30d REAL, vol_90d REAL, vol_all REAL,
+  won_7d INTEGER, closed_7d INTEGER, won_30d INTEGER, closed_30d INTEGER, won_90d INTEGER, closed_90d INTEGER,
+  weeks_up INTEGER, weeks_known INTEGER, typical_usd REAL, result BLOB NOT NULL);
+CREATE INDEX IF NOT EXISTS records_by_last_buy ON records (last_buy);
 """
 # A phase 1 directory.db has wallets without these: added when it's first opened, empty (status "found").
 _PHASE_2_COLUMNS = (("last_active", "REAL"), ("status", "TEXT NOT NULL DEFAULT 'found'"), ("scored_at", "REAL"),
@@ -312,6 +317,58 @@ def quick_look(trades: list[tuple[Any, ...]], now: float, read_all: bool,
     middle = (usds[len(usds) // 2] if len(usds) % 2 else (usds[len(usds) // 2 - 1] + usds[len(usds) // 2]) / 2) if usds else None
     return QuickLook(reason is None, reason, buys_30d, buys_90d, last_buy, max((t[0] for t in trades), default=None),
                      None if middle is None else round(middle, 2), covered > evidence)  # fmt: skip
+
+
+# The Leaderboard (``Directory.leaderboard``): every public wallet with a track record, active lately, ranked by what
+# they did. Facts only: no tier, no verdict, nothing about whether they'll make money next.
+RECORD_REFRESH_S = 2 * 86400  # a wallet's record is read again this often (a quick check first: inactive ones drop out)
+BOARD_PERIODS = ("7d", "30d", "90d", "all")
+BOARD_SORTS = ("profit", "return", "win", "volume", "weeks")
+BOARD_ACTIVE_DAYS = 30  # listed with a buy in the last 30 days
+BOARD_MIN_CLOSED = 5  # ...and at least this many positions closed in 90 days: a few decided markets
+BOARD_MIN_VOLUME = 1000  # profit per dollar traded ranks only from this many dollars traded in the period
+BOARD_WIN_MIN = 10  # a win rate ranks from 10 positions closed, as Recommended's did
+BOARD_WEEKS_MIN = 4  # weeks up ranks from 4 weeks of history
+
+
+def _wilson(k: int | None, n: int | None, z: float = 1.96) -> float | None:
+    """The bottom of the 95% range of ``k`` in ``n`` (Wilson's), so small samples rank low, never first."""
+    if not n or k is None:
+        return None
+    p = k / n
+    centre, spread = p + z * z / (2 * n), z * (p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5
+    return max(0.0, (centre - spread) / (1 + z * z / n))
+
+
+def record_of_score(s: dict[str, Any], at: float) -> dict[str, Any] | None:
+    """A track record from a kept score, as of when it was scored: its profit and volume by period, weeks and profit
+    line (the same history a record reads), usual trade and markets a day. None for a score kept before the SDK gave
+    profit by period (uselayer 0.8). No win rate: a score counts checked bets, not positions closed."""
+    periods = s.get("periods")
+    if not isinstance(periods, dict) or not periods:
+        return None
+    weeks = s.get("pnl_weeks") if isinstance(s.get("pnl_weeks"), list) else None
+    known = [w for w in weeks or [] if w is not None]
+    all_pnl, all_vol = _num(s.get("trading_pnl")), _num(s.get("volume"))
+    per = {p: {"trading_pnl": (periods.get(p) or {}).get("trading_pnl"), "volume": (periods.get(p) or {}).get("volume"),
+               "return_per_dollar": (periods.get(p) or {}).get("return_per_dollar"), "won": None, "closed": None}
+           for p in ("7d", "30d", "90d")}  # fmt: skip
+    per["all"] = {"trading_pnl": all_pnl, "volume": all_vol,
+                  "return_per_dollar": round(all_pnl / all_vol, 5) if all_pnl is not None and all_vol else None}  # fmt: skip
+    return {
+        "read_at": at,
+        "since": None,
+        "periods": per,
+        "pnl_weeks": weeks,
+        "weeks_up": sum(1 for w in known if w > 0) if weeks is not None else None,
+        "weeks_known": len(known) if weeks is not None else None,
+        "pnl_daily": s.get("pnl_daily"),
+        "positions_complete": None,
+        "typical_usd": _num(s.get("typical_usd")),
+        "buys_30d": None,
+        "markets_per_day": _style(s)[1],
+        "last_buy": last_trade(s),
+    }
 
 
 CHECK_GROUPS = ("passed", "limited", "checked", "unchecked")  # what our checks found: each listed wallet is in one
@@ -1138,6 +1195,123 @@ class Directory:
             con.row_factory = sqlite3.Row
             r = con.execute("SELECT * FROM wallets WHERE wallet = ?", (wallet.lower(),)).fetchone()
         return None if r is None else dict(r)
+
+    # ---- the Leaderboard: track records (signals/records.py) ----
+
+    def keep_record(self, wallet: str, rec: dict[str, Any], via: str = "read", at: float | None = None) -> None:
+        """Keeps a wallet's track record (``records.build``) as its latest, ``via`` a read or copied from a kept
+        score (``seed_records``). A read one also schedules the wallet's next look (RECORD_REFRESH_S) and leaves it
+        ``checked`` with nothing said against it: a record is facts, never a verdict."""
+        now = time.time() if at is None else at
+        w = wallet.lower()
+        per = rec.get("periods") or {}
+
+        def f(p: str, k: str) -> Any:
+            return (per.get(p) or {}).get(k)
+
+        with self._db() as con:
+            if not self._has(con, w):
+                self._add(con, [Seen(w, "search")], now)
+            con.execute(
+                "INSERT OR REPLACE INTO records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (w, rec.get("read_at") or now, via, rec.get("last_buy"),
+                 *(f(p, "trading_pnl") for p in BOARD_PERIODS), *(f(p, "volume") for p in BOARD_PERIODS),
+                 *(f(p, k) for p in BOARD_PERIODS[:3] for k in ("won", "closed")),
+                 rec.get("weeks_up"), rec.get("weeks_known"), rec.get("typical_usd"),
+                 zlib.compress(json.dumps(rec).encode())),
+            )  # fmt: skip
+            if via != "read":
+                return
+            con.execute(
+                "UPDATE wallets SET status = 'checked', not_recommended = NULL, tried_at = ?, score_error = NULL, "
+                "failures = 0, next_check = ?, typical_usd = COALESCE(?, typical_usd), "
+                "last_buy = MAX(COALESCE(?, last_buy), COALESCE(last_buy, ?)) WHERE wallet = ?",
+                (now, now + RECORD_REFRESH_S, rec.get("typical_usd"), rec.get("last_buy"), rec.get("last_buy"), w),
+            )
+
+    def seed_records(self, after: str = "", batch: int = 500) -> tuple[int, str | None]:
+        """Copies up to ``batch`` kept scores (wallets after ``after``, in order) into records, for wallets without
+        one: their profit, volume, weeks and profit line are the same history a record reads, so the Leaderboard
+        has them before each wallet's first record read. No win rate (a score counts its checked bets, not
+        positions closed), and never over a record already read. Returns how many were copied and the last wallet
+        looked at (None when there are no more)."""
+        with self._db() as con:
+            got = con.execute(
+                "SELECT s.wallet, s.scored_at, s.result FROM scores s WHERE s.wallet > ? AND NOT EXISTS "
+                "(SELECT 1 FROM records r WHERE r.wallet = s.wallet) ORDER BY s.wallet LIMIT ?", (after, batch),
+            ).fetchall()  # fmt: skip
+        if not got:
+            return 0, None
+        n = 0
+        for w, at, blob in got:
+            try:
+                s = json.loads(zlib.decompress(blob))
+            except (zlib.error, ValueError, TypeError):
+                continue
+            if rec := record_of_score(s, at):
+                self.keep_record(w, rec, via="score", at=at)
+                n += 1
+        return n, got[-1][0]
+
+    def record(self, wallet: str) -> dict[str, Any] | None:
+        """A wallet's latest track record as kept, with ``via``; None if it has none."""
+        with self._db() as con:
+            r = con.execute("SELECT result, via FROM records WHERE wallet = ?", (wallet.lower(),)).fetchone()
+        return None if r is None else json.loads(zlib.decompress(r[0])) | {"via": r[1]}
+
+    def leaderboard(self, period: str = "30d", sort: str = "profit", *, category: str | None = None, q: str = "",
+                    limit: int = 50, offset: int = 0, now: float | None = None) -> dict[str, Any]:  # fmt: skip
+        """A page of the Leaderboard: every wallet found somewhere public with a track record, a buy in the last
+        BOARD_ACTIVE_DAYS and at least BOARD_MIN_CLOSED positions closed in 90 days (or more than a record reads,
+        or not read yet), ranked by ``sort`` (BOARD_SORTS) over ``period`` (BOARD_PERIODS). A rate ranks by the
+        bottom of its 95% range and only from enough of a sample, so 1 of 1 never tops it. Returns ``rows`` (the
+        record with the wallet's name and category), ``total`` and whether there are ``more``."""
+        now = time.time() if now is None else now
+        p = period if period in BOARD_PERIODS else "30d"
+        k = p  # the columns' suffix: pnl_30d, vol_all
+        wk = "90d" if k == "all" else k  # positions closed all time aren't read in full: the win rate's longest is 90 days
+        where = [_PUBLIC, "r.last_buy >= ?", f"(r.closed_90d IS NULL OR r.closed_90d >= {BOARD_MIN_CLOSED})"]
+        args: list[Any] = [now - BOARD_ACTIVE_DAYS * 86400]
+        q = q.strip().lower()
+        if q and _WALLETISH.fullmatch(q):
+            where.append("w.wallet >= ? AND w.wallet < ?")
+            args += [q, q + "g"]
+        elif q:
+            where.append("w.name LIKE ? ESCAPE '\\'")
+            args.append("%" + _like(q) + "%")
+        if category:
+            where.append("COALESCE(w.category, w.seen_category) = ?")
+            args.append(category)
+        order = {
+            "profit": f"r.pnl_{k}",
+            "return": f"CASE WHEN r.vol_{k} >= {BOARD_MIN_VOLUME} THEN r.pnl_{k} / r.vol_{k} END",
+            "win": f"CASE WHEN r.closed_{wk} >= {BOARD_WIN_MIN} THEN wilson(r.won_{wk}, r.closed_{wk}) END",
+            "volume": f"r.vol_{k}",
+            "weeks": f"CASE WHEN r.weeks_known >= {BOARD_WEEKS_MIN} THEN wilson(r.weeks_up, r.weeks_known) END",
+        }[sort if sort in BOARD_SORTS else "profit"]
+        sql = f"FROM records r JOIN wallets w ON w.wallet = r.wallet WHERE {' AND '.join(where)}"
+        with self._read() as con:
+            con.create_function("wilson", 2, _wilson, deterministic=True)
+            total = con.execute(f"SELECT COUNT(*) {sql}", args).fetchone()[0]
+            rows = con.execute(
+                f"SELECT r.wallet, w.name, COALESCE(w.category, w.seen_category), r.via, r.result {sql} "
+                f"ORDER BY {order} DESC NULLS LAST, r.wallet LIMIT ? OFFSET ?", (*args, limit + 1, offset),
+            ).fetchall()  # fmt: skip
+        out = [json.loads(zlib.decompress(blob)) | {"wallet": w, "name": name, "category": cat, "via": via}
+               for w, name, cat, via, blob in rows[:limit]]  # fmt: skip
+        return {"rows": out, "total": total, "more": len(rows) > limit}
+
+    def record_counts(self, now: float | None = None) -> dict[str, int]:
+        """How many wallets have a record, read or copied from a score, and how many the Leaderboard lists."""
+        now = time.time() if now is None else now
+        with self._read() as con:
+            by = dict(con.execute("SELECT via, COUNT(*) FROM records GROUP BY 1"))
+            listed = con.execute(
+                f"SELECT COUNT(*) FROM records r JOIN wallets w ON w.wallet = r.wallet WHERE {_PUBLIC} AND "
+                f"r.last_buy >= ? AND (r.closed_90d IS NULL OR r.closed_90d >= {BOARD_MIN_CLOSED})",
+                (now - BOARD_ACTIVE_DAYS * 86400,),
+            ).fetchone()[0]
+        return {"read": by.get("read", 0), "from_scores": by.get("score", 0), "listed": listed}
 
     # ---- phase 6: monitoring (the owner's /api/monitoring: counts only, never a wallet) ----
 

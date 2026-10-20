@@ -358,6 +358,7 @@ def test_the_report_is_the_owners_only(monkeypatch: pytest.MonkeyPatch, tmp_path
 
 def test_a_lanes_recommended_traders_are_counted_with_its_outcomes(counts: Usage, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(engine, "STORE_DIR", tmp_path)
+    monkeypatch.setattr(engine, "SKILL_TEST", True)  # lanes count the skill test's scores
 
     class Sdk:
         def trades(self, *a: Any, **k: Any) -> Any:
