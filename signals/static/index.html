@@ -416,6 +416,7 @@
   .alert-set { display: grid; gap: 6px; justify-items: end; max-width: 340px; }
   .alert-set .busy { margin: 0; color: var(--muted); font-size: 12.5px; text-align: right; }
   .alert-set .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .alert-set .row[hidden] { display: none; } /* the amount box shows only with "Only trades over an amount" */
   .alert-set input { width: 7.5em; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 999px;
     padding: 5px 12px; font: inherit; font-size: 14px; }
   /* Their numbers: a summary (realized and open P&L, wallet, win rate) beside the chart, the rest of the figures under
