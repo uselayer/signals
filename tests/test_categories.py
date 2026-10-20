@@ -61,7 +61,7 @@ def test_the_recommended_traders_are_read_once_a_day_on_the_background_budget(ke
     assert got == {"recommended": 3, "due": 3, "read": 2, "failed": 1}
     stored = d.realized_of([SHARP, RISER, OTHER])
     assert set(stored) == {SHARP, RISER}
-    assert stored[SHARP]["rows"][0] == {"category": "Sports", "usd": 5000.0} and stored[SHARP]["except_sports"] == 300.0
+    assert stored[SHARP]["rows"][0] == {"category": "Sports", "usd": 5000.0} and stored[SHARP]["overall"] == 5300.0
     asked.clear()
     stored_at = stored[SHARP]["stored_at"]
     engine.categories_round(now=stored_at + 3600)  # an hour later: only the one that failed is due
@@ -96,13 +96,12 @@ def test_traders_rows_carry_what_was_kept_with_no_read_and_a_profile_uses_it(
     monkeypatch.setattr(engine, "_worth_load", lambda *a, **k: {"scores": [board(SHARP, "proven"), board(OTHER, "no_edge")]})
     client = TestClient(engine.app)
     rows = {s["wallet"]: s for s in client.get("/api/worth").json()["result"]["scores"]}
-    assert rows[SHARP]["realized"]["usd"] == {"Sports": 5000.0, "Politics": 300.0, "All except Sports": 300.0,
-                                              "All categories": 5300.0}  # fmt: skip
+    assert rows[SHARP]["realized"]["usd"] == {"Sports": 5000.0, "Politics": 300.0, "All categories": 5300.0}
     assert "realized" not in rows[OTHER]  # not recommended: never read, so nothing, never $0
     # a profile of a recommended trader: the kept one while it's fresh, no read on the checks' budget either
     monkeypatch.setattr(engine, "checker", lambda: (_ for _ in ()).throw(AssertionError("read")))
     monkeypatch.setattr(engine.time, "time", lambda: NOW + 3600)
-    assert client.get(f"/api/categories/{SHARP}").json()["except_sports"] == 300.0
+    assert client.get(f"/api/categories/{SHARP}").json()["overall"] == 5300.0
     assert asked == []
 
 
@@ -113,21 +112,21 @@ PICKER = ("usd", "pl", "esc", "plural", "byDesc", "lb", "WIN_LABEL", "winRateOf"
 
 
 def test_the_category_picker_sorts_by_realized_profit_in_it_and_says_what_it_counts(run_js: Any) -> None:
-    rows = ('[{wallet: "a", realized: {usd: {Sports: 5000, "All except Sports": 300}}}, {wallet: "b"},'
-            ' {wallet: "c", realized: {usd: {Sports: -200, "All except Sports": 900}}}, {wallet: "d", realized: {usd: {Politics: 50}}}]')
+    rows = ('[{wallet: "a", realized: {usd: {Sports: 5000, Politics: 300}}}, {wallet: "b"},'
+            ' {wallet: "c", realized: {usd: {Sports: -200, Politics: 900}}}, {wallet: "d", realized: {usd: {Politics: 50}}}]')
     got = run_js(PICKER, f"""(() => {{ const r = {rows}; lb.cat = "Sports";
       const sports = [...r].sort(LB_SORTS.category[1]).map((s) => s.wallet);
-      lb.cat = "All except Sports"; const rest = [...r].sort(LB_SORTS.category[1]).map((s) => s.wallet);
+      lb.cat = "Politics"; const rest = [...r].sort(LB_SORTS.category[1]).map((s) => s.wallet);
       return [sports, rest, r.map((s) => realizedText(s, "Sports")), r.filter((s) => realizedIn(s, "Sports") > 0).map((s) => s.wallet),
         categoryNote(r, "Sports"), REALIZED_CATS]; }})()""")
     sports, rest, texts, made, note, cats = got
     assert sports[:2] == ["a", "c"] and set(sports[2:]) == {"b", "d"}  # unknown or none at the bottom, never $0
-    assert rest[:2] == ["c", "a"]
+    assert rest[:3] == ["c", "a", "d"]
     assert texts == ["Sports: +$5K realized, all time", "Sports: not read yet", "Sports: −$200 realized, all time", "Sports: none"]
     assert made == ["a"]  # made money in Sports: realized profit above zero there
     assert note.startswith("Realized profit in Sports, all time: Polymarket's figures, read once a day for the traders we recommend.")
     assert "Parlays included" in note and note.endswith("Not read yet for 1 trader.")
-    assert cats[0] == "Sports" and cats[-1] == "All except Sports" and "Uncategorised" in cats
+    assert cats[0] == "Sports" and "All except Sports" not in cats and "Uncategorised" in cats  # the owner, 20 Oct
 
 
 def test_the_picker_adds_no_tier_and_loosens_nothing() -> None:
@@ -179,7 +178,7 @@ def test_a_kept_figure_needs_no_turn_and_a_queued_write_goes_where_it_was_queued
     monkeypatch.setattr(engine, "_checks", threading.BoundedSemaphore(1))
     engine._checks.acquire()  # every turn taken: a recommended trader's kept figure still comes
     monkeypatch.setattr(engine, "CHECK_WAIT_S", 0)
-    assert TestClient(engine.app).get(f"/api/categories/{SHARP}").json()["except_sports"] == 300.0
+    assert TestClient(engine.app).get(f"/api/categories/{SHARP}").json()["overall"] == 5300.0
     engine._checks.release()
     # the directory is captured when the write is queued: one swapped in before the writer runs never gets it
     gate = threading.Event()

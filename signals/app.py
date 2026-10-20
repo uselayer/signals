@@ -1796,10 +1796,11 @@ def worth(markets: str = "") -> dict[str, Any]:
 
 def realized_row(view: dict[str, Any]) -> dict[str, Any]:
     """A kept realized profit by category (``category_view``) as Traders' rows carry it: category → dollars, with
-    "All except Sports" and "All categories", and when it was read (``at``)."""
+    "All categories", and when it was read (``at``). No "All except Sports": a sum of other rows read as a category
+    (the owner, 20 Oct)."""
     out: dict[str, Any] = {r["category"]: r["usd"] for r in view.get("rows") or []}
     if view.get("overall") is not None:
-        out |= {"All except Sports": view.get("except_sports"), "All categories": view["overall"]}
+        out["All categories"] = view["overall"]
     return {"usd": out, "at": view.get("stored_at")}
 
 
@@ -2101,7 +2102,7 @@ def completed(wallet: str, request: Request) -> dict[str, Any]:
 def category_view(r: dict[str, Any]) -> dict[str, Any]:
     """The SDK's realized profit by category (``RealizedByCategory.to_dict()``) as the page shows it: a row per
     category they traded (most profit first, Polymarket's names made plain), then "Uncategorised" for markets in no
-    category when that isn't $0, all of them together (``overall``) and all except Sports. Parlays are included."""
+    category when that isn't $0, and all of them together (``overall``). Parlays are included."""
     cats: dict[str, float] = r.get("categories") or {}
     rows = [{"category": CATEGORY_NAMES.get(c, UNCATEGORISED), "usd": v} for c, v in cats.items()]
     other = r.get("uncategorised")
@@ -2112,7 +2113,6 @@ def category_view(r: dict[str, Any]) -> dict[str, Any]:
         merged[row["category"]] = round(merged.get(row["category"], 0.0) + row["usd"], 2)
     overall = r.get("overall")
     return {"rows": [{"category": c, "usd": v} for c, v in merged.items()], "overall": overall,
-            "except_sports": None if overall is None else round(overall - cats.get("SPORTS", 0.0), 2),
             "read_at": r.get("read_at")}  # fmt: skip
 
 
