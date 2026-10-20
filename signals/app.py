@@ -1899,13 +1899,9 @@ def record(wallet: str) -> dict[str, Any]:
 
 
 # ---- a trader's whole record of positions, and their realized profit by category (uselayer 0.14) ----
-# Both on the checks' budget (checker), kept per wallet. completed_positions is 3 reads for most wallets, 103 at most
-# (COMPLETED_PAGES);
+# Both on the checks' budget (checker), kept per wallet. completed_positions is 3 reads for most wallets, 13 at most;
 # realized_by_category is 12. Polymarket works both out every few hours, so they're kept that long-ish.
 COMPLETED_TTL_S = 1800
-# Closed positions read for "Made money on", 50 a page: up to 5,000. At the SDK's 10 (500), 24 of the 50 recommended
-# traders had more and got no record; at 100, 28 of 50 got one (was 18), median 3.3 s, slowest 46 s (19 Oct).
-COMPLETED_PAGES = 100
 CATEGORY_TTL_S = 3600
 # Polymarket's leaderboard categories, as the page names them
 CATEGORY_NAMES = {"SPORTS": "Sports", "ESPORTS": "Esports", "CRYPTO": "Crypto", "POLITICS": "Politics",
@@ -1925,7 +1921,7 @@ def _completed(wallet: str) -> dict[str, Any]:
     """Their whole record of positions (the SDK's ``completed_positions``): ``summary`` is its one line ("Made money
     on 43 of 82 positions", "· parlays not included" when they have parlays, or why there's no record), and the
     figures behind it. The positions themselves stay out: a busy trader has hundreds."""
-    r = checker().completed_positions(wallet, max_pages=COMPLETED_PAGES)
+    r = checker().completed_positions(wallet)
     return {"summary": r.summary, "made_money": r.made_money, "count": len(r.positions), "complete": r.complete,
             "reconciles": r.reconciles, "parlays_excluded": r.parlays_excluded, "read_at": r.read_at.isoformat()}  # fmt: skip
 
