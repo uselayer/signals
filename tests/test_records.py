@@ -90,6 +90,16 @@ def test_the_usual_trade_adds_up_one_orders_fills_so_a_big_trader_doesnt_look_sm
     assert rec["typical_usd"] == 25000 and rec["buys_30d"] == 3 and rec["last_buy"] == NOW - 76
 
 
+def test_the_usual_trade_is_where_their_money_goes_not_the_middle_of_their_scraps() -> None:
+    """Most of their trades are $5 scraps, almost all their money is in a few big bets (0x361b…74fe, 19 Oct: $22
+    usual against $1.3M profit): the usual trade is the big bets' size, never the scraps'."""
+    fills = [(NOW - 1000 * i, True, f"0xs{i}", 5.0) for i in range(1, 41)]  # 40 scraps, $200
+    fills += [(NOW - 3600 * i, True, f"0xb{i}", usd) for i, usd in enumerate((20000.0, 50000.0, 60000.0), 1)]
+    rec = records.build(ProfitHistory([]), positions([]), fills, NOW)
+    assert rec["typical_usd"] == 50000  # half the $130,200 is in trades of $50K or more
+    assert records._usual([10.0, 10.0, 10.0]) == 10 and records._usual([]) is None
+
+
 def test_a_record_read_takes_the_profit_history_and_the_completed_positions() -> None:
     asked: list[Any] = []
 

@@ -83,6 +83,19 @@ def _decisions(buys: list[tuple[Any, ...]]) -> list[float]:
     return out
 
 
+def _usual(usds: list[float]) -> float | None:
+    """Their usual trade: the size half their money went in, at or above (the middle of their trades weighted by
+    dollars). A plain middle counts a $5 trade as much as a $50K one, so a trader with many scraps and a few big bets
+    showed $22 against $1.3M profit (the owner, 19 Oct); here the scraps only count for the money in them."""
+    usds = sorted(u for u in usds if u > 0)
+    half, seen = sum(usds) / 2, 0.0
+    for u in usds:
+        seen += u
+        if seen >= half:
+            return round(u, 2)
+    return None
+
+
 def _paid(buys: list[tuple[Any, ...]]) -> float | None:
     """The average price they paid, each outcome bought once (its fills' dollars over its contracts), from buys
     that carry their price and outcome (``(…, price, outcome)``). A price is the market's chance for that outcome,
@@ -100,8 +113,8 @@ def _paid(buys: list[tuple[Any, ...]]) -> float | None:
 
 def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
     """From their latest trades (``(time, bought, market, dollars)``, newest first, as the quick check reads them,
-    optionally with each one's price and outcome after): their usual trade (the middle of their buys over 30 days,
-    in dollars), new markets a day over the days read (30, or fewer when a busy trader's 500 latest trades reach
+    optionally with each one's price and outcome after): their usual trade (``_usual``, over 30 days, in dollars),
+    new markets a day over the days read (30, or fewer when a busy trader's 500 latest trades reach
     back less far), the average price they paid over 30 days (``_paid``) and their last buy."""
     month = now - 30 * DAY
     buys = [t for t in trades if t[1] and t[0] >= month]
@@ -109,7 +122,7 @@ def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
     reached = min((t[0] for t in trades), default=now)
     days = max(1.0, (now - max(reached, month)) / DAY) if trades else 30.0
     return {
-        "typical_usd": round(statistics.median(usds), 2) if usds else None,
+        "typical_usd": _usual(usds),
         "buys_30d": len({t[2] for t in buys}),
         "markets_per_day": round(len({t[2] for t in buys}) / days, 2),
         "paid_30d": _paid(buys),
