@@ -463,6 +463,7 @@
   .pf-tabs button { border: 0; background: none; padding: 10px 14px; font: inherit; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; }
   .pf-tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
   .pf-sec { font-size: 13px; color: var(--muted); margin: 18px 0 2px; }
+  .pf-tabnote { font-size: 13px; color: var(--muted); margin: 12px 0 0; }
   .pf-li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 14px 2px; border-bottom: 1px solid var(--line); }
   .pf-li .t { font-weight: 500; overflow-wrap: anywhere; }
   .pf-li .s { font-size: 13px; color: var(--muted); margin-top: 2px; }
@@ -1746,6 +1747,9 @@ const lbPct = (x) => {
 // we recommend (the engine's daily job): the category picker sorts by it and can keep only those who made money in
 // it. A trader not read yet, or with none in that category (they never traded it), has "—", never $0.
 const REALIZED_CATS = ["Sports", "Politics", "Crypto", "Esports", "Economics", "Finance", "Culture", "Tech", "Weather", "Mentions", "Uncategorised", "All except Sports"];
+// The engine's name for markets Polymarket puts in no category (kept that way in directory.db), as a visitor reads it.
+const UNCATEGORISED = "Uncategorised";
+const catLabel = (c) => c === UNCATEGORISED ? "Other markets" : c;
 const realizedIn = (s, cat) => s.realized?.usd?.[cat] ?? null;
 const realizedText = (s, cat) => !s.realized ? `${cat}: not read yet` : realizedIn(s, cat) == null ? `${cat}: none` : `${cat}: ${usd(realizedIn(s, cat), true)} realized, all time`;
 const LB_SORTS = {
@@ -1871,7 +1875,7 @@ function renderWorth() {
       <div class="lb-view">
         <label class="lb-search" for="lbq"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg><input id="lbq" type="search" placeholder="Search name or wallet" value="${esc(lb.q)}" autocomplete="off" aria-label="Search by trader name or wallet address"></label>
         ${periods ? `<span class="lb-period-what" id="lbperiodwhat">Profit and trend over</span><div class="lb-period" role="group" aria-labelledby="lbperiodwhat">${Object.keys(PERIOD_DAYS).map((p) => `<button type="button" data-lbperiod="${p}" aria-pressed="${n === p}">${p.toUpperCase()}</button>`).join("")}</div>` : ""}
-        <select id="lbcat" class="lb-sort" aria-label="Realized profit by category">${[["", "Any category"], ...REALIZED_CATS.map((c) => [c, c])].map(([v, l]) => `<option value="${esc(v)}" ${cat === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <select id="lbcat" class="lb-sort" aria-label="Realized profit by category">${[["", "Any category"], ...REALIZED_CATS.map((c) => [c, catLabel(c)])].map(([v, l]) => `<option value="${esc(v)}" ${cat === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select>
         ${cat ? `<button type="button" class="lb-chip" id="lbmade" aria-pressed="${lb.made}">Made money in ${esc(cat)}</button>` : ""}
         <select id="lbsort" class="lb-sort" aria-label="Sort traders">${Object.entries(LB_SORTS).filter(([k]) => k !== "category" || cat).map(([k, [l]]) => k === "consistent" && !history
           ? `<option value="consistent" disabled>Most consistent (coming soon)</option>` : `<option value="${k}" ${sort === k ? "selected" : ""}>${k === "category" ? `Realized profit in ${esc(cat)}` : l}</option>`).join("")}</select>
@@ -2637,8 +2641,39 @@ const weekBars = (weeks) => `<span class="lb-weeks" aria-hidden="true">${weeks.m
 const numberRows = (rows) => rows.filter((r) => r.v != null).map(numberRow).join("");
 const numberRow = (r) => `<div><dt>${esc(r.k)}${r.sub ? `<small>${esc(r.sub)}</small>` : ""}</dt><dd>${r.weeks ? weekBars(r.weeks) : ""}${r.v ?? `<span class="lb-none">—</span>`}</dd></div>`;
 
+// The profile's two tabs, each with a line saying what it lists: a position adds up every buy of one outcome, a trade is
+// one buy or sell.
+const TAB_NOTES = {
+  positions: "One line per outcome they bought: all their buys of it added up, at their average price.",
+  activity: "Each buy and sell as it happened, newest first. Several trades can make up one position.",
+};
+// An open position: what they put in (contracts × their average price) and what it's worth now, in dollars; the
+// contracts are in the hover. The price they paid and the price now are the status on the right.
+function openPositionRow(p) {
+  const putIn = p.size != null && p.price != null ? p.price * p.size : null;
+  const worth = p.value ?? (p.size != null && p.now != null ? p.now * p.size : null);
+  const facts = [putIn != null ? `<span title="${esc(`${Math.round(p.size).toLocaleString("en-US")} contracts at ${cents(p.price)}`)}">Put in ${usd(putIn)}</span>` : null,
+    worth != null ? `worth ${usd(worth)} now` : null, p.url ? marketLink(p.url) : null].filter(Boolean).join(" · ");
+  return `<div class="pf-li"><div><div class="t">${esc(p.title)}</div><div class="s">${p.outcome ? `<span class="pf-oc">${esc(p.outcome)}</span>` : ""}${facts}${usInline(p.us)}</div></div><div class="r">${tradeStatus({ status: p.status, price: p.price, price_now: p.now })}</div></div>`;
+}
+// A closed position: what they put in and at what price, what they got back (contracts × their average exit: their
+// sells, and 1 or 0 for what they held to settlement), and on the right how it ended with Polymarket's profit, after
+// fees. A settled trade we checked (no SDK record) has only the price and its amount.
+function closedPositionRow(c) {
+  const sdk = "result" in c, when = c.closed_at || c.at;
+  const putIn = sdk ? (c.size != null && c.avg_price != null ? c.size * c.avg_price : null) : c.usd;
+  const price = sdk ? c.avg_price : c.price;
+  const back = sdk && c.size != null && c.exit_price != null ? c.size * c.exit_price : null;
+  const status = sdk ? { won: "won", lost: "lost", sold: "closed" }[c.result] : c.payout === 1 ? "won" : "lost"; // null: not settled yet
+  const facts = [putIn != null ? `Put in ${usd(putIn)}${price != null ? ` at ${cents(price)}` : ""}` : price != null ? `Bought at ${cents(price)}` : null,
+    c.result === "sold" && c.exit_price != null ? `sold at ${cents(c.exit_price)}` : null,
+    back != null ? `got back ${usd(back)}` : null, when ? ago(when) : null, c.url ? marketLink(c.url) : null].filter(Boolean).join(" · ");
+  return `<div class="pf-li"><div><div class="t">${esc(c.title || c.market)}</div><div class="s">${c.outcome ? `<span class="pf-oc">${esc(c.outcome)}</span>` : ""}${facts}</div></div>
+      <div class="r">${status ? statusLine(status) : ""}${c.pnl != null ? ` ${pl(c.pnl, usd(c.pnl, true))}` : ""}</div></div>`;
+}
+
 // "Realized profit by category, all time" (/api/categories: Polymarket's leaderboard for this trader, by category):
-// a row per category they traded, "Uncategorised" for markets in none, then all except Sports (only when they traded
+// a row per category they traded, "Other markets" for markets in none, then all except Sports (only when they traded
 // Sports and two or more others) and all together (only with more than one row): never a row that repeats another or a $0
 // for categories they never traded.
 const CATEGORY_NOTE = "Polymarket's figures, updated every few hours. Trades still open aren't counted.";
@@ -2648,8 +2683,10 @@ function categoryCard(c) {
   if (c.error) return `<section class="pf-card">${head}<p class="pf-empty">${c.busy ? BUSY_TEXT : "Their profit by category couldn't be read just now."}</p></section>`;
   const money = (x) => x == null ? null : pl(x, usd(x, true));
   const sports = (c.rows || []).some((r) => r.category === "Sports"), others = (c.rows || []).filter((r) => r.category !== "Sports").length;
-  // "Uncategorised" is the leaderboard's total less the categories': under $1 it's rounding (flawfence: +$0.01), no row
-  const rows = [...(c.rows || []).filter((r) => r.category !== "Uncategorised" || Math.abs(r.usd) >= 1).map((r) => ({ k: r.category, v: money(r.usd) })),
+  // "Uncategorised" (shown as "Other markets") is the leaderboard's total less the categories': under $1 it's rounding
+  // (flawfence: +$0.01), and under 0.1% of their total it's noise (+$1.17 of $9.1M): no row
+  const tiny = (x) => Math.abs(x) < 1 || (c.overall != null && Math.abs(x) < Math.abs(c.overall) * 0.001);
+  const rows = [...(c.rows || []).filter((r) => r.category !== UNCATEGORISED || !tiny(r.usd)).map((r) => ({ k: catLabel(r.category), v: money(r.usd) })),
     ...(c.overall != null && (c.rows || []).length > 1 ? [
       ...(sports && others > 1 ? [{ k: "All except Sports", v: money(c.except_sports) }] : []),
       { k: "All categories", v: money(c.overall) }] : [])];
@@ -2680,29 +2717,22 @@ function renderProfile() {
   // the tabs
   let body;
   if (pf.tab === "positions") {
-    const open = d && !d.error ? (d.positions || []).map((p) => ({ title: p.title || p.market, outcome: p.outcome, size: p.size, price: p.avg_price, now: p.current_price, status: p.status, url: p.url, us: p.us }))
+    const open = d && !d.error ? (d.positions || []).map((p) => ({ title: p.title || p.market, outcome: p.outcome, size: p.size, price: p.avg_price, now: p.current_price, value: p.value, status: p.status, url: p.url, us: p.us }))
       .filter((p) => !["won", "lost", "closed"].includes(p.status)) : null;
     const closedSdk = d && Array.isArray(d.closed) ? d.closed : null;
     const settled = (s.sample || []).filter((b) => b.payout != null).slice(0, 10);
-    const openRow = (p) => `<div class="pf-li"><div><div class="t">${esc(p.title)}</div><div class="s">${p.outcome ? `<span class="pf-oc">${esc(p.outcome)}</span>` : ""}${p.size != null ? `${Math.round(p.size).toLocaleString()} at ${cents(p.price)} · ${usd((p.price ?? 0) * p.size)}` : ""}${p.now != null ? ` · now ${cents(p.now)}` : ""}${p.url ? ` · ${marketLink(p.url)}` : ""}${usInline(p.us)}</div></div><div class="r">${tradeStatus({ status: p.status, price: p.price, price_now: p.now })}</div></div>`;
-    const closedRow = (c) => {
-      const sdk = "result" in c, when = c.closed_at || c.at;
-      const bought = sdk ? `${c.size != null ? `${Math.round(c.size).toLocaleString()} ` : ""}${c.avg_price != null ? `at ${cents(c.avg_price)}` : "bought"}` : `bought at ${cents(c.price)}`;
-      const status = sdk ? { won: "won", lost: "lost", sold: "closed" }[c.result] : c.payout === 1 ? "won" : "lost"; // null: not settled yet
-      return `<div class="pf-li"><div><div class="t">${esc(c.title || c.market)}</div><div class="s">${c.outcome ? `<span class="pf-oc">${esc(c.outcome)}</span>` : ""}${bought}${c.result === "sold" && c.exit_price != null ? ` · sold at ${cents(c.exit_price)}` : ""}${c.pnl != null ? ` · ${pl(c.pnl, usd(c.pnl, true))}` : ""}${when ? ` · ${ago(when)}` : ""}${c.url ? ` · ${marketLink(c.url)}` : ""}</div></div>
-      <div class="r">${status ? statusLine(status) : ""}</div></div>`;
-    };
-    body = `<p class="pf-sec">Open</p>${open == null ? (d?.error ? `<p class="inline-err">${esc(d.error)}</p>` : `<div class="skel" style="width:60%;height:14px;margin:16px 0"></div>`)
-        : open.length ? `<div>${open.slice(0, 12).map(openRow).join("")}</div>` : `<p class="pf-empty">No open trades.</p>`}
-      <p class="pf-sec">Closed${closedSdk ? "" : " · settled trades we checked"}</p>
-      ${(closedSdk || settled).length ? `<div>${(closedSdk || settled).slice(0, 12).map(closedRow).join("")}</div>` : `<p class="pf-empty">No settled trades yet. Results show up once their markets settle.</p>`}`;
+    body = `<p class="pf-tabnote">${esc(TAB_NOTES.positions)}</p>
+      <p class="pf-sec">Open</p>${open == null ? (d?.error ? `<p class="inline-err">${esc(d.error)}</p>` : `<div class="skel" style="width:60%;height:14px;margin:16px 0"></div>`)
+        : open.length ? `<div>${open.slice(0, 12).map(openPositionRow).join("")}</div>` : `<p class="pf-empty">No open trades.</p>`}
+      <p class="pf-sec">Closed${closedSdk ? " · profit after fees" : " · settled trades we checked"}</p>
+      ${(closedSdk || settled).length ? `<div>${(closedSdk || settled).slice(0, 12).map(closedPositionRow).join("")}</div>` : `<p class="pf-empty">No settled trades yet. Results show up once their markets settle.</p>`}`;
   } else {
     const trades = d && !d.error ? d.trades || [] : null;
     const act = trades ? trades.map((x) => ({ sell: x.action === "sell", title: x.title || x.market, outcome: x.outcome, usd: x.usd, price: x.price, at: x.at, url: x.url, us: x.us }))
       : (s.recent || []).map((b) => ({ sell: false, title: b.title || b.market, outcome: b.outcome, usd: b.usd, price: b.price, at: b.at, url: b.url }));
-    body = act.length ? `<div>${act.slice(0, 20).map((a) => `<div class="pf-li"><div><div class="t">${a.sell ? "Sold" : "Bought"} ${a.outcome ? `<span class="pf-oc">${esc(a.outcome)}</span>` : ""}${esc(a.title)}</div>
+    body = `<p class="pf-tabnote">${esc(TAB_NOTES.activity)}</p>` + (act.length ? `<div>${act.slice(0, 20).map((a) => `<div class="pf-li"><div><div class="t">${a.sell ? "Sold" : "Bought"} ${a.outcome ? `<span class="pf-oc">${esc(a.outcome)}</span>` : ""}${esc(a.title)}</div>
         <div class="s">${usd(a.usd)} at ${cents(a.price)}${a.url ? ` · ${marketLink(a.url)}` : ""}${usInline(a.us)}</div></div><div class="r s">${ago(a.at)}</div></div>`).join("")}</div>`
-      : `<p class="pf-empty">${trades ? "No trades yet." : "No buys in the last 30 days."}</p>`;
+      : `<p class="pf-empty">${trades ? "No trades yet." : "No buys in the last 30 days."}</p>`);
   }
 
   app.innerHTML = `${pf.from === "explore" ? `<a class="back" href="#/traders/explore">← Explore</a>` : `<a class="back" href="#/traders">← Traders</a>`}
@@ -2726,13 +2756,13 @@ function renderProfile() {
         ${s.record && !lastAt ? "" : `<section class="pf-card"><h2>${s.record ? "Lately" : "Why they're here"}</h2>
           ${why.listed ? `<p class="pf-verdict">${esc(why.listed)}</p>` : ""}
           ${risks.length ? `<div class="pf-warn">${WARN_ICON}<p>${risks.map(esc).join(" ")}</p></div>` : ""}
-          ${lastAt ? `<dl class="pf-facts"><dt>Last bought</dt><dd>${ago(lastAt)} · <button type="button" class="link" id="pfactivity">See activity</button></dd></dl>` : ""}
+          ${lastAt ? `<dl class="pf-facts"><dt>Last bought</dt><dd>${ago(lastAt)} · <button type="button" class="link" id="pfactivity">See recent trades</button></dd></dl>` : ""}
         </section>`}
         ${categoryCard(pf.cats)}
         ${s.directory && s.directory.group === "limited" && s.directory.evidence === "quick" ? `<section class="pf-card"><h2>What we know so far</h2>
           <p class="pf-note">Limited evidence: fewer than 8 markets traded in the last 30 days, which is too few to judge skill either way.</p>
           <dl class="pf-facts">${evidenceFacts(s.directory).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl></section>` : ""}
-        <div class="pf-tabs" role="tablist">${[["positions", "Positions"], ["activity", "Activity"]].map(([k, l]) => `<button type="button" role="tab" data-pftab="${k}" aria-selected="${pf.tab === k}">${l}</button>`).join("")}</div>
+        <div class="pf-tabs" role="tablist">${[["positions", "Positions"], ["activity", "Recent trades"]].map(([k, l]) => `<button type="button" role="tab" data-pftab="${k}" aria-selected="${pf.tab === k}">${l}</button>`).join("")}</div>
         <div>${body}</div>
         <details class="fold"><summary>How we measure this</summary><h3 class="pf-more">More figures</h3><dl class="pf-rows">${numberRows(nums.fold)}</dl>${s.record ? recordDetails(s) : worthDetails(s)}</details>
       </div>

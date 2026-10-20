@@ -194,13 +194,20 @@ behind Vercel (see README, "Hosting").
     profile: a hit rate, not skill, slow for busy traders and given for only 18 of 50 recommended traders (dropped
     19 Oct). The worst drop from a high is the score's `worst_drop` (every hourly point); a score kept before 0.14
     has none and no row. "Realized profit by category, all time" (`/api/categories`, the SDK's
-    `realized_by_category`, parlays included) has a row per category and "Uncategorised"; "All categories" only
+    `realized_by_category`, parlays included) has a row per category and "Other markets" (the engine's "Uncategorised",
+    markets Polymarket puts in no category: no row under $1 or under 0.1% of their total, the owner, 19 Oct, on +$1.17
+    beside $9.1M); "All categories" only
     with more than one row and "All except Sports" only with Sports and two or more others, so no row repeats
     another; with the caveat "Polymarket's figures, updated every few hours. Trades still open aren't counted."
     It's read on the checks' budget (`checker`: 12 reads), kept per wallet (1 h), and under "Check now"'s limits
     (`limited_read`: CHECKS_AT_ONCE turns, CHECKS_PER_CLIENT wallets per visitor); past one the card says "Busy,
     try again in a minute.", never an error or $0.
-  - Traders' category picker ("Any category", Polymarket's categories, "Uncategorised", "All except Sports"): picking
+  - A profile's Positions tab is one line per outcome (every buy added up) and Recent trades each buy and sell, each
+    tab with a line saying so. A position says what they put in, in dollars (contracts × their average price, the
+    contracts in the hover); open, what it's worth now, with the price they paid and the price now as its neutral
+    status; closed, what they got back and how it ended with Polymarket's profit after fees (the owner, 19 Oct: "how
+    much did they put in?").
+  - Traders' category picker ("Any category", Polymarket's categories, "Other markets", "All except Sports"): picking
     one sorts by realized profit in it (all time) and offers "Made money in X". Only the traders already listed are
     sorted or filtered: no new tier or label, no recommendation loosened, no raw-profit leaderboard beyond this sort.
     Its figures come from what's kept, never a read on a page load: a daily job (`_categories_loop`,
