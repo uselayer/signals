@@ -151,6 +151,12 @@ behind Vercel (see README, "Hosting").
     costs" stay for everyone: neutral market data. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; consistency is 12 weeks,
     win record and usual trade the last 30 days. Consistency is "X of N weeks up", where a week counts profit
     taken plus the change in value of trades still open.
+    On a trader's profile only, right under "Weeks up", "Streak" is the run they're on now (`weekStreak`), counted
+    back from their latest week with data in the same 12 weeks: "Up 3 weeks in a row" or "Down 3 weeks in a row",
+    with "Past results, not a prediction". A flat week or a week with no data ends it, and a run under 2 weeks has no
+    row. It's never on the traders list or the Feed, never a column, sort or filter, and there's no "hot" list (the
+    owner, 19 Oct: traders up 3 of their last 4 weeks made money the next month 63% of the time against 26%, but
+    copying them still lost after costs).
     One bar: filters on the left (market chips = the onboarding choice), how you view the list on
     the right (search name or wallet, period, sort). Columns are grouped as Track record and Style.
     Recommendations never include Big profit, edge unproven; Profit rests on one win (big profit that's a loss
