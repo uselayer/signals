@@ -1934,7 +1934,7 @@ async function boardView(more = false) {
   bd.busy = false;
   if (routeName() !== "traders:worth") return;
   bd.rows = more ? [...bd.rows, ...r.rows] : r.rows;
-  bd.total = r.total; bd.more = r.more; bd.counts = r.counts; bd.newHidden = r.new_hidden ?? 0;
+  bd.total = r.total; bd.more = r.more; bd.counts = r.counts; bd.newHidden = r.new_hidden ?? 0; bd.incomplete = r.incomplete ?? 0;
   renderBoard();
 }
 
@@ -1985,7 +1985,7 @@ function renderBoard() {
   } else if (q || bd.cat) {
     body = emptyState("No trader matches", q ? `Nobody called “${esc(q)}”${bd.cat ? ` in ${esc(bd.cat)}` : ""} on the leaderboard yet.` : `No ${esc(bd.cat)} traders on the leaderboard yet.`, `<button class="btn ghost" id="bdclear">Show everyone</button>`);
   } else {
-    body = emptyState("Reading traders' records", "The leaderboard fills in as each trader's record is read, a few thousand an hour.");
+    body = emptyState("Reading traders' records", "A trader is listed once every column has a figure: the leaderboard fills in as each record is read, the most profitable first.");
   }
   const c = bd.counts;
   box.innerHTML = `
@@ -2006,6 +2006,7 @@ function renderBoard() {
     ${body}
     <p class="lb-foot">${bd.total != null ? `${plural(bd.total, "trader")} with a buy in the last 30 days and at least 5 positions closed in 90 days` : ""}
       ${bd.newHidden ? ` · ${plural(bd.newHidden, "new account")} (under 4 weeks of history) hidden · <button class="link" id="bdnewfoot">Show them</button>` : bd.newOn ? " · New accounts included" : ""}
+      ${bd.incomplete && !bd.q.trim() ? ` · ${plural(bd.incomplete, "more trader")} not listed until every column has a figure (most are still being read, the most profitable first)` : ""}
       · Past results, not a prediction: what each trader did, read from Polymarket every 2 days
       · Win rate is positions closed in profit (sold or settled); 50% isn't break-even when prices differ, so each shows the average price they paid over 30 days
       ${c ? `<br>${c.read.toLocaleString("en-US")} records read so far${c.from_scores ? `, ${c.from_scores.toLocaleString("en-US")} more from earlier checks (no win rate until read)` : ""}` : ""}
