@@ -47,6 +47,15 @@ def live_reads(monkeypatch: pytest.MonkeyPatch, detail: Any) -> None:
 
 
 @pytest.fixture(autouse=True)
+def private_store(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test ever writes to the real store (~/.uselayer/signals): each starts with a store of its own, and a test
+    that sets ``engine.STORE_DIR`` itself (most do, to its ``tmp_path``) still wins."""
+    from signals import app as engine
+
+    monkeypatch.setattr(engine, "STORE_DIR", tmp_path_factory.mktemp("store"))
+
+
+@pytest.fixture(autouse=True)
 def fresh_poller() -> None:
     """Every test starts with nothing the Feed's poller kept about traders' positions, failures or hints."""
     from signals import app as engine

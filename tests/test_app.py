@@ -604,12 +604,13 @@ def test_the_copy_estimate_divides_by_what_a_copier_paid_when_the_sdk_says() -> 
     assert engine._board(COPYABLE | {"avg_price": 0.5, "copy_entry": None})["copy_return"] == pytest.approx(0.04)
 
 
-# ---- Traders' sections, by tier alone: Sharps, Rising ----
+# ---- Traders' recommended section: one, Sharps (the SDK's Rising is listed and named as a Sharp) ----
 
 
 def test_each_recommended_trader_has_one_section_by_tier_and_copying_never_moves_it() -> None:
     assert engine.section_of("quiet") == "sharp" and engine.section_of("proven") == "sharp"
-    assert engine.section_of("rising") == "rising"
+    assert engine.section_of("rising") == "sharp"  # the owner, 19 Oct: Sharp and Rising did no differently
+    assert engine.SECTIONS == ("sharp",)
     assert engine.section_of("too_fast") == "sharp"  # kept by uselayer before 0.10: a sharp
     for seg in ("big_profit", "lucky", "too_few", "no_edge", "no_view", "inactive", None):
         assert engine.section_of(seg) is None  # not recommended: only in "See all checked traders"
@@ -617,7 +618,7 @@ def test_each_recommended_trader_has_one_section_by_tier_and_copying_never_moves
     b = engine._board(losing)
     assert (b["section"], b["copy_ok"], b["copy_label"]) == ("sharp", False, "Costly to copy")
     assert (engine._board(COPYABLE)["section"], engine._board(COPYABLE)["copy_label"]) == ("sharp", "Copyable")
-    assert engine._board(SCORE | {"segment": "rising", "copyable": "unknown"})["section"] == "rising"
+    assert engine._board(SCORE | {"segment": "rising", "copyable": "unknown"})["section"] == "sharp"
     assert engine._board(SCORE | {"segment": "lucky"})["section"] is None
 
 
@@ -626,13 +627,14 @@ def test_the_traders_list_carries_each_traders_section(api: TestClient, monkeypa
     rising = SCORE | {"wallet": "0xr", "segment": "rising", "copyable": "unknown"}
     unproven = SCORE | {"wallet": "0xl", "segment": "big_profit"}
     monkeypatch.setattr(engine, "_worth_data", {"scores": [COPYABLE, losing, rising, unproven]})
-    got = {s["wallet"]: s["section"] for s in api.get("/api/worth").json()["result"]["scores"]}
-    assert got == {"0xabc": "sharp", "0xf": "sharp", "0xr": "rising", "0xl": None}
+    got = {s["wallet"]: (s["section"], s["segment"]) for s in api.get("/api/worth").json()["result"]["scores"]}
+    assert {w: section for w, (section, _) in got.items()} == {"0xabc": "sharp", "0xf": "sharp", "0xr": "sharp", "0xl": None}
+    assert got["0xr"][1] == "rising"  # the SDK's segment stays in the API: only the section and the page's words change
 
 
 def test_the_page_has_the_sections_and_no_copy_cue(api: TestClient) -> None:
     page = api.get("/").text
-    for words in ('"Sharps"', '"Rising"', '"Big profit, edge unproven"',
+    for words in ('"Sharps"', '"Sharp"', '"Quiet sharp"', '"Big profit, edge unproven"',
                   '"Profit rests on one win"', '"Limited evidence"', '"Our price test didn\'t show skill"',
                   '"Market maker or arbitrage"', '"Checked, not recommended"',
                   "not as a signal to buy: we haven't found that buying after them makes money.",
@@ -654,6 +656,28 @@ def test_the_page_has_the_sections_and_no_copy_cue(api: TestClient) -> None:
     for jargon in ("Copies kept", "Copies lost", "What copies", "a copy gets in", "Estimated copy return", "95% range",
                    "price a copy", "at the ask", "trader's copies", "a copy a few minutes late"):  # fmt: skip
         assert jargon not in shown, jargon  # plain words for someone who has never heard of copy trading
+
+
+def test_rising_reads_sharp_everywhere_and_the_page_never_says_rising(run_js: Any) -> None:
+    """The owner, 19 Oct: Sharp and Rising had indistinguishable next-month results, so one section, Sharps, and a
+    Rising trader's chip is Sharp's (name and colour). Quiet sharp stays: it says a style. Presentation only."""
+    import re
+
+    tiers = run_js(("TIER",), "[TIER.proven, TIER.quiet, TIER.rising]")
+    assert tiers == [["Sharp", "s-proven"], ["Quiet sharp", "s-quiet"], ["Sharp", "s-proven"]]
+    assert [k for k, *_ in run_js(("SECTIONS",), "SECTIONS")] == list(engine.SECTIONS) == ["sharp"]
+    assert [k for k, _ in run_js(("HOW_TIERS",), "HOW_TIERS")] == ["proven", "quiet"]  # one entry per chip shown
+    assert run_js(("HOW_FOCUS",), "HOW_FOCUS.rising") == "proven"  # a Rising trader's chip opens Sharp's entry
+    page = "\n".join(ln for ln in (engine.HERE / "static" / "index.html").read_text().splitlines()
+                     if not ln.lstrip().startswith("//"))  # fmt: skip
+    shown = re.sub(r"(^|\s)//\s.*$", "", page, flags=re.M)  # without code comments
+    assert "Rising" not in shown and "Proven sharp" not in shown and "s-rising" not in shown
+    # never a hedge beside a Sharp chip: not in the page's words, nor in a Sharp's "Why they're here" (the engine's)
+    assert "too few to be sure" not in shown and "Early signs" not in shown
+    for seg in ("proven", "quiet", "rising"):
+        s = SCORE | {"segment": seg, "edge": {"mean": 0.02, "margin": 0.03, "n": 12, "z": 1}}
+        listed = engine.why_lines(s | engine._board(s))["listed"] or ""
+        assert "too few" not in listed and "to be sure" not in listed and "Early signs" not in listed, seg
 
 
 def test_the_page_never_says_copy() -> None:

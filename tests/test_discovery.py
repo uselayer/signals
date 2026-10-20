@@ -336,7 +336,7 @@ def test_the_owner_sees_the_check_and_the_directory_compared(api: TestClient, mo
     assert (r["flag"], r["serving"], r["error"]) == ("directory", "directory", None)
     assert r["check"]["traders"] == 3 and r["check"]["recommended"] == 2
     assert r["directory"]["traders"] == 4 and r["directory"]["recommended"] == 2 and r["directory"]["considered"] == 4
-    assert r["directory"]["by_section"] == {"sharp": 1, "rising": 1}
+    assert r["directory"]["by_section"] == {"sharp": 2}  # Proven and Rising: one section, Sharps
     assert r["recommended"] == {"both": 1, "only_check": {"scored_since_another_tier": 1},
                                 "only_directory": {"not_in_checks_list": 1}}  # fmt: skip
     apart = r["scored_apart"]

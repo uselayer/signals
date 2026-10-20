@@ -59,7 +59,9 @@ def test_why_theyre_here_says_what_how_why_listed_and_copying_in_plain_lines() -
     assert why_costly["copying"] == engine.copy_offer(costly)[1] and why_costly["copying"].startswith("Costly to copy: ")
 
     rising = s | {"segment": "rising", "copyable": "unknown", "edge": {"mean": 0.02, "margin": 0.03, "n": 12, "z": 1}}
-    assert "over 12 trades so far, too few to be sure yet" in engine.why_lines(rising | engine._board(rising))["listed"]
+    rising_listed = engine.why_lines(rising | engine._board(rising))["listed"]
+    assert rising_listed.startswith("The price has tended to move their way after they buy, over 12 trades so far.")
+    assert "too few" not in rising_listed and "to be sure" not in rising_listed and "Early signs" not in rising_listed
 
     lucky = SCORE | {"segment": "lucky", "reason": "Big profit, but it rests on one bet."}
     assert engine.why_lines(lucky | engine._board(lucky))["listed"] == "Not on our list: Big profit, but it rests on one trade."
@@ -198,7 +200,7 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     assert m["Worst drop from a high"]["v"] is None and m["Worst drop from a high"]["sub"].startswith("last 90 days")
     assert m["Weeks up"]["v"] == "4 of 6" and m["Weeks up"]["sub"] == "since their first trade" and m["Weeks up"]["weeks"]
     assert m["Markets"]["v"] == "Sports 98%" and m["Markets"]["sub"] == "of 42 events checked, last 30 days"  # under 5% left out
-    assert m["Usual opening buy"]["v"] == "$24.8K" and m["Usual price paid"]["v"] == "35¢–54¢"
+    assert m["Usual trade"]["v"] == "$24.8K" and m["Usual price paid"]["v"] == "35¢–54¢"
     assert m["New positions"]["v"] == "about 2 a day"
     assert "+$780K" in m["All time without their biggest win"]["v"]  # in the fold
     assert m["How far the price moved before you could buy"]["v"] is None  # not read: "—", never 0
@@ -209,11 +211,60 @@ def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_s
     # 7D moves realized P&L only; the trader read still loading is "…"; a wallet read in part isn't the wallet
     w = rows(week)
     assert week["hero"]["k"] == "Realized P&L, 7 days" and "−$20" in week["hero"]["v"] and week["hero"]["sub"].endswith("all time … · after fees")
-    assert w["Open P&L"]["v"] == "…" and w["Usual opening buy"]["v"] == "$24.8K"
+    assert w["Open P&L"]["v"] == "…" and w["Usual trade"]["v"] == "$24.8K"
     assert w["Wallet"]["v"] is None and w["Wallet"]["sub"] == "cash $5.00; open positions couldn't be read"
     # the trader read failed: "—", never the score's change in open value over 30 days
     f = rows(failed)
     assert f["Open P&L"]["v"] is None and failed["hero"]["sub"] == "taken in the last 30 days · after fees"
+
+
+def test_a_figure_whose_read_failed_says_couldnt_be_read_and_too_few_stays_a_dash() -> None:
+    """uselayer 0.14's ``unread``: held-to-settlement is None both with too few closed positions and when its read
+    failed. Only the failed read is said; too few says nothing, and a score kept before 0.14 (no ``unread``) is as
+    before."""
+    s = SCORE | {"typical_usd": 855.0}
+    failed = engine.why_lines(s | {"held_share": None, "unread": ["held_share", "cash_usd"]})["how"]
+    assert failed == "Usually $855, how often they hold until the market settles couldn't be read."
+    too_few = engine.why_lines(s | {"held_share": None, "unread": ["cash_usd"]})["how"]
+    old = engine.why_lines(s | {"held_share": None})["how"]
+    assert too_few == old == "Usually $855."
+    read = engine.why_lines(s | {"held_share": 0.5, "unread": ["held_share"]})["how"]  # a figure wins: never both
+    assert read == "Usually $855, holds 50% of closed positions until the market settles."
+    assert "bet" not in failed.lower()
+
+
+ACCOUNT = ("profileAccount", "UNREAD_VALUE")
+
+
+def test_the_wallet_says_couldnt_be_read_when_its_read_failed_and_old_scores_are_as_before(run_js: Any) -> None:
+    """The Wallet row (cash plus open positions): when a part's read failed, the read now's own ``missing`` or, while
+    the check's figures stand in, the score's ``unread``, it says "couldn't be read" rather than a bare "—". A part
+    the check didn't fail is still being read now. A score kept before uselayer 0.14 (no ``unread``) is as before."""
+    s = {"periods": {"30d": {"realized": 1.0}}}
+
+    def wallet(score: dict[str, Any], account: Any) -> dict[str, Any]:
+        expr = (f"(() => {{ pf.account = {json.dumps(account)}; const s = {json.dumps(s | score)}; "
+                "return profileNumbers(s, null, profileAccount(s, pf.account), '30d').summary[1]; })()")  # as renderProfile
+        return run_js((*NUMBERS, *ACCOUNT), expr)  # type: ignore[no-any-return]
+
+    unread = "<span class=\"lb-none\">couldn't be read</span>"
+    # the read now failed and the check couldn't read either part: said, not "—"
+    both = wallet({"cash_usd": None, "positions_usd": None, "unread": ["positions_usd", "cash_usd"]}, {"error": True})
+    assert (both["v"], both["sub"]) == (unread, "their cash and open positions")
+    # still reading now, and the check couldn't read their cash: their positions are shown, the total isn't
+    cash = wallet({"cash_usd": None, "positions_usd": 300.0, "unread": ["cash_usd"]}, None)
+    assert (cash["v"], cash["sub"]) == (unread, "open positions $300; cash couldn't be read")
+    # the check didn't fail it (no Polygon reader, say): no "couldn't be read", the read now is still out
+    pending = wallet({"cash_usd": None, "positions_usd": 300.0, "unread": []}, None)
+    assert (pending["v"], pending["sub"]) == (None, "open positions $300; cash still being read")
+    # a score kept before 0.14: exactly as before
+    old = wallet({"cash_usd": None, "positions_usd": 300.0}, None)
+    assert (old["v"], old["sub"]) == (None, "open positions $300; cash couldn't be read")
+    # the read now came back without their cash: its `missing` says it couldn't be read
+    now = wallet({}, {"cash_usd": None, "positions_usd": 300.0, "missing": ["cash"], "read_at": None})
+    assert (now["v"], now["sub"]) == (unread, "open positions $300; cash couldn't be read")
+    whole = wallet({}, {"cash_usd": 5.0, "positions_usd": 300.0, "missing": [], "read_at": None})
+    assert whole["v"] == "$305" and whole["sub"].startswith("cash $5.00 + open positions $300")
 
 
 # ---- the price check ----
@@ -256,11 +307,17 @@ def test_the_check_says_how_much_the_book_holds_near_their_price(api: TestClient
     assert (r["ok"], r["max_spend"], r["depth_checked"], r["best_price"]) == (False, 340.0, True, None)
 
 
-def test_rising_stays_hedged_even_when_copying_is_offered() -> None:
+def test_a_rising_trader_is_a_sharp_said_as_a_plain_fact_even_when_copying_is_offered() -> None:
     rising = COPYABLE | {"segment": "rising", "edge": {"mean": 0.02, "margin": 0.03, "n": 12, "z": 1}}
     b = engine._board(rising)
-    assert (b["section"], b["copy_ok"]) == ("rising", True)  # listed by tier; copying is its status
-    assert engine.why_lines(rising | b)["listed"].startswith("Early signs: the price has tended to move their way after they buy, over 12 trades so far")
+    assert (b["section"], b["copy_ok"]) == ("sharp", True)  # listed with the Sharps; copying is its status
+    # next to a "Sharp" chip: a plain fact, no hedge, and never "it holds without their best trades" (not shown for them)
+    listed = engine.why_lines(rising | b)["listed"]
+    assert listed.startswith("The price has tended to move their way after they buy, over 12 trades so far.")
+    for hedge in ("too few", "to be sure", "Early signs", "without their best trades"):
+        assert hedge not in listed, hedge
+    no_edge = engine.why_lines(COPYABLE | {"segment": "rising", "edge": None} | b)["listed"]
+    assert no_edge.startswith("The price has tended to move their way after they buy.")  # no count: none made up
 
 
 def test_why_lines_take_trading_profit_as_the_page_does() -> None:
@@ -334,12 +391,12 @@ def test_the_traders_list_shows_a_win_rate_from_ten_settled_trades_as_the_sort_r
     and the sort (win_low, from WIN_MIN) say the same thing; a phone card's meta line opens with it."""
     got = run_js(WIN, """[{won: 31, settled: 57}, {won: 6, settled: 10}, {won: 1, settled: 1}, {won: 0, settled: 0}, {}]
       .map((s) => [winCell(s), winMeta(s)]).concat([[WIN_MIN, WIN_LABEL]])""")
-    assert got[0] == ['<span class="lb-main">54%</span><span class="lb-sub">31 of 57</span>', "Picked the winner 54% (31 of 57)"]
+    assert got[0] == ['<span class="lb-main">54%</span><span class="lb-sub">31 of 57</span>', "Win rate 54% (31 of 57)"]
     assert got[1][0].startswith('<span class="lb-main">60%</span>')  # 10 settled: shown, as it ranks
-    assert got[2] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">only 1 settled</span>', "Picked the winner: only 1 settled"]
-    assert got[3] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">none settled yet</span>', "Picked the winner: none settled yet"]
+    assert got[2] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">only 1 settled</span>', "Win rate: only 1 settled"]
+    assert got[3] == ['<span class="lb-main lb-none">—</span><span class="lb-sub">none settled yet</span>', "Win rate: none settled yet"]
     assert got[4] == ['<span class="lb-none">—</span>', ""]  # not worked out: unknown, never 0
-    assert got[5] == [engine.WIN_MIN, "Picked the winner"]  # the page's minimum is the engine's
+    assert got[5] == [engine.WIN_MIN, "Win rate"]  # the page's minimum is the engine's
     assert all("gain" not in c and "loss" not in c for c, _ in got[:5])  # never green or red
     page = (engine.HERE / "static" / "index.html").read_text()
     assert 'head("won", `${WIN_LABEL}<small>30 days</small>`)' in page and "Won, 30 days" not in page
@@ -352,7 +409,7 @@ def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: 
     got = run_js(WIN, """[{won: 52, settled: 54, odds: 0.92}, {won: 3, settled: 4, odds: 0.5}]
       .map((s) => [winCell(s), winMeta(s)])""")
     assert got[0] == ['<span class="lb-main">96%</span><span class="lb-sub">52 of 54</span><span class="lb-sub">prices implied 92%</span>',
-                      "Picked the winner 96% (52 of 54), prices implied 92%"]  # fmt: skip
+                      "Win rate 96% (52 of 54), prices implied 92%"]  # fmt: skip
     assert "implied" not in got[1][0]  # under 10 settled: no rate, so no baseline either
 
 
