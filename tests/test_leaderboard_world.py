@@ -112,6 +112,16 @@ def test_a_traders_page_without_a_fresh_record_reads_one_and_keeps_it_for_the_le
     assert asked.count("trades") == 1  # read once: the next page shows it as kept
 
 
+def test_a_record_read_before_it_kept_the_price_paid_is_read_again_on_a_traders_page(board: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    old = rec(500.0)
+    del old["paid_30d"]  # read by #166's code: no price paid, no profit taken by period, no worst drop
+    board.keep_record(AMY, old)
+    read: list[str] = []
+    monkeypatch.setattr(engine, "record_now", lambda w, request=None: read.append(w) or rec(600.0) | {"via": "read"})
+    got = TestClient(engine.app).get(f"/api/worth/{AMY}").json()
+    assert read == [AMY] and got["periods"]["30d"]["trading_pnl"] == 600 and got["paid_30d"] == 0.62
+
+
 def test_when_a_record_cant_be_read_now_an_older_one_is_shown_with_when_it_was_read(board: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     old = time.time() - 3 * DAY
     board.keep_record(AMY, rec(500.0, read_at=old), at=old)

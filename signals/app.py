@@ -2278,8 +2278,11 @@ def _directory_name(wallet: str) -> str | None:
 
 
 def _fresh_record(rec: dict[str, Any] | None, now: float) -> dict[str, Any] | None:
-    """``rec`` if a trader's page may show it as it is: read (not copied from a score) within RECORD_PAGE_FRESH_S."""
-    ok = rec is not None and rec.get("via") == "read" and now - (rec.get("read_at") or 0) < RECORD_PAGE_FRESH_S
+    """``rec`` if a trader's page may show it as it is: read (not copied from a score) within RECORD_PAGE_FRESH_S, by
+    a record of today's shape. One read before records kept the average price paid (``paid_30d``, with profit taken
+    by period and the worst drop, #168) is read again, so the page never shows its headline as missing."""
+    ok = (rec is not None and rec.get("via") == "read" and "paid_30d" in rec
+          and now - (rec.get("read_at") or 0) < RECORD_PAGE_FRESH_S)  # fmt: skip
     return rec if ok else None
 
 
