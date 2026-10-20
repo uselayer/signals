@@ -370,10 +370,11 @@ def worth_file() -> Path:
 def _worth_load(interests: tuple[str, ...] = ()) -> dict[str, Any] | None:
     """What Traders, the Feed's Recommended, alerts and trader pages read as the traders checked: the directory's
     latest scores with SIGNALS_DISCOVERY=directory (``discovery_result``, the picked ``interests`` first), else,
-    or while the directory has none, the Worth following check's (``_check_load``). Same shape either way."""
+    or while the directory has none, the Worth following check's (``_check_load``). Same shape either way, and
+    either way only those Recommended can vouch for keep a recommended tier (``_vouched``)."""
     if DISCOVERY == "directory" and (got := discovery_result(interests)) is not None:
-        return got
-    return _check_load()
+        return _vouched(got)
+    return _vouched(_check_load())
 
 
 def _check_load() -> dict[str, Any] | None:
@@ -1637,6 +1638,41 @@ def _consistency(weeks: list[float | None] | None) -> dict[str, Any]:
     up = sum(1 for w in known if w > 0)
     low = wilson_low(up, len(known)) if len(known) >= WEEKS_MIN else None
     return {"weeks_up": up, "weeks_known": len(known), "consistency_low": low}
+
+
+# Recommended vouches only for a trader the list can show in full: a figure in every column (trading profit, trend,
+# a win rate from WIN_MIN settled trades, usual trade) and VOUCH_WEEKS weeks of history or more, never a brand-new
+# account. Anyone else in a recommended tier is held back as Limited evidence wherever the checked traders are read
+# (``_worth_load``): Traders, the Feed's Recommended, alerts and their page all agree.
+VOUCH_WEEKS = WEEKS_MIN
+HELD_BACK_AS = "too_few"  # the tier a held-back trader shows: "Limited evidence"
+
+
+def held_back(s: dict[str, Any]) -> list[str]:
+    """What keeps a trader in a recommended tier off Recommended: the columns they have no figure for (``weeks``:
+    under VOUCH_WEEKS weeks of history), in the list's order. Empty when nothing does."""
+    b = s | _board(s)
+    profit = ((b.get("periods") or {}).get("30d") or {}).get("trading_pnl")
+    profit = b.get("trading_pnl_window") if profit is None else profit  # as the page's 30 days falls back
+    why = [("weeks", (b.get("weeks_known") or 0) < VOUCH_WEEKS),
+           ("profit", profit is None),
+           ("trend", len(b.get("pnl_daily") or []) < 2),
+           ("win_rate", b.get("won") is None or (b.get("settled") or 0) < WIN_MIN),
+           ("usual_trade", b.get("typical_usd") is None)]  # fmt: skip
+    return [k for k, missing in why if missing]
+
+
+def _vouched(data: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The checked traders with everyone Recommended can't vouch for (``held_back``) moved to Limited evidence,
+    keeping the tier they were given (``held_back_from``) and why (``held_back``). Never changes what's kept."""
+    if data is None:
+        return None
+    out = []
+    for s in data.get("scores", []):
+        if s.get("segment") in RECOMMENDED and (why := held_back(s)):
+            s = s | {"segment": HELD_BACK_AS, "held_back_from": s["segment"], "held_back": why}
+        out.append(s)
+    return data | {"scores": out}
 
 
 COPY_TIERS = ("proven", "quiet", "rising")  # the recommended tiers copying can be offered for
