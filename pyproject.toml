@@ -25,3 +25,4 @@ packages = ["signals"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["vouching: runs Recommended's real rule for who it vouches for (tests/conftest.py)"]
