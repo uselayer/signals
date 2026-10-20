@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from uselayer import ProfitHistory
 
 from signals import app as engine
 from signals import records
@@ -24,11 +25,11 @@ CAL = "0x" + "c3" * 20
 DAN = "0x" + "d4" * 20
 
 
-def history(days: int, per_day: float, volume_per_day: float = 1000.0, now: float = NOW) -> list[dict[str, Any]]:
+def history(days: int, per_day: float, volume_per_day: float = 1000.0, now: float = NOW) -> ProfitHistory:
     """Polymarket's hourly profit history, one point a day: running totals from their first trade ``days`` ago."""
     start = now - days * DAY
-    return [{"timestamp": int(start + i * DAY), "realized_pnl": per_day * i, "unrealized_pnl": 0.0,
-             "volume_usdc": volume_per_day * i, "wallet_income": 0.0} for i in range(days + 1)]  # fmt: skip
+    return ProfitHistory([{"timestamp": int(start + i * DAY), "realized_pnl": per_day * i, "unrealized_pnl": 0.0,
+             "volume_usdc": volume_per_day * i, "wallet_income": 0.0} for i in range(days + 1)])  # fmt: skip
 
 
 def position(pnl: float, closed_days_ago: float | None = None, ended_days_ago: float | None = None) -> Any:
@@ -85,7 +86,7 @@ def test_without_their_positions_the_rest_of_the_record_stands() -> None:
 def test_the_usual_trade_adds_up_one_orders_fills_so_a_big_trader_doesnt_look_small() -> None:
     fills = [(NOW - 100 + i, True, "0xm1", 1000.0) for i in range(25)]  # one $25K order in 25 fills
     fills += [(NOW - 5000, True, "0xm2", 30000.0), (NOW - 9000, True, "0xm3", 20000.0)]
-    rec = records.build([], positions([]), fills, NOW)
+    rec = records.build(ProfitHistory([]), positions([]), fills, NOW)
     assert rec["typical_usd"] == 25000 and rec["buys_30d"] == 3 and rec["last_buy"] == NOW - 76
 
 
@@ -93,7 +94,9 @@ def test_a_record_read_takes_the_profit_history_and_the_completed_positions() ->
     asked: list[Any] = []
 
     class Sdk:
-        _poly = SimpleNamespace(pnl_history=lambda w: asked.append(("pnl", w)) or history(40, 1.0))
+        def profit_history(self, w: str) -> ProfitHistory:
+            asked.append(("pnl", w))
+            return history(40, 1.0)
 
         def completed_positions(self, w: str, **k: Any) -> Any:
             asked.append(("positions", w, k))
@@ -245,7 +248,9 @@ def test_a_wallet_that_bought_lately_gets_a_record_and_one_that_didnt_only_the_q
     read: list[str] = []
 
     class Sdk:
-        _poly = SimpleNamespace(pnl_history=lambda w: read.append(w) or history(40, 2.0, now=now))
+        def profit_history(self, w: str) -> ProfitHistory:
+            read.append(w)
+            return history(40, 2.0, now=now)
         _trades = {AMY: [trade(now - 3600)], BEN: [trade(now - 95 * DAY)], CAL: [trade(now - 40 * DAY)]}
 
         def trades(self, venue: str, w: str, limit: int) -> list[Any]:
