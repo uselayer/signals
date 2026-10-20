@@ -329,6 +329,10 @@ BOARD_MIN_CLOSED = 5  # ...and at least this many positions closed in 90 days: a
 BOARD_MIN_VOLUME = 1000  # profit per dollar traded ranks only from this many dollars traded in the period
 BOARD_WIN_MIN = 10  # a win rate ranks from 10 positions closed, as Recommended's did
 BOARD_WEEKS_MIN = 4  # weeks up ranks from 4 weeks of history
+# A new account: under this many weeks of history (weeks that ended after their first trade), hidden unless asked
+# for. The same 4 weeks Recommended needed before it would vouch for anyone (VOUCH_WEEKS, the owner, 19 Oct).
+BOARD_ACCOUNT_WEEKS = 4
+_NEW_ACCOUNT = f"COALESCE(r.weeks_known, 0) < {BOARD_ACCOUNT_WEEKS}"
 
 
 def _wilson(k: int | None, n: int | None, z: float = 1.96) -> float | None:
@@ -1260,12 +1264,14 @@ class Directory:
         return None if r is None else json.loads(zlib.decompress(r[0])) | {"via": r[1]}
 
     def leaderboard(self, period: str = "30d", sort: str = "profit", *, category: str | None = None, q: str = "",
-                    limit: int = 50, offset: int = 0, now: float | None = None) -> dict[str, Any]:  # fmt: skip
+                    new: bool = False, limit: int = 50, offset: int = 0, now: float | None = None) -> dict[str, Any]:  # fmt: skip
         """A page of the Leaderboard: every wallet found somewhere public with a track record, a buy in the last
         BOARD_ACTIVE_DAYS and at least BOARD_MIN_CLOSED positions closed in 90 days (or more than a record reads,
         or not read yet), ranked by ``sort`` (BOARD_SORTS) over ``period`` (BOARD_PERIODS). A rate ranks by the
         bottom of its 95% range and only from enough of a sample, so 1 of 1 never tops it. Returns ``rows`` (the
-        record with the wallet's name and category), ``total`` and whether there are ``more``."""
+        record with the wallet's name and category, and ``new_account``), ``total`` and whether there are ``more``.
+        New accounts (under BOARD_ACCOUNT_WEEKS weeks of history) are left out unless ``new``: one big first week
+        shouldn't top a list of track records. ``new_hidden`` says how many of them were left out."""
         now = time.time() if now is None else now
         p = period if period in BOARD_PERIODS else "30d"
         k = p  # the columns' suffix: pnl_30d, vol_all
@@ -1289,17 +1295,20 @@ class Directory:
             "volume": f"r.vol_{k}",
             "weeks": f"CASE WHEN r.weeks_known >= {BOARD_WEEKS_MIN} THEN wilson(r.weeks_up, r.weeks_known) END",
         }[sort if sort in BOARD_SORTS else "profit"]
-        sql = f"FROM records r JOIN wallets w ON w.wallet = r.wallet WHERE {' AND '.join(where)}"
+        base = f"FROM records r JOIN wallets w ON w.wallet = r.wallet WHERE {' AND '.join(where)}"
+        sql = base if new else f"{base} AND NOT {_NEW_ACCOUNT}"
         with self._read() as con:
             con.create_function("wilson", 2, _wilson, deterministic=True)
             total = con.execute(f"SELECT COUNT(*) {sql}", args).fetchone()[0]
+            hidden = 0 if new else con.execute(f"SELECT COUNT(*) {base} AND {_NEW_ACCOUNT}", args).fetchone()[0]
             rows = con.execute(
                 f"SELECT r.wallet, w.name, COALESCE(w.category, w.seen_category), r.via, r.result {sql} "
                 f"ORDER BY {order} DESC NULLS LAST, r.wallet LIMIT ? OFFSET ?", (*args, limit + 1, offset),
             ).fetchall()  # fmt: skip
-        out = [json.loads(zlib.decompress(blob)) | {"wallet": w, "name": name, "category": cat, "via": via}
+        out = [(rec := json.loads(zlib.decompress(blob))) | {"wallet": w, "name": name, "category": cat, "via": via,
+                "new_account": (rec.get("weeks_known") or 0) < BOARD_ACCOUNT_WEEKS}
                for w, name, cat, via, blob in rows[:limit]]  # fmt: skip
-        return {"rows": out, "total": total, "more": len(rows) > limit}
+        return {"rows": out, "total": total, "more": len(rows) > limit, "new_hidden": hidden}
 
     def record_counts(self, now: float | None = None) -> dict[str, int]:
         """How many wallets have a record, read or copied from a score, and how many the Leaderboard lists."""
