@@ -2674,23 +2674,20 @@ function closedPositionRow(c) {
 }
 
 // "Realized profit by category, all time" (/api/categories: Polymarket's leaderboard for this trader, by category):
-// a row per category they traded, "Other markets" for markets in none, then all except Sports (only when they traded
-// Sports and two or more others) and all together (only with more than one row): never a row that repeats another or a $0
-// for categories they never traded.
+// a row per category they traded, "Other markets" for markets in none, then all together (only with more than one row):
+// never a row that repeats another or a $0 for categories they never traded. No "All except Sports" (the owner, 20 Oct:
+// "what do we mean by all except sports?"): a sum of the rows above it, said as if it were a category.
 const CATEGORY_NOTE = "Polymarket's figures, updated every few hours. Trades still open aren't counted.";
 function categoryCard(c) {
   const head = `<h2>Realized profit by category, all time</h2>`;
   if (c == null) return `<section class="pf-card">${head}<div class="skel" style="width:60%;height:14px;margin:16px 0"></div></section>`;
   if (c.error) return `<section class="pf-card">${head}<p class="pf-empty">${c.busy ? BUSY_TEXT : "Their profit by category couldn't be read just now."}</p></section>`;
   const money = (x) => x == null ? null : pl(x, usd(x, true));
-  const sports = (c.rows || []).some((r) => r.category === "Sports"), others = (c.rows || []).filter((r) => r.category !== "Sports").length;
   // "Uncategorised" (shown as "Other markets") is the leaderboard's total less the categories': under $1 it's rounding
   // (flawfence: +$0.01), and under 0.1% of their total it's noise (+$1.17 of $9.1M): no row
   const tiny = (x) => Math.abs(x) < 1 || (c.overall != null && Math.abs(x) < Math.abs(c.overall) * 0.001);
   const rows = [...(c.rows || []).filter((r) => r.category !== UNCATEGORISED || !tiny(r.usd)).map((r) => ({ k: catLabel(r.category), v: money(r.usd) })),
-    ...(c.overall != null && (c.rows || []).length > 1 ? [
-      ...(sports && others > 1 ? [{ k: "All except Sports", v: money(c.except_sports) }] : []),
-      { k: "All categories", v: money(c.overall) }] : [])];
+    ...(c.overall != null && (c.rows || []).length > 1 ? [{ k: "All categories", v: money(c.overall) }] : [])];
   return `<section class="pf-card">${head}${rows.length ? `<dl class="pf-rows">${numberRows(rows)}</dl>` : `<p class="pf-empty">No realized profit or loss in any category yet.</p>`}
     <p class="pf-statnote">Parlays included. ${esc(CATEGORY_NOTE)}</p></section>`;
 }
