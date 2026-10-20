@@ -1673,6 +1673,20 @@ const weeksUp = (s) => s.weeks_up ?? null;
 // What "up" means for a week: trading profit, so open trades count at their value that week.
 const WEEK_COUNTS = "A week counts profit taken plus the change in value of trades still open.";
 const weeksOf = (s) => s.weeks_known ?? null;
+// The run they're on now, on their profile only (never the list, a sort or a filter): counted back from their latest
+// week with data (pnl_weeks is oldest first), "Up 3 weeks in a row" or "Down 3 weeks in a row". A flat week (0) or a
+// week with no data ends it; a run under 2 weeks is no run (null: no row). Past results, never a prediction: traders
+// up 3 of their last 4 weeks made money the next month more often, but copying them still lost after costs.
+function weekStreak(weeks) {
+  const w = Array.isArray(weeks) ? weeks : [];
+  let i = w.length - 1;
+  while (i >= 0 && w[i] == null) i--;
+  if (i < 0 || !w[i]) return null;
+  const sign = Math.sign(w[i]);
+  let n = 0;
+  for (; i >= 0 && w[i] != null && Math.sign(w[i]) === sign; i--) n++;
+  return n >= 2 ? `${sign > 0 ? "Up" : "Down"} ${n} weeks in a row` : null;
+}
 // Trading profit only: never Polymarket's own figure (rewards and rebates in) when it's missing.
 const profitOf = (s, p) => s.periods?.[p]?.trading_pnl ?? (p === "30d" ? s.trading_pnl_window : null) ?? null;
 const perDollarOf = (s, p) => s.periods?.[p]?.return_per_dollar ?? (p === "30d" ? s.return_per_dollar : null) ?? null;
@@ -2406,6 +2420,7 @@ function profileNumbers(s, d, acct, n) {
   const when = acct.read_at ? `as of ${ago(acct.read_at)}` : "now";
   const up = weeksUp(s), known = weeksOf(s), weeks = s.pnl_weeks || [];
   const had = weeks.filter((w) => w != null), weekSub = known && known < 12 ? "since their first trade" : "last 12 weeks";
+  const streak = weekStreak(weeks);
   const cats = (s.categories || []).filter((c) => c.bets), events = cats.reduce((a, c) => a + c.bets, 0);
   const shares = cats.map((c) => [c.category, Math.round((100 * c.bets) / events)]).filter(([, p]) => p >= 5).slice(0, 3);
   const band = Array.isArray(s.price_band) ? `${cents(s.price_band[0])}–${cents(s.price_band[1])}` : null;
@@ -2431,6 +2446,8 @@ function profileNumbers(s, d, acct, n) {
       { title: "Record", rows: [
         { k: "Weeks up", v: up != null && known ? `${up} of ${known}` : null, sub: known && known < 12 ? "since their first trade" : "last 12 weeks",
           weeks: up != null && known ? weeks : null },
+        // their current run of weeks up or down, from 2 weeks; none is no row (not a "—")
+        ...(streak ? [{ k: "Streak", v: streak, sub: "Past results, not a prediction" }] : []),
         // in dollars: a week's trading profit (taken plus the change in what's still open), as Weeks up counts it
         { k: "Best week", v: had.length ? money(Math.max(...had)) : null, sub: weekSub },
         { k: "Worst week", v: had.length ? money(Math.min(...had)) : null, sub: weekSub },

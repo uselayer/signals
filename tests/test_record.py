@@ -283,9 +283,11 @@ def test_a_figure_that_cant_be_given_has_no_row(run_js: Any) -> None:
 
 def test_the_page_says_positions_never_predictions() -> None:
     """A trader's record counts positions (each outcome of a market): the page never calls them "predictions",
-    Polymarket's word for markets traded (its comments may say so)."""
+    Polymarket's word for markets traded (its comments may say so). The streak's "Past results, not a prediction"
+    (the owner's words, 19 Oct) says what a run of weeks isn't, so it's the one use allowed."""
     page = (engine.HERE / "static" / "index.html").read_text().splitlines()
-    assert not [ln for ln in page if "prediction" in ln.lower() and not ln.lstrip().startswith("//")]
+    said = [ln.lower().replace("past results, not a prediction", "") for ln in page if not ln.lstrip().startswith("//")]
+    assert not [ln for ln in said if "prediction" in ln]
 
 
 def test_a_profiles_own_reads_are_under_check_nows_limits_and_busy_says_so(

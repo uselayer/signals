@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from uselayer import Whales, WhaleTrade
 from uselayer.whales import CopyPreview
 
+from conftest import PAGE, js_defs
 from signals import app as engine
 
 SCORE = {"wallet": "0xabc", "name": "sharpie", "segment": "quiet", "action": "follow", "sample": []}
@@ -163,7 +164,7 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
 
 
 NUMBERS = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "lbPct", "readDays", "readPeriod", "weeksUp",
-           "weeksOf", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")  # fmt: skip
+           "weeksOf", "weekStreak", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")  # fmt: skip
 
 
 def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_slot(run_js: Any) -> None:
@@ -414,7 +415,7 @@ def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: 
 
 
 PROFILE = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "readDays", "readPeriod", "weeksUp", "weeksOf",
-           "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")
+           "weekStreak", "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")
 
 
 def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_own(run_js: Any) -> None:
@@ -429,6 +430,60 @@ def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_o
     assert "Strong in" not in [r["k"] for r in one]  # one kind of market: it's the test itself
     none = run_js(PROFILE, "profileNumbers({pnl_weeks: [null, null]}, null, {}, '30d').groups[0].rows")
     assert [r["v"] for r in none if r["k"] in ("Best week", "Worst week")] == [None, None]  # unknown is "—", never $0
+
+
+def test_the_streak_is_the_run_counted_back_from_their_latest_week(run_js: Any) -> None:
+    """pnl_weeks is oldest first: the run counts back from the newest week with data. Up or down from 2 weeks; a flat
+    week or a week with no data ends it; under 2 weeks, or no data at all, is no streak (null)."""
+    cases = {
+        "up": [-50, 10, -3, 40, 2.5, 900],  # the last three up
+        "down": [None, None, 300, -1, -20, -4],  # the last three down
+        "flat_breaks": [5, 6, 7, 0, 8, 9],  # the 0 ends it: 2, not 5
+        "null_breaks": [5, 6, None, 8, 9],  # a gap ends it: 2, not 4
+        "one_week": [5, 6, 7, -2],  # down 1 week: no streak, though they were up 3 before it
+        "latest_flat": [5, 6, 0],  # a flat latest week is neither up nor down
+        "all_up": [1] * 12,
+        "no_data": [None, None, None],
+        "empty": [],
+        "missing": None,
+    }
+    got = run_js(("weekStreak",), f"Object.fromEntries(Object.entries({json.dumps(cases)}).map(([k, w]) => [k, weekStreak(w)]))")
+    assert got == {
+        "up": "Up 3 weeks in a row",
+        "down": "Down 3 weeks in a row",
+        "flat_breaks": "Up 2 weeks in a row",
+        "null_breaks": "Up 2 weeks in a row",
+        "one_week": None,
+        "latest_flat": None,
+        "all_up": "Up 12 weeks in a row",
+        "no_data": None,
+        "empty": None,
+        "missing": None,
+    }
+
+
+def test_the_profile_shows_the_streak_under_weeks_up_and_no_row_without_one(run_js: Any) -> None:
+    """The streak sits right after "Weeks up", says it's past results, and has no row (not a "—") under 2 weeks."""
+    def record(weeks: list[float | None] | None) -> list[dict[str, Any]]:
+        s = {"pnl_weeks": weeks, "weeks_up": None, "weeks_known": None}
+        if weeks is not None:
+            known = [w for w in weeks if w is not None]
+            s |= {"weeks_up": sum(1 for w in known if w > 0), "weeks_known": len(known)}
+        return run_js(PROFILE, f"profileNumbers({json.dumps(s)}, null, {{}}, '30d').groups[0].rows")  # type: ignore[no-any-return]
+
+    down = record([None, 120, -40, -15, -900])
+    keys = [r["k"] for r in down]
+    assert keys[keys.index("Weeks up") + 1] == "Streak"
+    streak = next(r for r in down if r["k"] == "Streak")
+    assert streak["v"] == "Down 3 weeks in a row" and streak["sub"] == "Past results, not a prediction"
+    for weeks in ([120, -40, 15], [120, 40, 0], [None, None], None):  # 1 week, flat latest, no data, no history
+        assert "Streak" not in [r["k"] for r in record(weeks)], weeks
+
+
+def test_the_streak_is_on_the_profile_only() -> None:
+    """Not on the traders list, a sort, a filter or a "hot" list: the page uses it in profileNumbers alone."""
+    assert PAGE.read_text().count("weekStreak(") == 2  # its definition and one use
+    assert "weekStreak(" in js_defs("profileNumbers")
 
 
 def test_see_all_checked_traders_lists_recommended_first_and_says_what_it_is(run_js: Any) -> None:
