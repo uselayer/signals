@@ -55,6 +55,12 @@ def buys(n: int, at: float, every: float = 3600) -> list[tuple[float, bool, str]
     return [(at - i * every, True, f"0xm{i}") for i in range(n)]
 
 
+@pytest.fixture(autouse=True)
+def skill_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These are the skill test's evaluation (SIGNALS_SKILL_TEST=1, the way back); track records are test_records.py's."""
+    monkeypatch.setattr(engine, "SKILL_TEST", True)
+
+
 @pytest.fixture
 def d(tmp_path: Any) -> Directory:
     return Directory(tmp_path / "directory.db")
@@ -473,8 +479,8 @@ def test_a_new_wallet_gets_the_quick_check_and_is_scored_only_with_the_evidence_
     d.add([Seen(AMY, "leaderboard", "PNL MONTH OVERALL", rank=12), Seen(BEN, "search"), Seen(CAL, "search"),
            Seen(DAN, "search")])  # fmt: skip
     r = engine.evaluate_round()
-    assert r["due"] == 4 and r["done"] == {"scored": 2, "not_enough_recent_evidence": 1, "not_trading_lately": 0,
-                                           "dormant": 1, "failed": 0}  # fmt: skip
+    assert r["due"] == 4 and r["done"] == {"scored": 2, "recorded": 0, "not_enough_recent_evidence": 1,
+                                           "not_trading_lately": 0, "dormant": 1, "failed": 0}  # fmt: skip
     assert sorted(sdk.scored) == [(AMY, True), (DAN, False)]  # AMY on the monthly top 1,000, as the check would pass
     status = {w: (d.wallet(w)["status"], d.wallet(w)["not_recommended"]) for w in (AMY, BEN, CAL, DAN)}  # type: ignore[index]
     assert status == {AMY: ("scored", None), BEN: ("checked", "dormant"),

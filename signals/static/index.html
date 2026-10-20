@@ -1645,6 +1645,7 @@ const trTabs = (on) => !exploreOn ? "" : `<nav class="tr-tabs" aria-label="Trade
 
 async function tradersPage(view) {
   const app = $("#app");
+  if (boardOn && view === "worth") { app.innerHTML = `<div id="tview">${skelRows(7)}</div>`; return boardView(); }
   if (view === "worth") { app.innerHTML = `${trTabs("worth")}<div id="tview">${skelRows(7)}</div>`; return worthView(); }
   if (view === "explore") { app.innerHTML = `${trTabs("explore")}<div id="tview">${skelRows(7)}</div>`; return exploreView(); }
   if (view === "passed") { app.innerHTML = `${trTabs("worth")}<div id="tview">${skelRows(7)}</div>`; return passedView(); }
@@ -1896,6 +1897,109 @@ function renderWorth() {
   const toChecked = $("#lbchecked"); if (toChecked) toChecked.onclick = () => { exPick("checked"); location.hash = "#/traders/explore"; };
   $("#how").onclick = () => howSheet();
   const again = $("#wrefresh"); if (again) again.onclick = async () => { await api("/api/worth/refresh", { method: "POST" }); worthView(); };
+}
+
+// ---- Leaderboard: every active trader's track record, ranked (the engine's /api/leaderboard) ----
+// What they did, never a verdict: trading profit, profit per $ traded, win rate, volume and weeks up over the period
+// picked, for every trader with a buy in the last 30 days and a few positions closed. Ranked and paged by the engine
+// (it has thousands); the market chips filter by each trader's main category. No tier, no "recommended".
+let boardOn = false; // /api/config's leaderboard: SIGNALS_SKILL_TEST off
+const bd = { period: "30d", sort: "profit", cat: "", q: "", rows: [], total: null, more: false, counts: null, busy: false };
+const BOARD_SORTS = { profit: "Trading profit", return: "Profit per $ traded", win: WIN_LABEL, volume: "Volume", weeks: "Most weeks up" };
+const BOARD_PERIODS = { "7d": "7D", "30d": "30D", "90d": "90D", all: "All" };
+let boardTimer = null;
+const boardUrl = (offset) => `/api/leaderboard?${new URLSearchParams({ period: bd.period, sort: bd.sort, category: bd.cat, q: bd.q.trim(), offset: String(offset) })}`;
+
+async function boardView(more = false) {
+  const box = $("#tview");
+  if (!box) return;
+  bd.busy = true;
+  let r;
+  try { r = await api(boardUrl(more ? bd.rows.length : 0)); } catch (e) { bd.busy = false; box.innerHTML = errorState(e.message); bindActions(box); return; }
+  bd.busy = false;
+  if (routeName() !== "traders:worth") return;
+  bd.rows = more ? [...bd.rows, ...r.rows] : r.rows;
+  bd.total = r.total; bd.more = r.more; bd.counts = r.counts;
+  renderBoard();
+}
+
+// Positions closed in profit out of positions closed, from WIN_MIN; the days it covers when a busy trader closed more
+// than a record reads in the period picked ("last 7 days"). Neutral: 50% isn't break-even on Polymarket.
+function boardWin(s) {
+  const w = s.win;
+  if (!w) return { cell: `<span class="lb-none">—</span><span class="lb-sub">${s.via === "score" ? "not read yet" : s.positions_complete === false ? "too many to count" : "couldn't be read"}</span>`, meta: "" };
+  const days = PERIOD_DAYS[bd.period] ?? 90, span = w.days < days || bd.period === "all" ? `<span class="lb-sub">last ${w.days} days</span>` : "";
+  if (w.closed < WIN_MIN) return { cell: `<span class="lb-main lb-none">—</span><span class="lb-sub">${w.closed ? `only ${w.closed} closed` : "none closed"}</span>${span}`, meta: "" };
+  const pct = `${Math.round((100 * w.won) / w.closed)}%`;
+  return { cell: `<span class="lb-main">${pct}</span><span class="lb-sub">${w.won} of ${w.closed} in profit</span>${span}`, meta: `${WIN_LABEL} ${pct} (${w.won} of ${w.closed} positions closed in profit${w.days < days || bd.period === "all" ? `, last ${w.days} days` : ""})` };
+}
+
+function renderBoard() {
+  const box = $("#tview");
+  if (!box || routeName() !== "traders:worth") return;
+  const n = bd.period, days = PERIOD_DAYS[n] ?? 90, offset = 0;
+  const row = (s, i) => {
+    const p = s.periods?.[n] || {}, profit = p.trading_pnl ?? null, win = boardWin(s);
+    const up = s.weeks_up, known = s.weeks_known;
+    return `<a class="lb-cols lb-row" href="#/worth/${esc(s.wallet)}">
+      <span class="lb-rank">${offset + i + 1}</span>
+      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${[s.category, s.last_buy ? `active ${ago(s.last_buy * 1000)}` : ""].filter(Boolean).map(esc).join(" · ")}</span></span></span>
+      <span class="lb-cons">${up == null || !known || !Array.isArray(s.pnl_weeks) ? `<span class="lb-none">—</span>` : `<span class="lb-weeks" aria-hidden="true">${s.pnl_weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span><span class="lb-sub">${up} of ${known} weeks up</span>`}</span>
+      <span class="lb-pnl">${profit == null ? `<span class="lb-none">—</span>` : `<span class="lb-main">${pl(profit, usd(profit, true))}</span><span class="lb-sub">${p.return_per_dollar != null ? `${lbPct(p.return_per_dollar)} per $ traded` : ""}</span><span class="lb-sub">${p.volume != null ? `${usd(p.volume)} traded` : ""}</span>`}</span>
+      <span class="lb-trend">${lbSpark(s, days)}</span>
+      <span class="lb-won">${win.cell}</span>
+      <span class="lb-usual">${s.typical_usd != null ? `<span class="lb-main">${usd(s.typical_usd)}</span><span class="lb-sub">${perDayText(s.markets_per_day)}</span>` : `<span class="lb-none">—</span>`}</span>
+      <span class="lb-meta">${[win.meta, s.typical_usd != null ? `usually ${usd(s.typical_usd)}` : "", perDayText(s.markets_per_day)].filter(Boolean).join(" · ")}</span>
+    </a>`;
+  };
+  const head = (key, label) => `<button type="button" data-bdsort="${key}" aria-pressed="${bd.sort === key}">${label}</button>`;
+  const q = bd.q.trim();
+  let body;
+  if (bd.rows.length) {
+    body = `<div class="lb-board">
+      <div class="lb-cols lb-groups" aria-hidden="true"><span style="grid-column:3 / span 4">Track record</span><span style="grid-column:7">Style</span></div>
+      <div class="lb-cols lb-head"><span>#</span><span>Trader</span>${head("weeks", "Weeks up, last 12")}${head("profit", `Trading profit<small>${BOARD_PERIODS[n]}${bd.sort === "return" ? " · per $ traded" : bd.sort === "volume" ? " · volume" : ""}</small>`)}<span>Trend</span>${head("win", `${WIN_LABEL}<small>positions closed</small>`)}<span>Usual trade, 30 days</span></div>
+      ${bd.rows.map(row).join("")}
+      ${bd.more ? `<button type="button" class="lb-more" id="bdmore">Show ${Math.min(50, bd.total - bd.rows.length).toLocaleString("en-US")} more</button>` : ""}</div>`;
+  } else if (q && isWalletQuery(q)) {
+    body = emptyState("That wallet isn't on the leaderboard", "It may not have traded in the last 30 days, or we haven't read its record yet. Its page reads it now.", `<a class="btn" href="#/worth/${esc(q.toLowerCase())}">Open this wallet</a>`);
+  } else if (q || bd.cat) {
+    body = emptyState("No trader matches", q ? `Nobody called “${esc(q)}”${bd.cat ? ` in ${esc(bd.cat)}` : ""} on the leaderboard yet.` : `No ${esc(bd.cat)} traders on the leaderboard yet.`, `<button class="btn ghost" id="bdclear">Show everyone</button>`);
+  } else {
+    body = emptyState("Reading traders' records", "The leaderboard fills in as each trader's record is read, a few thousand an hour.");
+  }
+  const c = bd.counts;
+  box.innerHTML = `
+    <div class="lb-toolbar">
+      <div class="lb-filters" role="group" aria-label="Filter by market">
+        <button type="button" class="lb-chip" data-bdcat="" aria-pressed="${!bd.cat}">All</button>
+        ${INTERESTS.map((x) => `<button type="button" class="lb-chip" data-bdcat="${esc(x)}" aria-pressed="${bd.cat === x}">${esc(x)}</button>`).join("")}
+      </div>
+      <div class="lb-view">
+        <label class="lb-search" for="bdq"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M14 14l4 4"/></svg><input id="bdq" type="search" placeholder="Search name or wallet" value="${esc(bd.q)}" autocomplete="off" aria-label="Search by trader name or wallet address"></label>
+        <div class="lb-period" role="group" aria-label="Period">${Object.entries(BOARD_PERIODS).map(([p, l]) => `<button type="button" data-bdperiod="${p}" aria-pressed="${n === p}">${l}</button>`).join("")}</div>
+        <select id="bdsort" class="lb-sort" aria-label="Sort traders">${Object.entries(BOARD_SORTS).map(([k, l]) => `<option value="${k}" ${bd.sort === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      </div>
+    </div>
+    ${bd.sort === "win" && bd.rows.length ? `<p class="lb-note">Win rate ranks from ${WIN_MIN} positions closed, more closed ranking higher at the same rate.</p>` : ""}
+    ${bd.sort === "return" && bd.rows.length ? `<p class="lb-note">Profit per $ traded ranks from $1,000 traded in the period.</p>` : ""}
+    ${body}
+    <p class="lb-foot">${bd.total != null ? `${plural(bd.total, "trader")} with a buy in the last 30 days and at least 5 positions closed in 90 days` : ""}
+      · Past results, not a prediction: what each trader did, read from Polymarket every 2 days
+      · Win rate is positions closed in profit (sold or settled); 50% isn't break-even when prices differ
+      ${c ? `<br>${c.read.toLocaleString("en-US")} records read so far${c.from_scores ? `, ${c.from_scores.toLocaleString("en-US")} more from earlier checks (no win rate until read)` : ""}` : ""}
+      · <a class="link" href="#/traders/top">Top profit</a></p>`;
+
+  $$("[data-bdcat]", box).forEach((b) => (b.onclick = () => { bd.cat = b.dataset.bdcat; boardView(); }));
+  $$("[data-bdperiod]", box).forEach((b) => (b.onclick = () => { bd.period = b.dataset.bdperiod; boardView(); }));
+  $$("[data-bdsort]", box).forEach((b) => (b.onclick = () => { bd.sort = b.dataset.bdsort; boardView(); }));
+  $("#bdsort").onchange = (e) => { bd.sort = e.target.value; boardView(); };
+  $("#bdq").oninput = (e) => {
+    bd.q = e.target.value; clearTimeout(boardTimer);
+    boardTimer = setTimeout(async () => { await boardView(); const s = $("#bdq"); if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }, 300);
+  };
+  const more = $("#bdmore"); if (more) more.onclick = () => { more.disabled = true; boardView(true); };
+  const clear = $("#bdclear"); if (clear) clear.onclick = () => { bd.q = ""; bd.cat = ""; boardView(); };
 }
 
 // ---- Explore: every trader the directory found somewhere public (SIGNALS_EXPLORE) ----
@@ -2727,8 +2831,8 @@ function routeName() {
   if (h === "#/recommended") return "feed:rec";
   if (h === "#/traders") return "traders:worth";
   if (h === "#/traders/top") return "traders:top";
-  if (h === "#/traders/explore") return exploreOn ? "traders:explore" : "traders:worth";
-  if (h === "#/traders/passed") return exploreOn ? "traders:passed" : "traders:worth";
+  if (h === "#/traders/explore") return exploreOn && !boardOn ? "traders:explore" : "traders:worth"; // the Leaderboard replaces both
+  if (h === "#/traders/passed") return exploreOn && !boardOn ? "traders:passed" : "traders:worth";
   return h;
 }
 function venueOffPage(venue) {
@@ -2761,7 +2865,7 @@ function route() {
 }
 window.addEventListener("hashchange", route);
 api("/api/config").then((c) => {
-  venuesOn = c.venues; exploreOn = !!c.explore;
+  venuesOn = c.venues; exploreOn = !!c.explore; boardOn = !!c.leaderboard;
   if (c.clerk_key) startAuth(c.clerk_key, c.alerts);
   if (c.posthog_key) startAnalytics(c.posthog_key);
 })
