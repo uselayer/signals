@@ -305,7 +305,8 @@ def test_go_sends_a_tap_to_polymarket_us_or_kalshi_and_nowhere_else(api: TestCli
 
 # ---- the page ----
 
-PAGE_DEFS = ("esc", "INTL", "usLink", "sitsOut", "venueNote", "usInline", "usBox")
+PAGE_DEFS = ("esc", "INTL", "usLink", "sitsOut", "venueNote", "usInline", "usBox", "KALSHI", "onKalshi", "FINE", "bigBuy",
+             "kalshiBox")
 TWIN = {"found": True, "url": "https://polymarket.us/event/nba-cle-orl", "outcome": "Cavaliers",
         "differences": [{"code": "carveout_differs", "text": "Polymarket US sends a tie to <manual> review."}]}  # fmt: skip
 
@@ -386,7 +387,8 @@ def test_the_page_never_says_a_market_is_not_on_polymarket_us_and_scopes_quotes_
 
 # ---- the quote: the numbers in view, the working folded ----
 
-QUOTE_DEFS = ("esc", "INTL", "c1", "money", "slipOf", "slippageLine", "readAt", "quoteNote", "TRADE_TIME", "quoteFold")
+QUOTE_DEFS = ("esc", "INTL", "KALSHI", "venueOf", "sdkText", "c1", "money", "slipOf", "slippageLine", "readAt", "quoteNote",
+              "TRADE_TIME", "quoteFold")
 
 
 def test_the_quote_folds_its_working_and_shows_slippage_only_when_there_is_some(run_js: Any) -> None:
@@ -402,6 +404,43 @@ def test_the_quote_folds_its_working_and_shows_slippage_only_when_there_is_some(
         assert words in fold, words
     slipped = run_js(QUOTE_DEFS, f"slippageLine({json.dumps(p | {'price': 0.956})})")
     assert slipped.startswith('<p class="qwarn">Estimated slippage: your average fill, 95.6¢, is 0.8¢ above')
+
+
+KMATCH = {"found": True, "url": "https://kalshi.com/markets/kxnbagame/x/kxnbagame-26oct20bosdet-det",
+          "market_id": "KXNBAGAME-26OCT20BOSDET-DET", "side": "yes", "differences": []}  # fmt: skip
+
+
+def test_with_a_kalshi_match_buy_on_kalshi_leads_and_international_is_a_link_under_it(run_js: Any) -> None:
+    defs = (*PAGE_DEFS, "buyButtons")
+    intl = "https://polymarket.com/event/bos-det"
+    b = {"url": intl, "us": None, "kalshi": KMATCH}
+    html = run_js(defs, f"buyButtons({json.dumps(b)})")  # before the first quote: from the trade's own match
+    assert html.startswith(f'<a class="btn wide" id="buyon" href="{KMATCH["url"]}"') and "Buy on Kalshi ↗" in html
+    assert html.index("Buy on Kalshi ↗") < html.index("Or buy on Polymarket International, where they traded ↗")
+    assert "Buy on Polymarket International ↗" not in html and html.count("Signals places no orders") == 1
+    assert "you'd buy <b>Yes</b> there" in html
+    assert "couldn't check for a Polymarket US match" in html  # the US line still follows
+    sits = KMATCH | {"side": "no", "differences": [dict(us_match.SITS_OUT_KALSHI)]}
+    shown = run_js(defs, f"buyButtons({json.dumps(b | {'kalshi': sits})})").split("<details")[0]
+    assert "Kalshi settles" in shown  # how the two may pay out differently: in view, not folded
+    # the engine priced International (Kalshi not taking orders): International's button, whatever the trade says
+    closed = run_js(defs, f"buyButtons({json.dumps(b)}, {{venue: 'polymarket', kalshi_closed: 'x'}})")
+    assert closed.startswith(f'<a class="btn wide" id="buyon" href="{intl}"') and "kalshi.com" not in closed
+    for none in ("null", "{found: false}"):
+        assert "Buy on Polymarket International ↗" in run_js(defs, f"buyButtons({{url: {json.dumps(intl)}, us: null, kalshi: {none}}})")
+
+
+def test_a_kalshi_quote_says_whose_estimate_it_is(run_js: Any) -> None:
+    p = {"venue": "kalshi", "price": 0.41, "best_price": 0.41, "limit": 0.44, "max_spend": 900.0, "depth_checked": True,
+         "contracts": 10.0, "total": 4.3, "priced_at": None}  # fmt: skip
+    note, fold = run_js(QUOTE_DEFS, f"((p) => [quoteNote(p), quoteFold(p)])({json.dumps(p)})")
+    assert note == '<p class="qnote">Kalshi estimate · not a guaranteed fill</p>'
+    assert "before your order reaches Kalshi" in fold and "This estimate is for Kalshi only." in fold
+    shut = run_js(QUOTE_DEFS, "quoteNote({venue: 'polymarket', kalshi_closed: 'Kalshi is not taking orders on this market now.'})")
+    assert shut == ('<p class="qnote">Kalshi is not taking orders on this market now. This is Polymarket International\'s'
+                    ' estimate.</p><p class="qnote">Polymarket International estimate · not a guaranteed fill</p>')
+    line = run_js(QUOTE_HTML, f"priceLine({json.dumps(p | {'worst_price': 0.41})}, {{price: 0.31}})")
+    assert line.endswith("Trader paid 31¢ on Polymarket International.")  # theirs was on another exchange
 
 
 QUOTE_HTML = (*QUOTE_DEFS, "cents", "plural", "yesNo", "ifWins", "ifLoses", "priceLine", "ADDR", "SHORT_ADDR",

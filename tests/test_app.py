@@ -427,6 +427,74 @@ def test_a_closed_market_is_said_from_its_status_not_its_price(api: TestClient, 
     assert len(calls) == 1  # nothing more to read
 
 
+KALSHI_MATCH = {"found": True, "url": "https://kalshi.com/markets/kxnbagame/x/kxnbagame-26oct20bosdet-det",
+                "market_id": "KXNBAGAME-26OCT20BOSDET-DET", "side": "no", "confidence": 0.97, "differences": [],
+                "checked_at": "2026-10-20T16:00:00+00:00"}  # fmt: skip
+
+
+def _kalshi_quote(**kw: Any) -> CopyPreview:
+    return _quote(**({"venue": "kalshi", "market": KALSHI_MATCH["market_id"], "side": "no", "price": 0.41,
+                      "best_price": 0.41, "limit": 0.44} | kw))  # fmt: skip
+
+
+def test_a_trade_with_a_verified_kalshi_match_is_priced_on_kalshi(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The match is looked up by the engine from the trade's own market, token and outcome, never sent by the page.
+    asked: list[Any] = []
+    kalshi: list[Any] = []
+    monkeypatch.setattr(engine, "kalshi_of", lambda m, t=None, o=None: asked.append((m, t, o)) or KALSHI_MATCH)
+    monkeypatch.setattr(Whales, "preview_kalshi", lambda self, trade, ticker, side, **kw: kalshi.append((trade, ticker, side, kw)) or _kalshi_quote())
+    monkeypatch.setattr(Whales, "preview_copy", lambda self, trade, **kw: pytest.fail("priced on International"))
+    body = {"wallet": "0xabc", "market": "0xcid:1", "price": 0.52, "outcome": "Jets", "token": "tok-jets", "spend": 50,
+            "kalshi": {"market_id": "KX-SOMETHING-ELSE"}}  # fmt: skip
+    r = api.post("/api/trade/preview", json=body).json()
+    assert asked == [("0xcid:1", "tok-jets", "Jets")]
+    trade, ticker, side, kw = kalshi[0]
+    assert (ticker, side, kw) == ("KXNBAGAME-26OCT20BOSDET-DET", "no", {"spend": 50.0, "max_slippage": 0.03})
+    assert (trade.venue, trade.market, trade.price) == ("polymarket", "0xcid:1", 0.52)
+    assert r["venue"] == "kalshi" and r["kalshi"] == KALSHI_MATCH and r["ok"] and r["their_price"] == 0.52
+    assert r["price_changed"] is False and "kalshi_closed" not in r
+    with engine._db() as con:
+        assert [r[:2] for r in con.execute("SELECT outcome, reads FROM quotes")] == [("ok", 2)]
+
+
+def test_kalshi_not_taking_orders_is_priced_on_international_and_says_why(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine, "kalshi_of", lambda m, t=None, o=None: KALSHI_MATCH)
+    for reason in ("Kalshi isn't taking orders on this market now.", "Kalshi doesn't list this market any more."):
+        shut = _kalshi_quote(ok=False, reason=reason, contracts=None, price=None, limit=None, depth_checked=False, best_price=None)
+        monkeypatch.setattr(Whales, "preview_kalshi", lambda self, trade, ticker, side, **kw: shut)
+        monkeypatch.setattr(Whales, "preview_copy", lambda self, trade, **kw: _quote())
+        r = api.post("/api/trade/preview", json={"wallet": "0xabc", "market": "0xcid:1", "price": 0.52}).json()
+        assert r["venue"] == "polymarket" and r["ok"] and r["kalshi_closed"] == reason and "kalshi" not in r
+
+
+def test_a_kalshi_quote_that_cant_fill_stays_kalshis(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Too little for sale, or too small an amount: Kalshi's own answer, never International's price in its place.
+    monkeypatch.setattr(engine, "kalshi_of", lambda m, t=None, o=None: KALSHI_MATCH)
+    short = _kalshi_quote(ok=False, reason="Only $40.00 is for sale on Kalshi at 0.44 or better right now", contracts=None, max_spend=40.0)
+    monkeypatch.setattr(Whales, "preview_kalshi", lambda self, trade, ticker, side, **kw: short)
+    monkeypatch.setattr(Whales, "preview_copy", lambda self, trade, **kw: pytest.fail("priced on International"))
+    r = api.post("/api/trade/preview", json={"wallet": "0xabc", "market": "0xcid:1", "price": 0.52, "spend": 500}).json()
+    assert r["venue"] == "kalshi" and not r["ok"] and r["max_spend"] == 40.0 and r["kalshi"] == KALSHI_MATCH
+    assert r["price_changed"] is False
+
+
+def test_no_kalshi_match_is_priced_on_international(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    for none in (None, {"found": False}):  # matches unread, or read with none for this outcome
+        monkeypatch.setattr(engine, "kalshi_of", lambda m, t=None, o=None: none)
+        monkeypatch.setattr(Whales, "preview_kalshi", lambda *a, **kw: pytest.fail("priced on Kalshi"))
+        monkeypatch.setattr(Whales, "preview_copy", lambda self, trade, **kw: _quote())
+        r = api.post("/api/trade/preview", json={"wallet": "0xabc", "market": "0xcid:1", "price": 0.52}).json()
+        assert r["venue"] == "polymarket" and "kalshi" not in r and "kalshi_closed" not in r
+
+
+def test_a_trade_carries_its_us_twin_and_kalshi_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "us_of", lambda m, t=None, o=None: {"found": False})
+    monkeypatch.setattr(engine, "kalshi_of", lambda m, t=None, o=None: KALSHI_MATCH if (m, t, o) == ("0xcid:1", "tok", "Jets") else None)
+    assert engine.twins_of("0xcid:1", "tok", "Jets") == {"us": {"found": False}, "kalshi": KALSHI_MATCH}
+
+
 def test_why_not_copy_is_bet_status() -> None:
     # One rule: whatever the Feed calls "You can still get in", an alert prices, and nothing else.
     for paid in (0.05, 0.3, 0.6, 0.95):
@@ -669,7 +737,7 @@ def test_the_page_has_the_sections_and_no_copy_cue(api: TestClient) -> None:
                   '"Profit rests on one win"', '"Limited evidence"', '"Our price test didn\'t show skill"',
                   '"Market maker or arbitrage"', '"Checked, not recommended"',
                   "not as a signal to buy: we haven't found that buying after them makes money.",
-                  "they paid", "Buy on ${INTL} ↗", "weeks up",
+                  "they paid", "Buy on ${name} ↗", "bigBuy(b.url, INTL)", "bigBuy(k.url, KALSHI)", "weeks up",
                   "A week counts profit taken plus the change in value of trades still open.",
                   "when it was made on Polymarket, not when Signals saw it"):  # fmt: skip
         assert words in page, words

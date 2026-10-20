@@ -82,7 +82,12 @@ behind Vercel (see README, "Hosting").
   comes first, then the total back ("+$19.11 profit · $29.00 back in total", "−$9.89 loss · You get nothing back"),
   uncoloured, with "Not spent" for what's left of the amount. International's button sits right under its estimate;
   Polymarket US is one line after it ("US prices and fees differ. The estimate above doesn't apply.", "View US market
-  ↗"), with how the two may pay out differently in view and how they were matched folded ("Match details"). It's always an estimate: never imply a guaranteed fill (it may fill higher, in part, or not
+  ↗"), with how the two may pay out differently in view and how they were matched folded ("Match details"). With a
+  verified Kalshi match (`kalshi_of`, looked up by the engine, never sent by the page) the whole estimate is Kalshi's
+  (owner, 20 Oct: the SDK's `preview_kalshi`, Kalshi's public book and fees, no key): "Kalshi estimate", "Trader paid
+  49¢ on Polymarket International.", "Buy on Kalshi ↗" right under it, how the two may pay out differently in view,
+  "Or buy on Polymarket International, where they traded ↗", then the US line. When Kalshi doesn't list the market or
+  isn't taking orders on it, International prices it and the sheet says why (`kalshi_closed`). It's always an estimate: never imply a guaranteed fill (it may fill higher, in part, or not
   at all), and no green or "you can still get in" in it. A quote that fails shows no price: when the book moved
   between the reads (`price_changed`) it says "Price changed—refresh quote", never that nothing is for sale;
   "Only $X is for sale" is only for an amount bigger than the book holds within the limit. Transparency over a
