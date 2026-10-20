@@ -1911,11 +1911,13 @@ function renderWorth() {
 // picked, for every trader with a buy in the last 30 days and a few positions closed. Ranked and paged by the engine
 // (it has thousands); the market chips filter by each trader's main category. No tier, no "recommended".
 let boardOn = false; // /api/config's leaderboard: SIGNALS_SKILL_TEST off
-const bd = { period: "30d", sort: "profit", cat: "", q: "", rows: [], total: null, more: false, counts: null, busy: false };
+// New accounts (under 4 weeks of history) are hidden unless "Show new accounts" is on: one big first week shouldn't top
+// a list of track records (the owner, 19 Oct). The foot says how many are hidden.
+const bd = { period: "30d", sort: "profit", cat: "", q: "", newOn: false, rows: [], total: null, more: false, counts: null, newHidden: 0, busy: false };
 const BOARD_SORTS = { profit: "Trading profit", return: "Profit per $ traded", win: WIN_LABEL, volume: "Volume", weeks: "Most weeks up" };
 const BOARD_PERIODS = { "7d": "7D", "30d": "30D", "90d": "90D", all: "All" };
 let boardTimer = null;
-const boardUrl = (offset) => `/api/leaderboard?${new URLSearchParams({ period: bd.period, sort: bd.sort, category: bd.cat, q: bd.q.trim(), offset: String(offset) })}`;
+const boardUrl = (offset) => `/api/leaderboard?${new URLSearchParams({ period: bd.period, sort: bd.sort, category: bd.cat, q: bd.q.trim(), new: bd.newOn ? "1" : "0", offset: String(offset) })}`;
 
 async function boardView(more = false) {
   const box = $("#tview");
@@ -1926,7 +1928,7 @@ async function boardView(more = false) {
   bd.busy = false;
   if (routeName() !== "traders:worth") return;
   bd.rows = more ? [...bd.rows, ...r.rows] : r.rows;
-  bd.total = r.total; bd.more = r.more; bd.counts = r.counts;
+  bd.total = r.total; bd.more = r.more; bd.counts = r.counts; bd.newHidden = r.new_hidden ?? 0;
   renderBoard();
 }
 
@@ -1950,7 +1952,7 @@ function renderBoard() {
     const up = s.weeks_up, known = s.weeks_known;
     return `<a class="lb-cols lb-row" href="#/worth/${esc(s.wallet)}">
       <span class="lb-rank">${offset + i + 1}</span>
-      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${[s.category, s.last_buy ? `active ${ago(s.last_buy * 1000)}` : ""].filter(Boolean).map(esc).join(" · ")}</span></span></span>
+      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${[s.category, s.last_buy ? `active ${ago(s.last_buy * 1000)}` : "", s.new_account ? "new account" : ""].filter(Boolean).map(esc).join(" · ")}</span></span></span>
       <span class="lb-cons">${up == null || !known || !Array.isArray(s.pnl_weeks) ? `<span class="lb-none">—</span>` : `<span class="lb-weeks" aria-hidden="true">${s.pnl_weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span><span class="lb-sub">${up} of ${known} weeks up</span>`}</span>
       <span class="lb-pnl">${profit == null ? `<span class="lb-none">—</span>` : `<span class="lb-main">${pl(profit, usd(profit, true))}</span><span class="lb-sub">${p.return_per_dollar != null ? `${lbPct(p.return_per_dollar)} per $ traded` : ""}</span><span class="lb-sub">${p.volume != null ? `${usd(p.volume)} traded` : ""}</span>`}</span>
       <span class="lb-trend">${lbSpark(s, days)}</span>
@@ -1982,6 +1984,7 @@ function renderBoard() {
       <div class="lb-filters" role="group" aria-label="Filter by market">
         <button type="button" class="lb-chip" data-bdcat="" aria-pressed="${!bd.cat}">All</button>
         ${INTERESTS.map((x) => `<button type="button" class="lb-chip" data-bdcat="${esc(x)}" aria-pressed="${bd.cat === x}">${esc(x)}</button>`).join("")}
+        <button type="button" class="lb-chip" id="bdnew" aria-pressed="${bd.newOn}" title="Accounts with under 4 weeks of history">Show new accounts</button>
       </div>
       <div class="lb-view">
         <div class="lb-period" role="group" aria-label="Period">${Object.entries(BOARD_PERIODS).map(([p, l]) => `<button type="button" data-bdperiod="${p}" aria-pressed="${n === p}">${l}</button>`).join("")}</div>
@@ -1992,6 +1995,7 @@ function renderBoard() {
     ${bd.sort === "return" && bd.rows.length ? `<p class="lb-note">Profit per $ traded ranks from $1,000 traded in the period.</p>` : ""}
     ${body}
     <p class="lb-foot">${bd.total != null ? `${plural(bd.total, "trader")} with a buy in the last 30 days and at least 5 positions closed in 90 days` : ""}
+      ${bd.newHidden ? ` · ${plural(bd.newHidden, "new account")} (under 4 weeks of history) hidden · <button class="link" id="bdnewfoot">Show them</button>` : bd.newOn ? " · New accounts included" : ""}
       · Past results, not a prediction: what each trader did, read from Polymarket every 2 days
       · Win rate is positions closed in profit (sold or settled); 50% isn't break-even when prices differ
       ${c ? `<br>${c.read.toLocaleString("en-US")} records read so far${c.from_scores ? `, ${c.from_scores.toLocaleString("en-US")} more from earlier checks (no win rate until read)` : ""}` : ""}
@@ -2007,6 +2011,9 @@ function renderBoard() {
   };
   const more = $("#bdmore"); if (more) more.onclick = () => { more.disabled = true; boardView(true); };
   const clear = $("#bdclear"); if (clear) clear.onclick = () => { bd.q = ""; bd.cat = ""; boardView(); };
+  const toggleNew = () => { bd.newOn = !bd.newOn; boardView(); };
+  $("#bdnew").onclick = toggleNew;
+  const newFoot = $("#bdnewfoot"); if (newFoot) newFoot.onclick = toggleNew;
 }
 
 // ---- Explore: every trader the directory found somewhere public (SIGNALS_EXPLORE) ----

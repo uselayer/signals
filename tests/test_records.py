@@ -135,12 +135,23 @@ def test_each_sort_ranks_by_what_they_did_and_a_small_sample_never_tops_a_rate(d
     d.keep_record(AMY, rec(500, won=9, closed=10, vol30=100_000), at=NOW)
     d.keep_record(BEN, rec(900, won=60, closed=80, vol30=900), at=NOW)  # under $1K traded: no profit per dollar
     d.keep_record(CAL, rec(100, won=8, closed=8, vol30=2_000, weeks=(3, 3)), at=NOW)  # 8 of 8: too few to rank
-    order = lambda sort: [r["wallet"] for r in d.leaderboard("30d", sort, now=NOW)["rows"]]  # noqa: E731
+    order = lambda sort: [r["wallet"] for r in d.leaderboard("30d", sort, new=True, now=NOW)["rows"]]  # noqa: E731
     assert order("profit") == [BEN, AMY, CAL]
     assert order("return") == [CAL, AMY, BEN]  # 5% beats 0.5%; BEN's $900 traded ranks last
     assert order("win") == [BEN, AMY, CAL]  # 60 of 80 beats 9 of 10 on the bottom of its range; 8 of 8 unranked
     assert order("volume") == [AMY, CAL, BEN]
     assert order("weeks") == [AMY, BEN, CAL]  # 3 of 3 weeks is under 4 weeks of history: unranked
+
+
+def test_new_accounts_are_hidden_unless_asked_for_and_the_list_says_how_many(d: Directory) -> None:
+    d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in (AMY, BEN)])
+    d.keep_record(AMY, rec(500), at=NOW)
+    d.keep_record(BEN, rec(954_000, weeks=(1, 1)), at=NOW)  # one big first week
+    got = d.leaderboard(now=NOW)
+    assert [r["wallet"] for r in got["rows"]] == [AMY] and got["total"] == 1 and got["new_hidden"] == 1
+    shown = d.leaderboard(new=True, now=NOW)
+    assert [(r["wallet"], r["new_account"]) for r in shown["rows"]] == [(BEN, True), (AMY, False)]
+    assert shown["new_hidden"] == 0
 
 
 def test_a_record_read_schedules_the_next_look_and_says_nothing_against_them(d: Directory) -> None:

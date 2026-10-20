@@ -2239,23 +2239,25 @@ def _win_of(rec: dict[str, Any], period: str) -> dict[str, Any] | None:
 
 
 @app.get("/api/leaderboard")
-def leaderboard(period: str = "30d", sort: str = "profit", category: str = "", q: str = "",
+def leaderboard(period: str = "30d", sort: str = "profit", category: str = "", q: str = "", new: int = 0,
                 offset: int = 0) -> dict[str, Any]:  # fmt: skip
-    """A page of the Leaderboard, from directory.db only (each wallet's latest track record), never Polymarket."""
+    """A page of the Leaderboard, from directory.db only (each wallet's latest track record), never Polymarket.
+    New accounts (under 4 weeks of history) only with ``new=1``."""
     if SKILL_TEST:
         raise HTTPException(404, detail="Not found")
     if period not in BOARD_PERIODS or sort not in BOARD_SORTS or not 0 <= offset <= LEADERBOARD_MAX_OFFSET:
         raise HTTPException(400, detail="Unknown period, sort or page.")
     q = q.strip()[:64]
-    args = (period, sort, category, q.lower(), offset)
+    args = (period, sort, category, q.lower(), bool(new), offset)
     page = cached(f"board:{args}", LEADERBOARD_TTL_S, lambda: directory().leaderboard(
-        period, sort, category=category or None, q=q, limit=LEADERBOARD_PAGE, offset=offset))  # fmt: skip
+        period, sort, category=category or None, q=q, new=bool(new), limit=LEADERBOARD_PAGE, offset=offset))  # fmt: skip
     counts = cached("board:counts", LEADERBOARD_TTL_S, lambda: directory().record_counts())
     rows = [{k: r.get(k) for k in ("wallet", "name", "category", "via", "read_at", "periods", "pnl_weeks", "weeks_up",
                                    "weeks_known", "pnl_daily", "typical_usd", "markets_per_day", "last_buy",
-                                   "positions_complete")}
+                                   "positions_complete", "new_account")}
             | {"win": _win_of(r, period)} for r in page["rows"]]  # fmt: skip
-    return {"rows": rows, "total": page["total"], "more": page["more"], "offset": offset, "counts": counts}
+    return {"rows": rows, "total": page["total"], "more": page["more"], "offset": offset, "counts": counts,
+            "new_hidden": page["new_hidden"]}
 
 
 @app.get("/api/traders")
