@@ -53,7 +53,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import monitoring, records, us_match
+from signals import monitoring, records, us_match, watch
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -3104,6 +3104,92 @@ def _quote_outcome(p: Any, changed: bool) -> str:
     return "short" if p.depth_checked and p.max_spend else "other"
 
 
+# ---- watching a trader: what changed in what they hold (the Watchlist) ----
+# A trader's watch page (#/watch/<wallet>) reads their last WATCH_TRADES trades and their open positions on the checks'
+# budget (checker: 2 reads, one more per POSITIONS_PER_READ outcomes when they hold more than one read lists), under
+# "Check now"'s limits, kept WATCH_TTL_S for everyone, and works out what each move did to their position
+# (``watch.view``: new, added, sold some, closed). Nothing more is stored: what changed comes from their trades and what
+# they hold now, so a trader followed a minute ago shows their last WATCH_DAYS days straight away. The Watchlist's cards
+# (``/api/me/watchlist``) read nothing: the poller's kept trades of everyone followed, the last watch read and the
+# directory's kept record.
+WATCH_TRADES = 500  # Polymarket's most in one read
+WATCH_DAYS = 30
+WATCH_TTL_S = LIVE_POLL_S  # as fresh as the poller's reads of followed traders
+WATCH_MOVES = 60  # moves a watch page lists, newest first
+WATCH_MIN_USD = 1.0  # a move under a dollar (a stray fill) isn't listed; it still counts in what they hold
+WATCH_MISSING_READS = 4  # at most this many more reads for outcomes they traded that their positions' list left out
+WATCH_CARD_MOVES = 5  # moves a Watchlist card carries, newest first
+
+
+def _watch(w: str) -> dict[str, Any]:
+    whales, now = checker(), time.time()
+    trades = whales.trades("polymarket", w, limit=WATCH_TRADES)
+    held = {p.market: p for p in whales.positions("polymarket", w, limit=POSITIONS_READ)}
+    cut = len(held) >= POSITIONS_READ
+    if cut:  # a full list may leave out an outcome they traded: read those by market (holding one side isn't the other)
+        missing = list(dict.fromkeys(t.market.partition(":")[0] for t in trades if t.market not in held))
+        for i in range(0, min(len(missing), WATCH_MISSING_READS * POSITIONS_PER_READ), POSITIONS_PER_READ):
+            for p in whales.positions("polymarket", w, limit=POSITIONS_READ, market=",".join(missing[i : i + POSITIONS_PER_READ])):
+                held.setdefault(p.market, p)
+    oldest = min((t.at.timestamp() for t in trades), default=now)
+    # the last WATCH_DAYS days, or less when their last WATCH_TRADES trades don't reach that far back
+    since = max(now - WATCH_DAYS * 86400, oldest if len(trades) >= WATCH_TRADES else 0.0)
+    out = watch.view(trades, list(held.values()), since=since, now=now)
+    out["moves"] = [m for m in out["moves"] if m["usd"] >= WATCH_MIN_USD][:WATCH_MOVES]  # dust fills aren't changes
+    markets = list(dict.fromkeys(m["market"] for m in out["moves"]))
+    try:
+        cats = _categories(markets) if markets else {}
+    except VenueError:
+        cats = {}  # the moves still show, without their category
+    for m in out["moves"]:
+        m["category"] = cats.get(m["market"])
+        m["status"] = bet_status(m["price"], m["now"]) if m["held_now"] else "closed"
+    name = _directory_name(w) or next((t.name for t in trades if t.name and not t.name.startswith("0x")), None)
+    return out | {"wallet": w, "name": name, "since": since, "read_at": now, "trades_read": len(trades),
+                  "short": since > now - WATCH_DAYS * 86400 + 60, "positions_cut": cut}  # fmt: skip
+
+
+@app.get("/api/watch/{wallet}")
+def watch_trader(wallet: str, request: Request) -> dict[str, Any]:
+    """A trader's watch page (``_watch``): what they hold, what changed in it over the last WATCH_DAYS days and the
+    line of how they built what they hold now. No account needed, as a trader's page; kept WATCH_TTL_S, under "Check
+    now"'s limits (``limited_read``)."""
+    w = _wallet_or_400(wallet)
+    return limited_read(f"watch:{w}", WATCH_TTL_S, w, request, lambda: _watch(w))  # type: ignore[no-any-return]
+
+
+def _watch_card(w: str, now: float) -> dict[str, Any]:
+    """One trader on the Watchlist, with no read: their latest moves (the last watch read's, which know what each
+    did, unless the poller has seen a newer trade since: then the poller's, which say only bought or sold), what they
+    hold (from the last watch read, while it's under a day old) and their kept record."""
+    mono = time.monotonic()
+    seen = _cache.get(f"watch:{w}")
+    looked = seen[1] if seen and mono - seen[0] < 86400 else None
+    live = _live_kept(w)
+    newest = max((t.at.timestamp() for t in live[1].trades), default=0.0) if live else 0.0
+    if looked is not None and newest <= looked["read_at"]:
+        moves, read_at = looked["moves"][:WATCH_CARD_MOVES], looked["read_at"]
+    elif live is not None:
+        moves = watch.view(live[1].trades, None, since=now - WATCH_DAYS * 86400, now=now)["moves"][:WATCH_CARD_MOVES]
+        read_at = now - (mono - live[0])
+    else:
+        moves, read_at = [], None
+    try:
+        rec = directory().record(w)
+    except (sqlite3.Error, OSError):
+        rec = None
+    name = _directory_name(w) or (looked or {}).get("name") or next(
+        (t.name for t in (live[1].trades if live else []) if t.name and not t.name.startswith("0x")), None)  # fmt: skip
+    record = None
+    if rec is not None:
+        per = rec.get("periods") or {}
+        record = {"win": _win_of(rec, "90d"), "paid_30d": rec.get("paid_30d"), "typical_usd": rec.get("typical_usd"),
+                  "profit_30d": (per.get("30d") or {}).get("trading_pnl"), "read_at": rec.get("read_at")}  # fmt: skip
+    held = None if looked is None else {"put_in": looked["put_in"], "worth": looked["worth"],
+                                         "count": len(looked["holdings"]), "read_at": looked["read_at"]}  # fmt: skip
+    return {"wallet": w, "name": name, "moves": moves, "moves_at": read_at, "held": held, "record": record}
+
+
 # ---- following traders: sign in with Clerk (Google or Telegram), alerts on Telegram ----
 # Browsing needs no account. Following a trader is the one thing that asks you to sign in, through Clerk:
 # Google, or Telegram as a custom OpenID Connect provider, both set up in Clerk's dashboard. The page sends
@@ -3382,6 +3468,44 @@ def my_feed(response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]
         people.append({"wallet": w, "name": s.get("name"), "segment": s.get("segment"), "label": label}
                       | copy_fields(s or None))  # fmt: skip
     return {"traders": people, "hours": FEED_HOURS} | _feed(people, sells=True)
+
+
+@app.get("/api/me/watchlist")
+def my_watchlist(response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
+    """The Watchlist: each trader you follow (``_watch_card``, no read), in the order you followed them."""
+    _private(response)
+    follows = list((_load_follows()["users"].get(uid) or {}).get("follows") or [])
+    now = time.time()
+    return {"traders": [_watch_card(w, now) for w in follows], "max": MAX_FOLLOWS, "days": WATCH_DAYS}
+
+
+# What "Follow a trader" takes: a wallet, a Polymarket profile link (polymarket.com/profile/0x…, which names the wallet)
+# or a name the directory knows. Polymarket's own username links (polymarket.com/@name) are looked up by their name.
+_PROFILE_NAME = re.compile(r"(?:polymarket\.com/)?@([A-Za-z0-9_.-]{2,64})/?$")
+FIND_LIMIT = 8
+
+
+@app.get("/api/find")
+def find_trader(q: str = "") -> dict[str, Any]:
+    """Traders for "Follow a trader": the wallet a pasted address or profile link names, else the directory's wallets
+    whose name matches (no Polymarket read). ``wallet`` is set when the text named one wallet."""
+    text = q.strip()[:200]
+    m = re.search(r"0x[0-9a-fA-F]{40}", text)
+    if m:
+        w = m.group(0).lower()
+        return {"wallet": w, "results": [{"wallet": w, "name": _directory_name(w)}]}
+    named = _PROFILE_NAME.search(text)
+    name = (named.group(1) if named else text).strip()
+    if len(name) < 2:
+        raise HTTPException(400, detail="Paste a profile link or wallet address, or type at least 2 letters of a name.")
+    try:
+        rows = cached(f"find:{name.lower()}", LEADERBOARD_TTL_S,
+                      lambda: directory().leaderboard("30d", "profit", q=name, new=True, limit=FIND_LIMIT)["rows"])  # fmt: skip
+    except (sqlite3.Error, OSError):
+        rows = []
+    return {"wallet": None, "results": [{"wallet": r["wallet"], "name": r.get("name"),
+                                         "profit_30d": ((r.get("periods") or {}).get("30d") or {}).get("trading_pnl")}
+                                        for r in rows]}  # fmt: skip
 
 
 @app.post("/api/me/telegram")

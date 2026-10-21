@@ -497,6 +497,56 @@
     .lb-nohist .lb-cons, .lb-nohist .lb-trend { display: none; } /* no profit history yet: nothing to show on a card */
   }
 
+  /* The Watchlist: a card per trader you follow. A trader's watch page: what they hold, as they built it up, then
+     each change beside the facts that explain it. Kinds of change are neutral labels (colour is only gains and losses). */
+  .wl-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 16px; }
+  .wl-top h1 { font-size: 26px; }
+  .wl-top .lede { margin: 4px 0 0; }
+  .wl-banner { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; margin-bottom: 16px; font-size: 14.5px; }
+  .wl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+  .wl-card { display: flex; flex-direction: column; gap: 12px; }
+  .wl-who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .wl-who .grow { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .wl-sub { font-size: 13px; color: var(--muted); }
+  .wl-new { flex: none; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+  .wl-held { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .wl-held b { font-size: 18px; font-weight: 600; }
+  .wl-held span { font-size: 13px; color: var(--muted); }
+  .wl-moves { border-top: 1px solid var(--line); padding-top: 10px; display: grid; gap: 7px; font-size: 14px; margin-top: auto; }
+  .wl-move { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .wl-move .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wl-kind { flex: none; display: inline-block; font-size: 12px; font-weight: 500; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; line-height: 18px; color: var(--fg); white-space: nowrap; }
+  .wl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+  .wl-dot.off { background: none; }
+  .wl-find { display: flex; gap: 8px; margin: 16px 0 0; }
+  .wl-find input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: var(--r-sm); padding: 10px 12px; font: inherit; font-size: 15px; }
+  .wl-find input:focus { outline: none; border-color: var(--accent); }
+  .wl-picks { display: grid; gap: 6px; margin-top: 14px; }
+  .wl-pick { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: var(--r-sm); padding: 10px 12px; font: inherit; cursor: pointer; }
+  .wl-pick:hover { background: var(--soft); }
+  .wl-pick .grow { flex: 1; min-width: 0; display: grid; }
+  .wt-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 20px; }
+  .wt-tiles .tile { margin: 0; }
+  .wt-chart svg { width: 100%; height: auto; display: block; }
+  .wt-chart text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  .wt-mark { cursor: pointer; }
+  .wt-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px 20px; align-items: start; margin-top: 16px; }
+  .wt-grid > .pf-card { margin-top: 0; }
+  .wt-list { padding: 0; overflow: hidden; }
+  .wt-list .pf-card-head { padding: 16px 18px 10px; margin: 0; }
+  .wt-move { display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; gap: 10px; align-items: start; width: 100%; text-align: left; border: 0; border-top: 1px solid var(--line); background: none; padding: 13px 18px; cursor: pointer; font: inherit; color: inherit; }
+  .wt-move:hover { background: var(--soft); }
+  .wt-move[aria-pressed="true"] { background: var(--soft); box-shadow: inset 3px 0 0 var(--accent); }
+  .wt-move .wl-dot { margin-top: 7px; }
+  .wt-move .t { font-weight: 500; overflow-wrap: anywhere; }
+  .wt-move .s { font-size: 13px; color: var(--muted); margin-top: 3px; }
+  .wt-move .when { font-size: 12.5px; color: var(--faint); white-space: nowrap; }
+  .wt-explain { position: sticky; top: 76px; }
+  .wt-explain h3 { font-size: 17px; margin: 10px 0 0; overflow-wrap: anywhere; }
+  .wt-why { font-size: 15px; font-weight: 600; margin: 14px 0 0; }
+  .wt-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+  @media (max-width: 920px) { .wt-grid { grid-template-columns: minmax(0, 1fr); } .wt-explain { position: static; } }
+
   /* states */
   .state { text-align: center; padding: 44px 24px; color: var(--muted); }
   .state b { display: block; color: var(--fg); font-size: 16px; margin-bottom: 6px; }
@@ -616,7 +666,7 @@
   <div class="wrap">
     <a class="brand" href="#/traders"><span class="logo"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1"/><rect x="8.5" y="7" width="3" height="10" rx="1"/><rect x="14" y="3" width="3" height="14" rx="1"/></svg></span>Signals</a>
     <nav class="tabs" aria-label="Main">
-      <a href="#/" data-tab="feed">Feed</a><a href="#/traders" data-tab="traders">Traders</a>
+      <a href="#/" data-tab="feed">Feed</a><a href="#/watchlist" data-tab="watch">Watchlist</a><a href="#/traders" data-tab="traders">Traders</a>
     </nav>
     <div class="account" id="account"></div>
     <button type="button" class="theme-btn" id="theme" aria-label="Light theme" title="Light theme"><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
@@ -626,6 +676,7 @@
 <footer class="wrap foot">Built on <a href="https://uselayer.sh" target="_blank" rel="noopener">uselayer</a> · Every trader here trades on Polymarket International · Signals places no orders</footer>
 <nav class="tabbar" aria-label="Main">
   <a href="#/" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13h3l2.5-6 4 11 2.5-5H20"/></svg>Feed</a>
+  <a href="#/watchlist" data-tab="watch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>Watchlist</a>
   <a href="#/traders" data-tab="traders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.7-3.2 2.9-5 5.5-5s4.8 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.4c1.6.7 2.6 2.3 3 4.6"/></svg>Traders</a>
 </nav>
 <div id="sheet"></div>
@@ -695,6 +746,7 @@ async function startAuth(key, alerts) {
     redrawFollow();
     if (feedGate()) return; // signed in or out on a Feed page: drawn again
     if (drawnGate === "open" && onFeed() && feedView() === "follow") loadFeed(); // Following is yours: read it once we know who you are
+    if (drawnGate === "open" && routeName() === "watchlist") loadWatchlist(); // so is the Watchlist
   });
   feedGate();
 }
@@ -712,6 +764,8 @@ function signInPage() {
   const st = gateState(), traders = `<a class="btn ghost" href="#/traders">Browse traders</a>`;
   $("#app").innerHTML = st === "loading" ? skelCards(3)
     : st === "failed" ? emptyState("Signing in couldn't load just now", "The Feed needs signing in. Try again in a minute; Traders and trader pages need no account.", traders)
+    : routeName() === "watchlist" ? emptyState("Sign in to see your Watchlist", "Follow traders to see what they hold and every change they make, a few minutes after they make it. Traders and their pages need no account.",
+      `<button class="btn" id="gatesignin">Sign in</button> ${traders}`)
     : emptyState("Sign in to see the Feed", "The trades of the traders you follow and of the traders we recommend, a few minutes after they're made. Traders and their pages need no account.",
       `<button class="btn" id="gatesignin">Sign in</button> ${traders}`);
   const b = $("#gatesignin"); if (b) b.onclick = () => window.Clerk.openSignIn();
@@ -721,7 +775,7 @@ document.addEventListener("click", (e) => {
   const a = e.target.closest?.('a[href^="#/"]');
   if (!a || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const href = a.getAttribute("href");
-  if (!["#/", "#/recommended", "#/big"].includes(href) || gateState() !== "closed") return;
+  if (!["#/", "#/recommended", "#/big", "#/watchlist"].includes(href) || gateState() !== "closed") return;
   e.preventDefault();
   whenSignedIn(() => { location.hash = href; });
 });
@@ -2760,7 +2814,8 @@ function renderProfile() {
   app.innerHTML = `${pf.from === "explore" ? `<a class="back" href="#/traders/explore">← Explore</a>` : `<a class="back" href="#/traders">← Traders</a>`}
     <div class="pf-head">${avatar(s.wallet, 64)}
       <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "record read" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
-      <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div></div></div>
+      <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div>
+        <a class="link" href="#/watch/${esc(s.wallet)}" style="font-size:14px">What they hold and every change they make →</a></div></div>
     <div class="pf-grid">
       <section class="pf-card pf-sum" aria-label="Their numbers">
         <div class="pf-card-head"><h2>Their numbers</h2>${period}</div>
@@ -2900,9 +2955,333 @@ async function checkPage(wallet, market) {
   tradeSheet(b);
 }
 
+// ---- the Watchlist (#/watchlist) and a trader's watch page (#/watch/<wallet>) ----
+// Follow a trader (the same list as Follow on their page, up to 20) and see what they hold and every change they make:
+// a new position, more bought, some sold, all of it sold, each with the facts that explain it (their trade, what they
+// hold now, how it compares with their usual trade, their record in that category). Facts only, ready at once: no AI
+// write-up. The engine works the changes out from their last 500 trades and what they hold now (/api/watch), read
+// about every 30 seconds while the page is open. The Watchlist is behind signing in, like the Feed; a watch page, like a
+// trader's page, needs no account. "Since you last looked" is when you last opened their watch page, in this browser.
+const KIND = { new: "New", added: "Bought more", sold_some: "Sold some", closed: "Sold all", bought: "Bought", sold: "Sold" };
+const SEEN_KEY = "signals.seen";
+const seenVisit = {}; // storage blocked (a private window): it holds for the visit
+function seenMap() { try { return JSON.parse(localStorage.getItem(SEEN_KEY) || "{}") || {}; } catch { return {}; } }
+const seenAt = (w) => seenMap()[w] ?? seenVisit[w] ?? null;
+function markSeen(w) {
+  seenVisit[w] = Date.now();
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify({ ...seenMap(), [w]: seenVisit[w] })); } catch {}
+}
+// New since you last looked; for a trader you haven't opened here yet, from the last day.
+const isNew = (m, seen) => new Date(m.at).getTime() > (seen ?? Date.now() - 864e5);
+const ordinal = (n) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th"}`;
+function span(from, to) {
+  const h = (new Date(to) - new Date(from)) / 36e5;
+  return h < 1 ? plural(Math.max(1, Math.round(h * 60)), "minute") : h < 48 ? plural(Math.round(h), "hour") : plural(Math.round(h / 24), "day");
+}
+const winText = (w) => w && w.closed >= WIN_MIN ? `${Math.round((100 * w.won) / w.closed)}%` : null;
+let watchTimer = null;
+
+// The Watchlist: a card per trader you follow (the engine reads nothing for it), refreshed every 30 seconds.
+const wl = { d: null, err: null, seq: 0 };
+async function watchlistPage() {
+  $("#app").innerHTML = `<div class="wl-top"><div><h1>Watchlist</h1><p class="lede">The traders you follow: what they hold and every change they make.</p></div>
+    <button class="btn" id="wladd">+ Follow a trader</button></div><div id="wlbody">${skelCards(3)}</div>`;
+  $("#wladd").onclick = () => followSheet();
+  await loadWatchlist();
+}
+async function loadWatchlist() {
+  clearTimeout(watchTimer);
+  const my = ++wl.seq;
+  if (!canFollowFeed()) { renderWatchlist(); return; } // who you follow isn't known yet (or signing in is off)
+  try { wl.d = await api("/api/me/watchlist"); wl.err = null; } catch (e) { wl.err = e.message; }
+  if (my !== wl.seq || routeName() !== "watchlist") return;
+  watchTimer = setTimeout(() => { if (routeName() === "watchlist") loadWatchlist(); }, 30000);
+  renderWatchlist();
+}
+function renderWatchlist() {
+  const box = $("#wlbody");
+  if (!box) return;
+  if (!canFollowFeed()) {
+    box.innerHTML = !auth.wanted ? emptyState("The Watchlist needs signing in", "Signing in isn't switched on here.", `<a class="btn ghost" href="#/traders">Find traders</a>`)
+      : auth.meErr ? errorState(auth.meErr) : skelCards(3);
+    bindActions(box);
+    return;
+  }
+  const d = wl.d;
+  if (!d) { box.innerHTML = wl.err ? errorState(wl.err) : skelCards(3); bindActions(box); return; }
+  if (!d.traders.length) {
+    box.innerHTML = emptyState("You don't follow anyone yet", "Follow a trader to see what they hold and every change they make, a few minutes after they make it.",
+      `<button class="btn" id="wlfirst">Follow a trader</button> <a class="btn ghost" href="#/traders">Find traders</a>`);
+    $("#wlfirst").onclick = () => followSheet();
+    return;
+  }
+  const fresh = d.traders.map((t) => t.moves.filter((m) => isNew(m, seenAt(t.wallet))).length);
+  const changes = fresh.reduce((a, n) => a + n, 0), who = fresh.filter(Boolean).length;
+  box.innerHTML = `<div class="wl-banner">${changes ? `<span class="wl-dot"></span><span><b>Since you last looked:</b> ${plural(changes, "change")} from ${plural(who, "trader")}.</span>`
+      : `<span>No changes since you last looked.</span>`}<span class="updated" style="margin-left:auto">${d.traders.length} of ${d.max} followed</span></div>
+    <div class="wl-cards">${d.traders.map((t, i) => wlCard(t, fresh[i])).join("")}</div>
+    <p class="foot-note">${esc(FOLLOW_LAG)} Each card shows their latest changes; open one for everything they hold and why each change stands out. Past trades, not advice: Signals places no orders.</p>`;
+  bindActions(box);
+}
+const FOLLOW_LAG = "Signals typically reads the traders you follow every 30 seconds.";
+function wlCard(t, fresh) {
+  const r = t.record || {}, seen = seenAt(t.wallet);
+  const win = winText(r.win);
+  const facts = [win ? `Win rate ${win}${r.paid_30d != null ? ` (paid ${cents(r.paid_30d)} on average)` : ""}` : null,
+    r.typical_usd != null ? `usual trade ${usd(r.typical_usd)}` : null,
+    r.profit_30d != null ? `${pl(r.profit_30d, usd(r.profit_30d, true))} in 30 days` : null].filter(Boolean);
+  const held = t.held ? `<div class="wl-held"><span>Holding now</span><span><b>${usd(t.held.put_in)}</b> put in · worth ${usd(t.held.worth)} · ${plural(t.held.count, "position")}</span></div>` : "";
+  const moves = t.moves.slice(0, 3).map((m) => `<div class="wl-move"><span class="wl-dot${isNew(m, seen) ? "" : " off"}"></span><span class="wl-kind">${KIND[m.kind]}</span>
+    <span class="t">${usd(m.usd)} · ${esc(m.title || m.market)}</span><span class="when">${ago(m.at)}</span></div>`).join("");
+  return `<article class="card trade wl-card" data-href="#/watch/${esc(t.wallet)}" tabindex="0">
+    <div class="wl-who">${avatar(t.wallet, 40)}<span class="grow"><span class="name">${esc(displayName(t.name, t.wallet))}</span>
+      ${facts.length ? `<span class="wl-sub">${facts.join(" · ")}</span>` : `<span class="wl-sub">Record not read yet</span>`}</span>
+      ${fresh ? `<span class="wl-new">${fresh} new</span>` : ""}</div>
+    ${held}
+    <div class="wl-moves">${moves || `<span class="wl-sub">No trades in the last ${wl.d?.days || 30} days yet.</span>`}</div></article>`;
+}
+
+// "Follow a trader": paste a profile link or wallet, or type a name the directory knows; see who it is and their
+// record; Follow. Their watch page opens, with their last 30 days already there.
+function followSheet() {
+  const panel = sheet(`<h2>Follow a trader</h2>
+    <p class="explain">Paste their Polymarket profile link or wallet address, or type their name. You'll see what they hold, their record and every change they make.</p>
+    <form class="wl-find" id="wlfind"><input id="wlq" type="text" autocomplete="off" spellcheck="false" placeholder="polymarket.com/profile/0x… or a name" aria-label="Profile link, wallet address or name">
+      <button class="btn" type="submit">Look up</button></form><div id="wlfound"></div>`);
+  const q = $("#wlq", panel), found = $("#wlfound", panel);
+  q.focus();
+  $("#wlfind", panel).onsubmit = async (e) => {
+    e.preventDefault();
+    found.innerHTML = `<div class="skel" style="width:60%;height:14px;margin:18px 0"></div>`;
+    let r;
+    try { r = await api(`/api/find?q=${encodeURIComponent(q.value)}`); } catch (err) { found.innerHTML = `<p class="inline-err">${esc(err.message)}</p>`; return; }
+    if (r.wallet || r.results.length === 1) return followPreview(found, r.wallet || r.results[0].wallet);
+    if (!r.results.length) {
+      found.innerHTML = `<p class="explain">No trader by that name in Signals yet. Paste their Polymarket profile link (polymarket.com/profile/0x…) or wallet address instead: it's the address of their profile page on Polymarket.</p>`;
+      return;
+    }
+    found.innerHTML = `<div class="wl-picks">${r.results.map((t) => `<button type="button" class="wl-pick" data-pick="${esc(t.wallet)}">${avatar(t.wallet, 32)}
+      <span class="grow"><span class="name">${esc(displayName(t.name, t.wallet))}</span>${t.profit_30d != null ? `<span class="wl-sub">${pl(t.profit_30d, usd(t.profit_30d, true))} trading profit, 30 days</span>` : ""}</span></button>`).join("")}</div>`;
+    $$("[data-pick]", found).forEach((b) => (b.onclick = () => followPreview(found, b.dataset.pick)));
+  };
+}
+async function followPreview(box, wallet) {
+  box.innerHTML = `<p class="explain">Reading their record (usually a few seconds)…</p>`;
+  let s = null, why = null;
+  try { s = await api(`/api/worth/${wallet}?score=0`); } catch (e) { why = e.message; }
+  if (!box.isConnected) return;
+  const name = displayName(s?.name, wallet), w = s?.win?.["90d"], win = winText(w), profit = s ? profitOf(s, "30d") : null;
+  const tiles = [win ? [`Win rate`, win, `paid ${s.paid_30d != null ? cents(s.paid_30d) : "—"} on average, 30 days`] : null,
+    s?.typical_usd != null ? ["Usual trade", usd(s.typical_usd), "last 30 days"] : null,
+    profit != null ? ["Trading profit", pl(profit, usd(profit, true)), "last 30 days"] : null].filter(Boolean);
+  const following = !!auth.me?.follows.includes(wallet);
+  box.innerHTML = `<div class="sheet-who">${avatar(wallet, 36)}<span class="grow"><span class="name">${esc(name)}</span>
+      <span class="muted" style="font-size:13px">${profileLink(`https://polymarket.com/profile/${wallet}`)}</span></span></div>
+    ${tiles.length ? `<div class="kv">${tiles.map(([k, v, sub]) => `<div><span>${k}</span><b>${v}</b><small>${esc(sub)}</small></div>`).join("")}</div>`
+      : `<p class="explain">${why ? `Their record couldn't be read just now: ${esc(why)}` : "No track record to show yet."}</p>`}
+    <p class="inline-err" id="wlerr" hidden></p>
+    ${following || !auth.on ? `<a class="btn wide" href="#/watch/${esc(wallet)}" style="display:block;text-align:center">${following ? "You follow them · open their page" : "Open their page"}</a>`
+      : `<button class="btn wide" id="wlfollow">Follow ${esc(name)}</button>`}
+    <p class="fine">Following is how you hear about their trades. Signals places no orders.</p>`;
+  const go = $("#wlfollow", box);
+  if (go) go.onclick = () => whenSignedIn(async () => {
+    try { auth.me = await post("/api/me/follows", { wallet }); } catch (e) { const err = $("#wlerr"); if (err) { err.hidden = false; err.textContent = e.message; } return; }
+    closeSheet();
+    location.hash = `#/watch/${wallet}`;
+    toast(`Following ${esc(name)}. New changes show up within about 30 seconds.`);
+  });
+  $("a.btn", box)?.addEventListener("click", closeSheet);
+}
+
+// A trader's watch page: their record in a line of tiles, what they hold now as they built it up (the line steps at
+// each of their trades in it; every change is a dot), the changes beside what explains the one picked, then what they
+// hold now. Read again every 30 seconds while it's open.
+const wt = { w: null, d: null, s: null, cats: null, sel: null, err: null, seen: null, sig: "" };
+async function watchPage(wallet) {
+  Object.assign(wt, { w: wallet, d: null, s: null, cats: null, sel: null, err: null, seen: seenAt(wallet), sig: "" });
+  markSeen(wallet); // what's new is from your last visit; this one counts as looking
+  $("#app").innerHTML = `${watchBack()}<div class="pf-head">${avatar(wallet, 64)}<div class="grow"><div class="skel" style="width:40%;height:24px"></div>
+    <div class="skel" style="width:25%;height:14px;margin-top:10px"></div></div></div><p class="muted" style="margin-top:24px">Reading their trades and what they hold (usually a few seconds)…</p>`;
+  const redraw = () => { if (onWatch(wallet) && wt.d) renderWatch(true); };
+  api(`/api/worth/${wallet}?score=0`).then((s) => { wt.s = s; }, () => { wt.s = { error: true }; }).then(redraw);
+  api(`/api/categories/${wallet}`).then((c) => { wt.cats = c; }, (e) => { wt.cats = readFailed(e); }).then(redraw);
+  await loadWatch();
+}
+const onWatch = (w) => location.hash === `#/watch/${w}`;
+const watchBack = () => signedIn() || !auth.wanted ? `<a class="back" href="#/watchlist">← Watchlist</a>` : `<a class="back" href="#/traders">← Traders</a>`;
+async function loadWatch() {
+  clearTimeout(watchTimer);
+  const w = wt.w;
+  let d = null, err = null;
+  try { d = await api(`/api/watch/${w}`); } catch (e) { err = e; }
+  if (wt.w !== w || !onWatch(w)) return;
+  if (d) Object.assign(wt, { d, err: null }); else wt.err = err;
+  watchTimer = setTimeout(() => { if (onWatch(w)) loadWatch(); }, 30000);
+  renderWatch();
+}
+function renderWatch(force = false) {
+  const app = $("#app"), d = wt.d, w = wt.w;
+  if (!d) {
+    if (wt.err) { app.innerHTML = watchBack() + (wt.err.status === 429 ? emptyState(BUSY_TEXT, "Lots of people are reading traders right now. This page tries again in 30 seconds.") : errorState(wt.err.message)); bindActions(app); }
+    return;
+  }
+  // the same answer as on screen (only its read time moved): just say when it was read, so nothing jumps while reading
+  const sig = JSON.stringify([d.moves, d.holdings, wt.s, wt.cats]);
+  if (!force && sig === wt.sig && $("#wtread")) { $("#wtread").textContent = `updated ${ago(d.read_at * 1000)}`; return; }
+  wt.sig = sig;
+  if (wt.sel == null || !d.moves.some((m) => moveKey(m) === wt.sel)) wt.sel = d.moves[0] ? moveKey(d.moves[0]) : null;
+  const s = wt.s && !wt.s.error ? wt.s : null, name = displayName(d.name || s?.name, w);
+  const fresh = d.moves.filter((m) => isNew(m, wt.seen)).length;
+  const period = span(d.since * 1000, d.read_at * 1000); // 30 days, or as far back as their last 500 trades go
+  app.innerHTML = `${watchBack()}
+    <div class="pf-head">${avatar(w, 64)}
+      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1></div>
+        <div class="pf-tag">Read every 30 seconds · <span id="wtread">updated ${ago(d.read_at * 1000)}</span> · <a class="link" href="#/worth/${esc(w)}">Full profile</a> · ${profileLink(`https://polymarket.com/profile/${w}`)}</div></div>
+      <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(w)}"></div></div></div>
+    <div class="wt-tiles">${watchTiles(d, s, wt.cats).map(([k, v, sub]) => `<div class="tile"><span>${esc(k)}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ""}</div>`).join("")}</div>
+    <section class="pf-card wt-chart"><div class="pf-card-head"><h2>What they hold now, as they built it up</h2></div>
+      ${watchChart(d)}
+      <div class="pf-legend"><span>● Bought</span><span>○ Sold</span><span>Each dot is a change: pick one to see it explained</span></div>
+      <p class="pf-statnote">What they put into the positions they hold now, at the price they paid, over ${d.short ? `the ${period} their last ${d.trades_read.toLocaleString()} trades go back` : `the last ${period}`}. Positions they've since closed aren't in the line; their trades are still dots.</p></section>
+    <div class="wt-grid">
+      <section class="pf-card wt-list"><div class="pf-card-head"><h2>Changes <small class="muted">${fresh ? `${fresh} new since you last looked` : `last ${period}`}</small></h2></div>
+        ${d.moves.length ? d.moves.map((m) => moveRow(m)).join("") : `<p class="pf-empty" style="padding:0 18px 18px">No trades in the last ${period}.</p>`}</section>
+      <section class="pf-card wt-explain" id="wtexplain" aria-live="polite">${explainHtml(selectedMove())}</section>
+    </div>
+    <section class="pf-card"><div class="pf-card-head"><h2>Holding now <small class="muted">${d.holdings.length ? `${plural(d.holdings.length, "position")} · ${usd(d.put_in)} put in · worth ${usd(d.worth)}` : ""}</small></h2></div>
+      ${d.holdings.length ? d.holdings.slice(0, 25).map(holdingRow).join("") : `<p class="pf-empty">No open positions.</p>`}
+      ${d.holdings.length > 25 ? `<p class="pf-statnote">Their 25 biggest of ${d.holdings.length}. <a class="link" href="#/worth/${esc(w)}">See all on their profile</a></p>` : ""}
+      ${d.positions_cut ? `<p class="pf-statnote">They hold more positions than one read lists: the ones they traded lately are all here.</p>` : ""}</section>
+    <p class="foot-note">Worked out from their last ${d.trades_read.toLocaleString()} trades and what they hold now, so a change made by a split, merge or payout rather than a trade shows only as what they hold. Past trades, not advice: Signals places no orders.</p>`;
+  bindWatch(app);
+  redrawFollow();
+}
+const moveKey = (m) => `${m.market}|${m.at}|${m.action}`;
+const selectedMove = () => wt.d?.moves.find((m) => moveKey(m) === wt.sel) || null;
+function moveRow(m) {
+  const did = m.action === "buy" ? `Bought ${usd(m.usd)} at ${cents(m.price)}` : `Sold ${usd(m.usd)} at ${cents(m.price)}${m.paid != null ? `, paid ${cents(m.paid)}` : ""}`;
+  return `<button type="button" class="wt-move" data-move="${esc(moveKey(m))}" aria-pressed="${moveKey(m) === wt.sel}">
+    <span class="wl-dot${isNew(m, wt.seen) ? "" : " off"}"></span>
+    <span><span class="t"><span class="wl-kind">${KIND[m.kind]}</span> ${esc(m.title || m.market)}</span>
+      <span class="s" style="display:block">${m.outcome ? `<span class="pf-oc">${esc(m.outcome)}</span>` : ""}${did}</span></span>
+    <span class="when">${ago(m.at)}</span></button>`;
+}
+// The one line that says what the change was, from its facts only.
+function moveHeadline(m) {
+  const vs = (word) => m.paid == null ? word : m.price < m.paid - 0.005 ? `${word}, below what they paid` : m.price > m.paid + 0.005 ? `${word}, above what they paid` : `${word}, at about what they paid`;
+  switch (m.kind) {
+    case "new": return "Opened a new position";
+    case "added": return m.buy_count >= 2 ? `Their ${ordinal(m.buy_count)} buy of this${m.opened_at ? ` in ${span(m.opened_at, m.at)}` : ""}${m.rising ? ", each at a higher price" : m.falling ? ", each at a lower price" : ""}`
+      : "Bought more of a position they already held";
+    case "sold_some": return vs("Sold some and kept the rest");
+    case "closed": return vs("Sold all of it");
+    case "sold": return "Sold";
+    default: return "Bought";
+  }
+}
+// The facts behind a change: what they did, where their position stands now, its size against their usual trade and
+// their record in the category. A fact we don't have is left out, never a "—".
+function moveFacts(m) {
+  const h = (wt.d?.holdings || []).find((x) => x.market === m.market), s = wt.s && !wt.s.error ? wt.s : null;
+  const rows = [["What they did", `${m.action === "buy" ? "Bought" : "Sold"} ${usd(m.usd)}${m.outcome ? ` of ${esc(m.outcome)}` : ""} at ${cents(m.price)}${m.fills > 1 ? `, in ${m.fills} trades` : ""}`]];
+  rows.push(["Their position now", h ? `${usd(h.put_in)} put in at ${cents(h.paid)} · worth ${usd(h.value)}`
+    : m.kind === "closed" ? "They no longer hold it" : "Not among what they hold now: it may have settled, or been paid out"]);
+  if (m.action === "buy" && s?.typical_usd) {
+    const x = m.usd / s.typical_usd;
+    rows.push(["Size", `${x >= 1.5 ? `${x >= 10 ? Math.round(x) : x.toFixed(1)}× their usual trade` : x <= 0.5 ? "Smaller than their usual trade" : "About their usual trade"} of ${usd(s.typical_usd)}, last 30 days`]);
+  }
+  const cats = wt.cats && !wt.cats.error ? (wt.cats.rows || []).filter((r) => r.category !== UNCATEGORISED) : [];
+  const mine = m.category && cats.find((r) => r.category === m.category);
+  if (mine) {
+    const best = mine.usd > 0 && cats.every((r) => r.usd <= mine.usd) && cats.length > 1;
+    rows.push([`Their record in ${esc(m.category)}`, `${pl(mine.usd, usd(mine.usd, true))} realized, all time${best ? " · their best category" : ""}`]);
+  }
+  if (m.held_now && m.now != null) rows.push(["Price now", `${cents(m.now)} · they paid ${cents(h?.paid ?? m.price)}`]);
+  rows.push(["When", `${ago(m.at)}${m.fills > 1 && m.first_at !== m.at ? `, from their first fill ${ago(m.first_at)}` : ""}`]);
+  return rows;
+}
+function explainHtml(m) {
+  if (!m) return `<h2>Explained</h2><p class="pf-empty">Pick a change to see what explains it.</p>`;
+  return `<div class="pf-card-head"><h2>Explained</h2><span class="when">${ago(m.at)}</span></div>
+    <div><span class="wl-kind">${KIND[m.kind]}</span>${m.category ? ` <span class="pf-oc">${esc(m.category)}</span>` : ""}</div>
+    <h3>${esc(m.title || m.market)}</h3>
+    <p class="wt-why">${esc(moveHeadline(m))}</p>
+    <dl class="pf-facts">${moveFacts(m).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+    <div class="wt-actions">${m.action === "buy" && m.market ? `<button class="btn small" data-wtcheck>Check your price</button>` : ""}${marketLink(m.url)}</div>
+    <p class="pf-statnote">From their trades, what they hold now and their record. Past trades, not advice.</p>`;
+}
+function holdingRow(h) {
+  return `<div class="pf-li"><div><div class="t">${esc(h.title || h.market)}</div><div class="s">${h.outcome ? `<span class="pf-oc">${esc(h.outcome)}</span>` : ""}Put in ${usd(h.put_in)} · worth ${usd(h.value)} now</div></div>
+    <div class="r">${neutralStatus(h.paid, h.now)}</div></div>`;
+}
+// The record in a line of tiles: what they hold, win rate with the price they paid beside it, usual trade, profit, and
+// their best category. A figure we can't give has no tile.
+function watchTiles(d, s, cats) {
+  const tiles = [["Holding now", usd(d.put_in), `put in · worth ${usd(d.worth)}`]];
+  const w = s?.win?.["90d"], win = winText(w);
+  if (win) tiles.push(["Win rate", win, `of ${w.closed} positions closed, ${w.days} days${s.paid_30d != null ? ` · paid ${cents(s.paid_30d)} on average` : ""}`]);
+  if (s?.typical_usd != null) tiles.push(["Usual trade", usd(s.typical_usd), "last 30 days"]);
+  const p = s ? profitOf(s, "30d") : null;
+  if (p != null) tiles.push(["Trading profit", pl(p, usd(p, true)), "last 30 days"]);
+  const rows = cats && !cats.error ? (cats.rows || []).filter((r) => r.category !== UNCATEGORISED && r.usd > 0) : [];
+  const best = rows.reduce((a, r) => (!a || r.usd > a.usd ? r : a), null);
+  if (best && rows.length > 1) tiles.push(["Best category", esc(best.category), `${usd(best.usd, true)} realized, all time`]);
+  return tiles;
+}
+// What they hold now as they built it up: a step line (it steps at each of their trades in it), and a dot per change
+// (filled: bought, hollow: sold), at the line's height then. Neutral: it's what they hold, not a gain or a loss.
+function watchChart(d) {
+  const pts = d.series || [];
+  if (pts.length < 2) return `<p class="pf-empty">Nothing to draw yet.</p>`;
+  // drawn at the width it's shown at, so its text and dots stay their size on a phone and a wide screen alike
+  const W = Math.max(300, Math.round(($("#app")?.clientWidth || 680) - 70)), H = W < 500 ? 200 : 240, L = 56, R = 12, T = 12, B = 26;
+  const t0 = pts[0][0], t1 = Math.max(pts[pts.length - 1][0], t0 + 1);
+  const hi = Math.max(1, ...pts.map((p) => p[1])) * 1.08;
+  const X = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R), Y = (v) => T + (1 - v / hi) * (H - T - B);
+  let line = `${X(pts[0][0]).toFixed(1)},${Y(pts[0][1]).toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) line += ` ${X(pts[i][0]).toFixed(1)},${Y(pts[i - 1][1]).toFixed(1)} ${X(pts[i][0]).toFixed(1)},${Y(pts[i][1]).toFixed(1)}`;
+  const at = (t) => { let v = pts[0][1]; for (const p of pts) { if (p[0] <= t) v = p[1]; else break; } return v; };
+  const dots = d.moves.filter((m) => new Date(m.at) / 1000 >= t0).map((m) => {
+    const t = new Date(m.at) / 1000, on = moveKey(m) === wt.sel, buy = m.action === "buy";
+    return `<circle class="wt-mark" data-move="${esc(moveKey(m))}" cx="${X(t).toFixed(1)}" cy="${Y(at(t)).toFixed(1)}" r="${on ? 7 : 5}"
+      fill="${buy ? "var(--fg)" : "var(--card)"}" stroke="${on ? "var(--accent)" : "var(--fg)"}" stroke-width="${on ? 3 : 1.5}"><title>${esc(`${KIND[m.kind]}: ${usd(m.usd)} · ${m.title || m.market}`)}</title></circle>`;
+  }).join("");
+  const ticks = [0, hi / 2 / 1.08, hi / 1.08];
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="What they hold now, as they built it up: ${usd(pts[pts.length - 1][1])} put in">
+    ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1" ${v ? 'stroke-dasharray="3 4"' : ""}/><text x="${L - 8}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">${usd(v)}</text>`).join("")}
+    <polyline points="${line}" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linejoin="round"/>${dots}
+    <text x="${L}" y="${H - 6}">${ago(t0 * 1000)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">Now</text></svg>`;
+}
+function bindWatch(app) {
+  const pick = (key) => {
+    wt.sel = key;
+    const m = selectedMove();
+    if (matchMedia("(max-width: 920px)").matches) { // on a phone the explanation is under the list: open it as a sheet
+      const panel = sheet(`<div class="wt-explain">${explainHtml(m)}</div>`);
+      bindExplain(panel, m);
+    }
+    $$("[data-move]", app).forEach((el) => {
+      const on = el.dataset.move === key;
+      if (el.tagName === "BUTTON") el.setAttribute("aria-pressed", on);
+      else { el.setAttribute("r", on ? 7 : 5); el.setAttribute("stroke", on ? "var(--accent)" : "var(--fg)"); el.setAttribute("stroke-width", on ? 3 : 1.5); }
+    });
+    const box = $("#wtexplain", app);
+    if (box) { box.innerHTML = explainHtml(m); bindExplain(box, m); }
+  };
+  $$("[data-move]", app).forEach((el) => (el.onclick = () => pick(el.dataset.move)));
+  bindExplain($("#wtexplain", app), selectedMove());
+  bindActions(app);
+}
+function bindExplain(root, m) {
+  const b = root && $("[data-wtcheck]", root);
+  if (!b || !m) return;
+  b.onclick = () => tradeSheet({ wallet: wt.w, name: wt.d?.name, market: m.market, price: m.price, price_now: m.now, title: m.title, outcome: m.outcome,
+    url: m.url, status: m.status, usd: m.usd, size: m.size, at: m.at, category: m.category, token: m.token });
+}
+
 // ---- routing ----
 // usesignals.app with no hash lands on Traders. #/ the Feed's Following (alerts link there) · #/recommended its Recommended · #/big Big trades · #/traders[/top|/explore] · #/worth/<wallet> · #/t/<venue>/<id> ·
-// #/check/<wallet>/<market> (an alert's "Check your price").
+// #/check/<wallet>/<market> (an alert's "Check your price") · #/watchlist the Watchlist · #/watch/<wallet> a trader's watch page.
 // Old links still work: Big trades used to be #/traders/big; My trades (#/mine, #/copied) went with the sandbox.
 const OLD = { "#/live": "#/", "#/worth": "#/traders", "#/copied": "#/", "#/mine": "#/", "#/traders/big": "#/big" };
 // ---- analytics (PostHog): how people use the page, off unless the engine has a project key (/api/config) ----
@@ -2935,6 +3314,7 @@ function routeName() {
   if (h === "#/" || h === "#") return "feed";
   if (h === "#/big") return "feed:big";
   if (h === "#/recommended") return "feed:rec";
+  if (h === "#/watchlist") return "watchlist";
   if (h === "#/traders") return "traders:worth";
   if (h === "#/traders/top") return "traders:top";
   if (h === "#/traders/explore") return exploreOn && !boardOn ? "traders:explore" : "traders:worth"; // the Leaderboard replaces both
@@ -2947,21 +3327,24 @@ function venueOffPage(venue) {
 }
 function route() {
   if (OLD[location.hash]) { location.replace(OLD[location.hash]); return; }
-  closeSheet(); clearTimeout(feedTimer); clearTimeout(worthTimer);
+  closeSheet(); clearTimeout(feedTimer); clearTimeout(worthTimer); clearTimeout(watchTimer);
   const name = routeName();
   const w = location.hash.match(/^#\/worth\/(0x[0-9a-fA-F]{40})$/);
   const check = location.hash.match(/^#\/check\/(0x[0-9a-fA-F]{40})\/([^/]+)$/);
   const t = location.hash.match(/^#\/t\/(kalshi|polymarket)\/(.+)$/);
-  const tab = name.startsWith("feed") || check ? "feed" : "traders";
+  const watching = location.hash.match(/^#\/watch\/(0x[0-9a-fA-F]{40})$/);
+  const tab = name.startsWith("feed") || check ? "feed" : name === "watchlist" || watching ? "watch" : "traders";
   $$("[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
   $("#app").classList.toggle("narrow", name === "traders:top" || !!t); // one width everywhere else, header included
   window.scrollTo(0, 0);
-  const gated = name.startsWith("feed") || !!check; // the Feed's pages: signed in only; the rest needs no account
+  const gated = name.startsWith("feed") || !!check || name === "watchlist"; // the Feed's pages and the Watchlist: signed in only; the rest needs no account
   const onboarding = interests === null && (name.startsWith("feed") || name === "traders:worth"); // first run; links to a trader skip it
   drawnGate = gated && !onboarding ? gateState() : null;
   if (onboarding) onboardingPage();
   else if (gated && drawnGate !== "open") signInPage();
   else if (name.startsWith("feed")) feedPage(feedView());
+  else if (name === "watchlist") watchlistPage();
+  else if (watching) watchPage(watching[1].toLowerCase());
   else if (name.startsWith("traders:")) tradersPage(name.split(":")[1]);
   else if (w) worthTraderPage(w[1].toLowerCase());
   else if (check) checkPage(check[1].toLowerCase(), decodeURIComponent(check[2]));
