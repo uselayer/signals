@@ -146,7 +146,15 @@ behind Vercel (see README, "Hosting").
 - The page is a consumer app, not an analyst's spreadsheet. It helps people find traders worth following and
   understand why: who they are, how they trade, and what the evidence does and doesn't show. Before anyone buys,
   show what it would really cost them now (above): what their amount fills at, the fee, the slippage, what's for
-  sale. Nothing on the page may imply that copying makes money. Two tabs (Feed, Traders).
+  sale. Nothing on the page may imply that copying makes money. Three tabs (Feed, Watchlist, Traders).
+  - The Watchlist (`#/watchlist`, signed in) is the follow list (one list: Follow on a trader's page, "+ Follow a
+    trader" there, alerts and the Feed's Following all use follows.json), a card per trader, read from what's kept
+    (`/api/me/watchlist` reads nothing). A trader's watch page (`#/watch/<wallet>`, no account) is `/api/watch`: their
+    last 500 trades and open positions on the checks' budget under "Check now"'s limits, kept 30 s for everyone,
+    worked out by `signals/watch.py`. A change (new, bought more, sold some, sold all) comes from walking back from what
+    they hold now; where that isn't known (not held, last move a buy: it settled or was paid out) it's only "Bought" or
+    "Sold", never guessed. Its explanation is facts only (no AI write-up, no verdict, nothing about what happens next),
+    every change label neutral, and every buy keeps "Check your price".
   - Onboarding (first visit, once per browser) asks one question: which markets interest you (Politics, Sports,
     Crypto, Esports; Skip means all markets). Nothing else: no budget, goals or signup. The choice is kept in
     localStorage (and, when picked here or with the Feed's Change, on the account for big-trade alerts), every read and write in try/catch; if storage is blocked it holds for the visit, and no one is
