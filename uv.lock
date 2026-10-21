@@ -515,7 +515,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
-    { name = "uselayer", specifier = ">=0.16.0" },
+    { name = "uselayer", specifier = ">=0.17.0" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
@@ -561,7 +561,7 @@ wheels = [
 
 [[package]]
 name = "uselayer"
-version = "0.16.0"
+version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
@@ -569,9 +569,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/a6/413e3953c6c8881572fbaa9644aa6103fef5ea9d8d252557652f305e1e82/uselayer-0.16.0.tar.gz", hash = "sha256:b22c1a86fa293a57aba73b5887646c994436a93d265e4266e5e27261357ecdb9", size = 421569, upload-time = "2026-10-20T16:50:52.375Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/2d/ca8f81168ab899b73db833a5da78d57b0cfae489b1263ff49bb52063b6c1/uselayer-0.17.0.tar.gz", hash = "sha256:c888176d88ff329e55fb467ae9f73ea48b53ff527e5c03c22597738c3773f104", size = 422814, upload-time = "2026-10-21T21:31:00.982Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/0b/ab8339c112020d8a5ea237e8a1a1d009dac868d2a821f4c38fd8d3068c02/uselayer-0.16.0-py3-none-any.whl", hash = "sha256:7352826403eb271d08fb83cfcba93ca8d1345cbd4d167cbcd2f6221ac0793ed4", size = 274080, upload-time = "2026-10-20T16:50:50.925Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/06/0e58341ca8626156e740d5bd0ab5de80259f1fb334fac649b8cd661fe984/uselayer-0.17.0-py3-none-any.whl", hash = "sha256:9134214b05b76c74e5a2c6b36e5392e93902874d6d07e72b86d2c9b21987dba4", size = 274658, upload-time = "2026-10-21T21:30:59.33Z" },
 ]
 
 [[package]]

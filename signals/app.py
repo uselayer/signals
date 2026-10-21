@@ -3480,22 +3480,19 @@ def my_watchlist(response: Response, uid: str = Depends(signed_in)) -> dict[str,
 
 
 # What "Follow a trader" takes: a wallet, a Polymarket profile link (polymarket.com/profile/0x…, which names the wallet)
-# or a username (with its @, or a polymarket.com/@name link). A username is looked up on Polymarket (the SDK's
-# ``search_traders``, uselayer-sdk#44: one read on the checks' budget, kept FIND_TTL_S), exact match first, then the
-# directory's wallets whose name matches; with an SDK from before it, the directory only.
+# or a username (with its @, or a polymarket.com/@name link). A username is looked up on Polymarket (uselayer 0.17's
+# ``search_traders``: one read on the checks' budget, kept FIND_TTL_S), exact match first, then the directory's wallets
+# whose name matches.
 _PROFILE_NAME = re.compile(r"(?:polymarket\.com/)?@([A-Za-z0-9_.-]{2,64})/?(?:\?.*)?$")
 FIND_LIMIT = 8
 FIND_TTL_S = 300
 
 
 def _search_polymarket(name: str) -> list[dict[str, Any]]:
-    """Polymarket traders by username (the SDK's ``search_traders``), or [] when this SDK hasn't got it or the read
-    failed: the directory's matches still show."""
-    search = getattr(checker(), "search_traders", None)
-    if search is None:
-        return []
+    """Polymarket traders by username (the SDK's ``search_traders``), or [] when the read failed: the directory's
+    matches still show."""
     try:
-        found = cached(f"search:{name.lower()}", FIND_TTL_S, lambda: search(name, limit=FIND_LIMIT))
+        found = cached(f"search:{name.lower()}", FIND_TTL_S, lambda: checker().search_traders(name, limit=FIND_LIMIT))
     except VenueError:
         return []
     return [{"wallet": t.id.lower(), "name": t.name} for t in found]
