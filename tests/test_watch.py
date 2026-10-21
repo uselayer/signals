@@ -178,7 +178,11 @@ def test_a_full_positions_list_reads_the_outcomes_they_traded_that_it_left_out(a
 def test_follow_a_trader_finds_a_pasted_wallet_or_link_or_a_name(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     for text in (W, W.upper().replace("0X", "0x"), f"https://polymarket.com/profile/{W}?tab=activity"):
         assert api.get("/api/find", params={"q": text}).json()["wallet"] == W
+    from uselayer import Trader, VenueError
+
     asked: list[str] = []
+    searched: list[str] = []
+    on_polymarket: list[Trader] = []
 
     class Dir:
         def leaderboard(self, *a: Any, q: str = "", **k: Any) -> dict[str, Any]:
@@ -188,29 +192,31 @@ def test_follow_a_trader_finds_a_pasted_wallet_or_link_or_a_name(api: TestClient
         def wallet(self, w: str) -> None:
             return None
 
+    class Search:  # uselayer 0.17's search_traders: Polymarket's own username search
+        def search_traders(self, name: str, *, limit: int = 5) -> list[Trader]:
+            searched.append(name)
+            if name == "down":
+                raise VenueError("http_error", "Polymarket didn't answer.", venue="polymarket")
+            return on_polymarket
+
     monkeypatch.setattr(engine, "directory", lambda: Dir())
+    monkeypatch.setattr(engine, "checker", lambda: Search())
+    # nobody by that name on Polymarket: the directory's matches
     for text in ("northpaw", "https://polymarket.com/@northpaw", "@northpaw"):
         d = api.get("/api/find", params={"q": text}).json()
         assert d["wallet"] is None and d["results"] == [{"wallet": W, "name": "northpaw", "profit_30d": 6200.0}]
-    assert asked == ["northpaw"]  # kept: the same name isn't searched again
+    assert asked == searched == ["northpaw"]  # kept: the same name isn't searched again
     assert api.get("/api/find", params={"q": "n"}).status_code == 400
-
-    # with uselayer's search_traders (uselayer-sdk#44): Polymarket's usernames first, then the directory's, each once
-    from uselayer import Trader
-
-    searched: list[str] = []
-
-    class Search:
-        def search_traders(self, name: str, *, limit: int = 5) -> list[Trader]:
-            searched.append(name)
-            return [Trader(venue="polymarket", id="0x" + "EE" * 20, name="NorthPaw"), Trader(venue="polymarket", id=W, name="northpaw")]
-
-    monkeypatch.setattr(engine, "checker", lambda: Search())
+    # Polymarket's usernames first, then the directory's, each wallet once (with the directory's profit)
+    on_polymarket[:] = [Trader(venue="polymarket", id="0x" + "EE" * 20, name="NorthPaw"),
+                        Trader(venue="polymarket", id=W, name="northpaw")]  # fmt: skip
     engine._cache.clear()
     d = api.get("/api/find", params={"q": "https://polymarket.com/@NorthPaw?tab=positions"}).json()
     assert d["results"] == [{"wallet": "0x" + "ee" * 20, "name": "NorthPaw", "profit_30d": None},
                             {"wallet": W, "name": "northpaw", "profit_30d": 6200.0}]  # fmt: skip
-    assert searched == ["NorthPaw"]
+    assert searched[-1] == "NorthPaw"
+    # Polymarket not answering: the directory's matches still show
+    assert api.get("/api/find", params={"q": "down"}).json()["results"] == [{"wallet": W, "name": "northpaw", "profit_30d": 6200.0}]
 
 
 def test_the_watchlist_is_yours_and_reads_nothing(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
