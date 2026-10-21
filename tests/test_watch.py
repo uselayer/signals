@@ -195,6 +195,23 @@ def test_follow_a_trader_finds_a_pasted_wallet_or_link_or_a_name(api: TestClient
     assert asked == ["northpaw"]  # kept: the same name isn't searched again
     assert api.get("/api/find", params={"q": "n"}).status_code == 400
 
+    # with uselayer's search_traders (uselayer-sdk#44): Polymarket's usernames first, then the directory's, each once
+    from uselayer import Trader
+
+    searched: list[str] = []
+
+    class Search:
+        def search_traders(self, name: str, *, limit: int = 5) -> list[Trader]:
+            searched.append(name)
+            return [Trader(venue="polymarket", id="0x" + "EE" * 20, name="NorthPaw"), Trader(venue="polymarket", id=W, name="northpaw")]
+
+    monkeypatch.setattr(engine, "checker", lambda: Search())
+    engine._cache.clear()
+    d = api.get("/api/find", params={"q": "https://polymarket.com/@NorthPaw?tab=positions"}).json()
+    assert d["results"] == [{"wallet": "0x" + "ee" * 20, "name": "NorthPaw", "profit_30d": None},
+                            {"wallet": W, "name": "northpaw", "profit_30d": 6200.0}]  # fmt: skip
+    assert searched == ["NorthPaw"]
+
 
 def test_the_watchlist_is_yours_and_reads_nothing(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     assert api.get("/api/me/watchlist").status_code == 401

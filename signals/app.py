@@ -3480,15 +3480,32 @@ def my_watchlist(response: Response, uid: str = Depends(signed_in)) -> dict[str,
 
 
 # What "Follow a trader" takes: a wallet, a Polymarket profile link (polymarket.com/profile/0x…, which names the wallet)
-# or a name the directory knows. Polymarket's own username links (polymarket.com/@name) are looked up by their name.
-_PROFILE_NAME = re.compile(r"(?:polymarket\.com/)?@([A-Za-z0-9_.-]{2,64})/?$")
+# or a username (with its @, or a polymarket.com/@name link). A username is looked up on Polymarket (the SDK's
+# ``search_traders``, uselayer-sdk#44: one read on the checks' budget, kept FIND_TTL_S), exact match first, then the
+# directory's wallets whose name matches; with an SDK from before it, the directory only.
+_PROFILE_NAME = re.compile(r"(?:polymarket\.com/)?@([A-Za-z0-9_.-]{2,64})/?(?:\?.*)?$")
 FIND_LIMIT = 8
+FIND_TTL_S = 300
+
+
+def _search_polymarket(name: str) -> list[dict[str, Any]]:
+    """Polymarket traders by username (the SDK's ``search_traders``), or [] when this SDK hasn't got it or the read
+    failed: the directory's matches still show."""
+    search = getattr(checker(), "search_traders", None)
+    if search is None:
+        return []
+    try:
+        found = cached(f"search:{name.lower()}", FIND_TTL_S, lambda: search(name, limit=FIND_LIMIT))
+    except VenueError:
+        return []
+    return [{"wallet": t.id.lower(), "name": t.name} for t in found]
 
 
 @app.get("/api/find")
 def find_trader(q: str = "") -> dict[str, Any]:
-    """Traders for "Follow a trader": the wallet a pasted address or profile link names, else the directory's wallets
-    whose name matches (no Polymarket read). ``wallet`` is set when the text named one wallet."""
+    """Traders for "Follow a trader": the wallet a pasted address or profile link names, else Polymarket's traders with
+    that username and the directory's whose name matches, each wallet once (with its 30-day trading profit when the
+    directory has it). ``wallet`` is set when the text named one wallet."""
     text = q.strip()[:200]
     m = re.search(r"0x[0-9a-fA-F]{40}", text)
     if m:
@@ -3503,9 +3520,11 @@ def find_trader(q: str = "") -> dict[str, Any]:
                       lambda: directory().leaderboard("30d", "profit", q=name, new=True, limit=FIND_LIMIT)["rows"])  # fmt: skip
     except (sqlite3.Error, OSError):
         rows = []
-    return {"wallet": None, "results": [{"wallet": r["wallet"], "name": r.get("name"),
-                                         "profit_30d": ((r.get("periods") or {}).get("30d") or {}).get("trading_pnl")}
-                                        for r in rows]}  # fmt: skip
+    known = {r["wallet"]: ((r.get("periods") or {}).get("30d") or {}).get("trading_pnl") for r in rows}
+    out: dict[str, dict[str, Any]] = {}
+    for t in _search_polymarket(name) + [{"wallet": r["wallet"], "name": r.get("name")} for r in rows]:
+        out.setdefault(t["wallet"], {"wallet": t["wallet"], "name": t["name"], "profit_30d": known.get(t["wallet"])})
+    return {"wallet": None, "results": list(out.values())[:FIND_LIMIT]}
 
 
 @app.post("/api/me/telegram")
