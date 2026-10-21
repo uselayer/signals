@@ -1,0 +1,42 @@
+Boards read 2026-10-21 14:34 local; 206 wallets pulled
+
+=== daily board (24h, window from 2026-10-20 14:00 local), 100 traders
+1. Board profit $2,511,704, of which unrealized $1,934,241 (77%)
+   Closed trades in the window lost money: 22/100 (22%)
+   More than half the profit unsold: 69/100 (69%)
+2. Biggest single coin is ≥ 50% of their gains in the window: 72/80 (90%); median share 93%
+3. Wallets with ≥ 20 closed positions before the window: 85/100 (85%)
+   Made money before the window: 42/85 (49%); still positive without their best coin: 31/85 (36%)
+   Median total -$4,136, median without best coin -$13,443
+   Median win rate 32%; median share of money in winners 36%; median best coin = 19% of all gains
+   Median closed positions 257
+4. Fewer than 5 positions in all: 4/100 (4%); median share of positions with tokens that arrived without a buy 6%
+   Capped at 5,000 positions: 18
+
+=== weekly board (7d, window from 2026-10-14 14:00 local), 100 traders
+1. Board profit $6,663,088, of which unrealized $5,020,424 (75%)
+   Closed trades in the window lost money: 27/100 (27%)
+   More than half the profit unsold: 64/100 (64%)
+2. Biggest single coin is ≥ 50% of their gains in the window: 70/94 (74%); median share 81%
+3. Wallets with ≥ 20 closed positions before the window: 82/100 (82%)
+   Made money before the window: 44/82 (54%); still positive without their best coin: 40/82 (49%)
+   Median total $22,521, median without best coin -$687
+   Median win rate 33%; median share of money in winners 38%; median best coin = 14% of all gains
+   Median closed positions 548
+4. Fewer than 5 positions in all: 3/100 (3%); median share of positions with tokens that arrived without a buy 7%
+   Capped at 5,000 positions: 26
+
+=== monthly board (30d, window from 2026-09-21 14:00 local), 100 traders
+1. Board profit $11,836,056, of which unrealized $2,648,652 (22%)
+   Closed trades in the window lost money: 11/100 (11%)
+   More than half the profit unsold: 21/100 (21%)
+2. Biggest single coin is ≥ 50% of their gains in the window: 27/100 (27%); median share 8%
+3. Wallets with ≥ 20 closed positions before the window: 85/100 (85%)
+   Made money before the window: 75/85 (88%); still positive without their best coin: 71/85 (84%)
+   Median total $210,893, median without best coin $201,881
+   Median win rate 76%; median share of money in winners 84%; median best coin = 2% of all gains
+   Median closed positions 2827
+   Verdict (pre-registered lines): SKILL-LIKE
+4. Fewer than 5 positions in all: 1/100 (1%); median share of positions with tokens that arrived without a buy 5%
+   Capped at 5,000 positions: 55
+
