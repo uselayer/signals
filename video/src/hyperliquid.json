@@ -1,91 +1,46 @@
 {
   "sample": false,
-  "asOf": "Oct 22, 7:03 AM PT",
+  "asOf": "Oct 22, 7:35 AM PT",
   "league": "Europa League",
-  "kickoff": "Oct 22, 12:00 PM PT",
+  "kickoff": "Oct 22",
+  "venues": ["kalshi", "polymarket", "hyperliquid"],
+  "titles": {
+    "kalshi": "Bournemouth vs Milan — BOU vs ACM (Oct 22)",
+    "polymarket": "Will AFC Bournemouth win on 2026-10-22?",
+    "hyperliquid": "UEFA Europa League Matchday 3: Bournemouth AFC v AC Milan"
+  },
   "kalshi": {
-    "title": "Bournemouth vs Milan — BOU vs ACM (Oct 22)",
     "rule": "…after 90 minutes plus stoppage time (does not include extra time or penalties)",
     "mark": "90 minutes plus stoppage time"
   },
   "hyperliquid": {
-    "title": "UEFA Europa League Matchday 3: Bournemouth AFC v AC Milan",
     "rule": "The Counted Play is regulation time, 90 minutes plus stoppage time.",
     "mark": "90 minutes plus stoppage time"
   },
   "outcomes": [
-    {
-      "kalshi": "Bournemouth",
-      "kalshiBidAsk": [
-        49,
-        50
-      ],
-      "hyperliquid": "Bournemouth AFC",
-      "hyperliquidBidAsk": [
-        49.4,
-        49.7
-      ]
-    },
-    {
-      "kalshi": "Tie",
-      "kalshiBidAsk": [
-        24,
-        25
-      ],
-      "hyperliquid": "Draw",
-      "hyperliquidBidAsk": [
-        24.9,
-        25.7
-      ]
-    },
-    {
-      "kalshi": "Milan",
-      "kalshiBidAsk": [
-        26,
-        27
-      ],
-      "hyperliquid": "AC Milan",
-      "hyperliquidBidAsk": [
-        25.0,
-        25.8
-      ]
-    }
+    { "kalshi": ["Bournemouth", 50, 51], "polymarket": ["AFC Bournemouth", 50, 51], "hyperliquid": ["Bournemouth AFC", 50.1, 50.7] },
+    { "kalshi": ["Tie", 24, 25], "polymarket": ["Draw", 25, 26], "hyperliquid": ["Draw", 24.9, 25.5] },
+    { "kalshi": ["Milan", 24, 25], "polymarket": ["AC Milan", 24, 25], "hyperliquid": ["AC Milan", 24.1, 24.8] }
   ],
-  "basis": "identical",
-  "confidence": 0.92,
+  "verdict": "same game on all three · identical · joined through Kalshi",
   "code": [
-    "curl -G https://uselayer.sh/v0/matches \\",
-    "  -H \"Authorization: Bearer $LAYER_API_KEY\" \\",
-    "  -d venue=hyperliquid -d q=bournemouth"
+    "for venue in polymarket hyperliquid; do",
+    "  curl -G https://uselayer.sh/v0/matches \\",
+    "    -H \"Authorization: Bearer $LAYER_API_KEY\" \\",
+    "    -d venue=$venue -d q=bournemouth",
+    "done"
   ],
   "response": [
-    "{",
-    "  \"count\": 3,",
-    "  \"matches\": [{",
-    "    \"kalshi\": {",
-    "      \"market_id\": \"KXUELGAME-26OCT22BOUACM-TIE\",",
-    "      \"outcome\": \"Tie\" },",
-    "    \"hyperliquid\": {",
-    "      \"market_id\": \"#141840\",",
-    "      \"series\": \"uefa-europa-league\" },",
-    "    \"basis\": \"identical\",",
-    "    \"confidence\": 0.92,",
-    "    \"caveats\": []",
-    "  }, ...]",
-    "}"
+    "// venue=polymarket",
+    "{ \"kalshi\": { \"market_id\": \"KXUELGAME-26OCT22BOUACM-TIE\" },",
+    "  \"polymarket\": { \"slug\": \"uel-bou-mil1-2026-10-22-draw\" },",
+    "  \"basis\": \"identical\", \"confidence\": 0.95, \"caveats\": [] }",
+    "",
+    "// venue=hyperliquid",
+    "{ \"kalshi\": { \"market_id\": \"KXUELGAME-26OCT22BOUACM-TIE\" },",
+    "  \"hyperliquid\": { \"market_id\": \"#141840\" },",
+    "  \"basis\": \"identical\", \"confidence\": 0.92, \"caveats\": [] }"
   ],
-  "highlight": [
-    "\"basis\"",
-    "\"caveats\""
-  ],
-  "leagues": [
-    "NBA",
-    "NFL",
-    "Premier League",
-    "La Liga",
-    "Serie A",
-    "Champions League",
-    "Europa League",
-    "LoL esports"
-  ]
+  "highlight": ["\"basis\""],
+  "leagues": ["NBA", "NFL", "Premier League", "La Liga", "Serie A", "Champions League", "Europa League", "LoL esports"]
 }
