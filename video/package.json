@@ -6,7 +6,8 @@
     "pull": "node scripts/pull.mjs",
     "studio": "remotion studio",
     "render": "remotion render TraderStory out/trader-story.mp4",
-    "still": "remotion still TraderStory out/frame.png"
+    "still": "remotion still TraderStory out/frame.png",
+    "render:hl": "remotion render SameGame out/same-game.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.534",

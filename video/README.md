@@ -5,11 +5,16 @@ Short videos for X, made with [Remotion](https://www.remotion.dev) (React → MP
 `TraderStory` (20 s, 1080×1350): "Lucky or good?" — one Leaderboard trader's record, then the alert you'd get
 when they buy. Every number comes from `src/data.json`.
 
+`SameGame` (23 s, 1080×1350, for Layer's account, in Layer's site colours): "Same game?" — one real Hyperliquid ↔
+Kalshi pair: different names, same outcomes, prices a cent apart, the same rule quoted from both, then the API call.
+Every fact comes from `src/hyperliquid.json`; set its `"sample": true` and a red band marks every frame as not real.
+
 ```sh
 npm install
 npm run pull -- Kch-Temp   # a Leaderboard name or wallet: refreshes src/data.json from usesignals.app
 npm run studio             # preview and scrub in the browser
 npm run render             # out/trader-story.mp4
+npm run render:hl          # out/same-game.mp4
 ```
 
 Sound: `public/tick.wav` and `public/ping.wav` are made with ffmpeg. Music is `public/music.mp3`, not in git
