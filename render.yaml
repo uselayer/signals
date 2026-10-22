@@ -1,0 +1,46 @@
+# usesignals.app's engine on Render (README, "Hosting"; moving the store in: deploy/render/README.md).
+# One instance with a disk at /data for the store: Render stops the old instance before starting a new one, so two
+# never write the store at once (and a deploy has a few seconds' gap). Deploys are the owner's: nothing deploys on a
+# commit; "Manual Deploy" in the dashboard, or `render deploys create <service id>`, deploys main's latest commit.
+services:
+  - type: web
+    name: signals
+    runtime: docker
+    repo: https://github.com/uselayer/signals
+    branch: main
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    plan: 1c-2g # 1 CPU, 2 GB (Standard): the engine settles near 0.7 GB with MALLOC_ARENA_MAX=2
+    numInstances: 1 # a service with a disk can't scale
+    healthCheckPath: /
+    autoDeployTrigger: "off"
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 10 # the store is ~0.7 GB (directory.db most of it); a disk grows but never shrinks
+    envVars:
+      # Signals' switches, as they were on Railway (2026-10-22)
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: SIGNALS_DIRECTORY
+        value: "0"
+      - key: SIGNALS_EXPLORE
+        value: "1"
+      - key: SIGNALS_EVALUATE
+        value: "1"
+      - key: SIGNALS_DISCOVERY
+        value: directory
+      # Keys: asked for once, when the Blueprint is created; never in this file. Leave TELEGRAM_BOT_TOKEN empty until
+      # the store is moved in and usesignals.app points here (deploy/render/README.md), so only one bot runs at a time.
+      - key: LAYER_API_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: SIGNALS_METRICS_KEY
+        sync: false
+      - key: CLERK_PUBLISHABLE_KEY
+        sync: false
+      - key: SIGNALS_POSTHOG_KEY
+        sync: false
+      - key: USELAYER_POLYGON_RPC
+        sync: false

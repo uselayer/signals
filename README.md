@@ -149,9 +149,10 @@ while Layer can't be read (or the index is over 45 minutes old) trades make no U
 
 usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
 
-- **Railway** runs the engine from the `Dockerfile` (one process, `railway.json`), with a volume at `/data` for
-  the store. Set `LAYER_API_KEY` in the service's variables; keys never reach the browser.
-- **Vercel** holds the domain and forwards every request to Railway (`web/vercel.json`, deployed from `web/`).
+- **Render** runs the engine from the `Dockerfile` (one process, `render.yaml`), with a disk at `/data` for the
+  store. Keys (`LAYER_API_KEY` and the rest) are set in the service's Environment; keys never reach the browser.
+  Railway ran it until October 2026 (`railway.json`); moving the store over is `deploy/render/README.md`.
+- **Vercel** holds the domain and forwards every request to the engine (`web/vercel.json`, deployed from `web/`).
   Caching is off there.
 - **Signing in, for the Feed and to follow traders** (off until its keys are set; while off, nothing is gated):
   Clerk, with Google and Telegram. The page loads Clerk from the Frontend API its publishable key names, and sends
@@ -257,7 +258,7 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
   the wallet has no Polymarket profile (`no_profile`, next to the alerts' "Check your price" taps for scale). To
   read the summary:
   - locally: `curl http://127.0.0.1:8790/api/metrics` (from the same machine only);
-  - hosted: the owner sets `SIGNALS_METRICS_KEY` in Railway's variables, then
+  - hosted: the owner sets `SIGNALS_METRICS_KEY` in the engine's Environment on Render, then
     `curl -H "Authorization: Bearer $SIGNALS_METRICS_KEY" https://usesignals.app/api/metrics`. Without the key
     it answers 404; with no key set it's closed. `?days=7` changes the period (default 30).
 - **Analytics** (how people use the page; off until `SIGNALS_POSTHOG_KEY` is set): PostHog, the same as
@@ -273,7 +274,7 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
 
 ### Setting up sign-in and alerts (owner)
 
-1. **Telegram bot**: in Telegram, @BotFather → `/newbot`. Put its token in Railway as `TELEGRAM_BOT_TOKEN`.
+1. **Telegram bot**: in Telegram, @BotFather → `/newbot`. Put its token in the engine's Environment on Render as `TELEGRAM_BOT_TOKEN`.
 2. **Clerk**: in the Clerk dashboard, turn on Google (a production instance needs your own Google OAuth
    credentials) and make email optional (Telegram doesn't share one). Add Telegram as a custom provider
    (SSO connections → Add connection → For all users → Custom provider): discovery endpoint
@@ -281,7 +282,7 @@ usesignals.app is the same engine, run with `SIGNALS_HOSTED=1`:
    @BotFather → your bot → Login Widget, where you also add Clerk's authorized redirect URL as an Allowed URL.
 3. **Domain**: a Clerk production instance asks for DNS records on usesignals.app (its Frontend API, such as
    `clerk.usesignals.app`); add them where the domain's DNS is managed.
-4. **Railway**: set `CLERK_PUBLISHABLE_KEY` (pk_live_…). No Clerk secret key is needed. `SIGNALS_SITE`
+4. **Render**: set `CLERK_PUBLISHABLE_KEY` (pk_live_…). No Clerk secret key is needed. `SIGNALS_SITE`
    (default `https://usesignals.app`) is the origin sign-ins must come from.
 
 ## Good to know

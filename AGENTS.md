@@ -3,7 +3,7 @@
 Signals, on the uselayer SDK: signal discovery and trading intelligence, not a copy-trading app. Top traders on
 Polymarket (Kalshi too when switched on, see below), a page per trader, cross-venue links (with Kalshi on), and
 for every open trade what buying it now would really cost. It runs on the user's
-machine (`uv run signals`) and is hosted at usesignals.app: the same engine with `SIGNALS_HOSTED=1` on Railway,
+machine (`uv run signals`) and is hosted at usesignals.app: the same engine with `SIGNALS_HOSTED=1` on Render,
 behind Vercel (see README, "Hosting").
 
 - All venue reads, links and copies go through `client.whales` in the SDK. Don't add venue calls or matching
@@ -32,7 +32,7 @@ behind Vercel (see README, "Hosting").
   (`big_trades(venues=…)`, `top(venue=…)`), and a venue that's off is refused, never read and then hidden. The
   page gets it from `/api/config` and hides Kalshi's views (Top profit's venue choice, Kalshi trader pages,
   "Same person on the other venue?") while it's off.
-- Keys come from the environment (hosted: Railway's service variables), are never logged, returned by the
+- Keys come from the environment (hosted: the Render service's Environment), are never logged, returned by the
   engine or written to disk.
 - Trader directory (README, "Trader directory"): wallets found, and where, in the store's `directory.db`, with
   each one's evaluation (status, last scored, last active) and every score worked out. Found is not checked and
@@ -141,7 +141,7 @@ behind Vercel (see README, "Hosting").
   from it ("Traded 14:02 UTC, 6 min before this alert."). The engine checks Clerk's session token itself (public keys,
   no Clerk secret). Never let one account see or change another's follows, and never let an answer about a
   signed-in person be cached.
-- Deploys and changes to the hosting (Railway, Vercel, the domain) only when the owner asks.
+- Deploys and changes to the hosting (Render, Vercel, the domain) only when the owner asks.
 - Never say a link *is* someone: show the tier ("likely" / "possible") and the evidence.
 - The page is a consumer app, not an analyst's spreadsheet. It helps people find traders worth following and
   understand why: who they are, how they trade, and what the evidence does and doesn't show. Before anyone buys,
@@ -271,17 +271,14 @@ behind Vercel (see README, "Hosting").
 
 ## Deploying (only when the owner asks)
 
-- **Engine** (Railway project and service `signals`): `railway up --service signals` from the repo root. It
-  builds the `Dockerfile`; the store is on the service's volume at `/data`. A deploy restarts the server, and a
+- **Engine** (Render service `signals`, from `render.yaml`): nothing deploys on a commit. The owner deploys main's
+  latest commit with Manual Deploy in Render's dashboard, or `render deploys create <service id>`. It builds the
+  `Dockerfile`; the store is on the service's disk at `/data`. A deploy stops the server for a few seconds, and a
   Worth following check that hasn't finished starts over (20–30 min).
-- **From a worktree** (`.claude/worktrees/…`), run `railway up . --path-as-root --service signals`. Without
-  `--path-as-root` it uploads the linked folder (the owner's main checkout), which can be stale: this briefly
-  put old code live on 12 Oct.
 - **After any deploy**, check the live page actually serves the new code: fetch https://usesignals.app and look
   for something only the new code has.
 - **Forwarding layer** (Vercel project `signals`, holds usesignals.app): `vercel deploy --prod` inside `web/`.
-  Only needed when `web/vercel.json` changes.
-- A new checkout or folder isn't linked yet: run `railway link` (project and service `signals`) in the repo root
-  and `vercel link --project signals` in `web/` first.
-- Keys are set by the owner in Railway's service variables, never by a session.
-- `railway.json` works until 2026-12-01; after that Railway needs `railway config migrate`.
+  Only needed when `web/vercel.json` changes. A new folder isn't linked yet: `vercel link --project signals` in `web/`.
+- Keys are set by the owner in the Render service's Environment, never by a session.
+- Railway ran the engine until October 2026 (`railway.json`, `railway up . --path-as-root --service signals`); the
+  move to Render is `deploy/render/README.md`. Until usesignals.app points at Render, deploys still go to Railway.
