@@ -167,16 +167,18 @@ const Row = ({ venue, delay, bg, children, last }:
   );
 };
 
-type Venue = "kalshi" | "polymarket" | "hyperliquid";
+type Venue = "kalshi" | "polymarket" | "polymarket_us" | "hyperliquid";
 const VENUE_ROWS = data.venues as Venue[];
+const NAME: Record<Venue, string> = { kalshi: "kalshi", polymarket: "polymarket", polymarket_us: "polymarket us",
+  hyperliquid: "hyperliquid" };
 
 const Card = () => (
   <Scene len={NAMES - CARD}>
-    <Rise><Label>one game, three venues · {data.league} · {data.kickoff}</Label></Rise>
+    <Rise><Label>one game, {["", "one", "two", "three", "four"][VENUE_ROWS.length]} venues · {data.league} · {data.kickoff}</Label></Rise>
     <div style={{ border: `2px solid ${C.ink}`, marginTop: 28 }}>
       {VENUE_ROWS.map((v, i) => (
-        <Row key={v} venue={v} delay={8 + i * 12}>
-          <div style={{ fontSize: 36, lineHeight: 1.2, letterSpacing: "-0.02em" }}>{data.titles[v]}</div>
+        <Row key={v} venue={NAME[v]} delay={8 + i * 10}>
+          <div style={{ fontSize: 36, lineHeight: 1.2, letterSpacing: "-0.02em" }}>{(data.titles as Record<string, string>)[v]}</div>
         </Row>
       ))}
       <Row venue="layer" delay={50} bg={C.accent}>
@@ -191,45 +193,50 @@ const Card = () => (
   </Scene>
 );
 
-// Each outcome on all three venues, threaded by the line Layer draws, prices underneath. Kalshi and Polymarket
-// quote whole cents, Hyperliquid tenths.
-const DP: Record<Venue, number> = { kalshi: 0, polymarket: 0, hyperliquid: 1 };
-const Outcome = ({ o, delay }: { o: (typeof data.outcomes)[number]; delay: number }) => {
+// Each outcome on every venue: a row per venue, a column per outcome, and a yellow thread drawn down each column
+// because it's the same outcome all the way down. Kalshi and both Polymarkets quote whole cents, Hyperliquid hundredths.
+const DP: Record<Venue, number> = { kalshi: 0, polymarket: 0, polymarket_us: 0, hyperliquid: 2 };
+const GRID = "196px 1fr 1fr 1fr";
+
+const Names = () => {
   const f = useCurrentFrame();
-  const t = ease(f, delay, 16), line = ease(f, delay + 10, 22);
+  const thread = ease(f, 70, 30);
   return (
-    <div style={{ position: "relative", display: "grid", gridTemplateColumns: "1fr 1fr 1fr", opacity: t,
-      padding: "26px 0", borderTop: `2px solid ${C.rule}` }}>
-      <div style={{ position: "absolute", left: 0, top: 50, height: 2, width: `${line * 100}%`, background: C.accent }} />
-      {VENUE_ROWS.map((v, i) => {
-        const [name, bid, ask] = o[v] as [string, number, number];
-        return (
-          <div key={v} style={{ textAlign: (["left", "center", "right"] as const)[i], position: "relative" }}>
-            <span style={{ fontSize: 36, letterSpacing: "-0.02em", whiteSpace: "nowrap", background: C.paper,
-              padding: i === 1 ? "0 12px" : i ? "0 0 0 12px" : "0 12px 0 0" }}>{name}</span>
-            <div style={{ fontFamily: MONO, fontSize: 24, color: C.muted, marginTop: 8 }}>
-              {cents(bid, DP[v])} / {cents(ask, DP[v])}
+    <Scene len={RULES - NAMES}>
+      <H size={96}>Different names.</H>
+      <div style={{ position: "relative", marginTop: 48 }}>
+        {data.outcomes.map((_, c) => (
+          <div key={c} style={{ position: "absolute", top: 0, width: 4, height: `${thread * 100}%`, background: C.accent,
+            left: `calc(196px + (100% - 196px) * ${(c + 0.5) / 3} - 2px)` }} />
+        ))}
+        {VENUE_ROWS.map((v, r) => {
+          const t = ease(f, 12 + r * 10, 16);
+          return (
+            <div key={v} style={{ position: "relative", display: "grid", gridTemplateColumns: GRID, alignItems: "center",
+              borderTop: `2px solid ${C.ink}`, padding: "18px 0", opacity: t, transform: `translateY(${(1 - t) * 24}px)` }}>
+              <Label>{NAME[v]}</Label>
+              {data.outcomes.map((o, c) => {
+                const [name, bid, ask] = (o as Record<string, unknown>)[v] as [string, number, number];
+                return (
+                  <div key={c} style={{ textAlign: "center", padding: "0 6px" }}>
+                    <span style={{ fontSize: 30, lineHeight: 1.15, letterSpacing: "-0.02em", background: C.paper,
+                      padding: "2px 6px", boxDecorationBreak: "clone" }}>{name}</span>
+                    <div style={{ fontFamily: MONO, fontSize: 21, color: C.muted, marginTop: 6 }}>
+                      <span style={{ background: C.paper, padding: "0 6px" }}>{cents(bid, DP[v])} / {cents(ask, DP[v])}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        );
-      })}
-    </div>
+          );
+        })}
+        <div style={{ borderTop: `2px solid ${C.ink}` }} />
+      </div>
+      <Label style={{ marginTop: 12 }}>bid / ask</Label>
+      <Rise delay={96} style={{ marginTop: 36 }}><H size={84}>Same outcomes. Prices <Mark text="about a cent apart." delay={108} /></H></Rise>
+    </Scene>
   );
 };
-
-const Names = () => (
-  <Scene len={RULES - NAMES}>
-    <H size={96}>Different names.</H>
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", marginTop: 56, marginBottom: 14 }}>
-      {VENUE_ROWS.map((v, i) => (
-        <Label key={v} style={{ textAlign: (["left", "center", "right"] as const)[i] }}>{v}</Label>
-      ))}
-    </div>
-    {data.outcomes.map((o, i) => <Outcome key={o.kalshi[0] as string} o={o} delay={14 + i * 14} />)}
-    <Label style={{ marginTop: 12 }}>bid / ask</Label>
-    <Rise delay={84} style={{ marginTop: 40 }}><H size={88}>Same outcomes. Prices <Mark text="about a cent apart." delay={96} /></H></Rise>
-  </Scene>
-);
 
 const Rule = ({ venue, m, delay }: { venue: string; m: { rule: string; mark: string }; delay: number }) => (
   <Rise delay={delay} style={{ borderTop: `2px solid ${C.ink}`, paddingTop: 24, marginTop: 44 }}>
