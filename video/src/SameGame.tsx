@@ -332,9 +332,10 @@ const Footer = () => (
   </div>
 );
 
-// Sound: the same tick and ping as TraderStory, and public/music.mp3 under it when there is one.
-const MUSIC_FROM = 15.95;
-const hasMusic = getStaticFiles().some((f) => f.name === "music.mp3");
+// Sound: the same tick and ping as TraderStory, and public/layer-music.mp3 under it when there is one: a 28 s trap
+// track made for this video with ElevenLabs Music (paid plan, so commercial use is allowed), kept out of git.
+const MUSIC = "layer-music.mp3";
+const hasMusic = getStaticFiles().some((f) => f.name === MUSIC);
 const TICKS: [number, number][] = [
   ...VENUES.map((_, i) => [PIPE + 14 + i * 6, 0.4] as [number, number]),  // each venue
   [PIPE + 50, 0.55],  // Layer
@@ -348,8 +349,8 @@ const Sound = () => {
   return (
     <>
       {hasMusic && (
-        <Audio src={staticFile("music.mp3")} trimBefore={Math.round(MUSIC_FROM * fps)}
-          volume={(f) => interpolate(f, [0, 3, SAME_GAME_DURATION - 30, SAME_GAME_DURATION], [0, 0.4, 0.4, 0], clamp)} />
+        <Audio src={staticFile(MUSIC)}
+          volume={(f) => interpolate(f, [0, 3, SAME_GAME_DURATION - 30, SAME_GAME_DURATION], [0, 0.55, 0.55, 0], clamp)} />
       )}
       {TICKS.map(([at, vol]) => (
         <Sequence key={at} from={at} durationInFrames={6}><Audio src={staticFile("tick.wav")} volume={vol} /></Sequence>
