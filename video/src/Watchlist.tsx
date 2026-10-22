@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
-import { AbsoluteFill, Audio, Easing, OffthreadVideo, Sequence, interpolate, spring, staticFile, useCurrentFrame,
-  useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, Easing, OffthreadVideo, Sequence, getStaticFiles, interpolate, spring, staticFile,
+  useCurrentFrame, useVideoConfig } from "remotion";
 import { loadFont } from "@remotion/fonts";
 import data from "./watchlist.json";
 import rec from "../public/watchlist/events.json";
@@ -184,12 +184,22 @@ const End = () => (
   </AbsoluteFill>
 );
 
-// Sound: ticks on the clicks and a ping when the alert lands (public/tick.wav, ping.wav). No music: the owner picks it.
+// Sound: ticks on the clicks and a ping when the alert lands (public/tick.wav, ping.wav), over the owner's pick of
+// music when public/watchlist-music.mp3 is there (not in git): "East Side Boulevard", from its drop at 62.59 s (a beat
+// of silence, then the full beat), so the video opens on it. It dips under the ping.
+const MUSIC_FROM = 62.58;
+const hasMusic = getStaticFiles().some((f) => f.name === "watchlist-music.mp3");
 const CLICKS = [ev.followSheet, ev.lookUp, ev.followed - 0.06, ev.picked].map((t) => frameOf(t - 0.09));
+const PING = ALERT + 22;
 const Sound = () => (
   <>
+    {hasMusic && (
+      <Audio src={staticFile("watchlist-music.mp3")} trimBefore={Math.round(MUSIC_FROM * FPS)}
+        volume={(f) => interpolate(f, [0, 2, PING - 4, PING, PING + 24, PING + 40, WATCHLIST_DURATION - 36, WATCHLIST_DURATION],
+          [0, 0.68, 0.68, 0.4, 0.4, 0.68, 0.68, 0], clamp)} />
+    )}
     {CLICKS.map((c) => <Sequence key={c} from={c} durationInFrames={6}><Audio src={staticFile("tick.wav")} volume={0.6} /></Sequence>)}
-    <Sequence from={ALERT + 22} durationInFrames={30}><Audio src={staticFile("ping.wav")} volume={1} /></Sequence>
+    <Sequence from={PING} durationInFrames={30}><Audio src={staticFile("ping.wav")} volume={1} /></Sequence>
   </>
 );
 
