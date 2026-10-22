@@ -3134,7 +3134,7 @@ def _watch(w: str) -> dict[str, Any]:
     oldest = min((t.at.timestamp() for t in trades), default=now)
     # the last WATCH_DAYS days, or less when their last WATCH_TRADES trades don't reach that far back
     since = max(now - WATCH_DAYS * 86400, oldest if len(trades) >= WATCH_TRADES else 0.0)
-    out = watch.view(trades, list(held.values()), since=since, now=now)
+    out = watch.view(trades, list(held.values()), since=since)
     out["moves"] = [m for m in out["moves"] if m["usd"] >= WATCH_MIN_USD][:WATCH_MOVES]  # dust fills aren't changes
     markets = list(dict.fromkeys(m["market"] for m in out["moves"]))
     try:
@@ -3151,9 +3151,8 @@ def _watch(w: str) -> dict[str, Any]:
 
 @app.get("/api/watch/{wallet}")
 def watch_trader(wallet: str, request: Request) -> dict[str, Any]:
-    """A trader's watch page (``_watch``): what they hold, what changed in it over the last WATCH_DAYS days and the
-    line of how they built what they hold now. No account needed, as a trader's page; kept WATCH_TTL_S, under "Check
-    now"'s limits (``limited_read``)."""
+    """A trader's watch page (``_watch``): what they hold and what changed in it over the last WATCH_DAYS days. No
+    account needed, as a trader's page; kept WATCH_TTL_S, under "Check now"'s limits (``limited_read``)."""
     w = _wallet_or_400(wallet)
     return limited_read(f"watch:{w}", WATCH_TTL_S, w, request, lambda: _watch(w))  # type: ignore[no-any-return]
 
@@ -3170,7 +3169,7 @@ def _watch_card(w: str, now: float) -> dict[str, Any]:
     if looked is not None and newest <= looked["read_at"]:
         moves, read_at = looked["moves"][:WATCH_CARD_MOVES], looked["read_at"]
     elif live is not None:
-        moves = watch.view(live[1].trades, None, since=now - WATCH_DAYS * 86400, now=now)["moves"][:WATCH_CARD_MOVES]
+        moves = watch.view(live[1].trades, None, since=now - WATCH_DAYS * 86400)["moves"][:WATCH_CARD_MOVES]
         read_at = now - (mono - live[0])
     else:
         moves, read_at = [], None

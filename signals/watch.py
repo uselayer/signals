@@ -86,16 +86,13 @@ def _walk_back(ms: list[Move], held_now: float | None) -> None:
         after = m.before
 
 
-def view(trades: list[Any], positions: list[Any] | None, *, since: float, now: float) -> dict[str, Any]:
+def view(trades: list[Any], positions: list[Any] | None, *, since: float) -> dict[str, Any]:
     """What a watch page shows. ``trades``: the SDK's WhaleTrade, any order; ``positions``: their open positions now
     (WhalePosition), or None when they weren't read (then every move is only "bought" or "sold"). ``since``: the oldest
     time shown (unix seconds).
 
     ``moves``: newest first, each with what it did (``kind``: KINDS), its dollars, contracts and average price, when,
-    and the facts its explanation needs. ``holdings``: what they hold now, biggest first. ``series``: what they hold now,
-    as they built it up: at each move since ``since``, the contracts they then held of what they hold now, at the
-    average price they paid for it (Polymarket's), so it ends at what they put in. Positions they no longer hold aren't
-    in it (their moves still are, as marks)."""
+    and the facts its explanation needs. ``holdings``: what they hold now, biggest first."""
     held = {p.market: p for p in positions or []}
     by_market = _moves(trades)
     for market, ms in by_market.items():
@@ -117,7 +114,7 @@ def view(trades: list[Any], positions: list[Any] | None, *, since: float, now: f
     out.sort(key=lambda m: m["at"], reverse=True)
 
     holdings = sorted((_holding(p) for p in held.values() if (p.size or 0) > 0), key=lambda h: -(h["put_in"] or 0))
-    return {"moves": out, "holdings": holdings, "series": _series(by_market, held, since, now) if positions is not None else [],
+    return {"moves": out, "holdings": holdings,
             "put_in": round(sum(h["put_in"] or 0 for h in holdings), 2) if positions is not None else None,
             "worth": round(sum(h["value"] or 0 for h in holdings), 2) if positions is not None else None}  # fmt: skip
 
@@ -164,22 +161,3 @@ def _holding(p: Any) -> dict[str, Any]:
             "now": p.current_price, "value": p.value, "pnl": p.pnl,
             "put_in": None if put_in is None else round(put_in, 2)}  # fmt: skip
 
-
-def _series(by_market: dict[str, list[Move]], held: dict[str, Any], since: float, now: float) -> list[list[Any]]:
-    """[[unix seconds, dollars], …]: at ``since``, then after each move in what they hold now, then now."""
-    steps: list[tuple[float, float]] = []  # (when, dollars it added at their average price)
-    total = 0.0
-    for market, p in held.items():
-        if not p.size or p.avg_price is None:
-            continue
-        total += p.size * p.avg_price
-        for m in by_market.get(market, []):
-            if m.at.timestamp() > since and m.before is not None and m.after is not None:
-                steps.append((m.at.timestamp(), (m.after - m.before) * p.avg_price))
-    start = total - sum(d for _, d in steps)
-    out, v = [[since, round(max(0.0, start), 2)]], start
-    for t, d in sorted(steps):
-        v += d
-        out.append([t, round(max(0.0, v), 2)])
-    out.append([now, round(total, 2)])
-    return out

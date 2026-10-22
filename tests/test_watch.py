@@ -50,7 +50,7 @@ POSITIONS = [held(LAKERS, LAKERS_SIZE, 0.30, 0.33), held(FED, 1850 / 0.62, 0.62,
 
 
 def the_view(positions: list[WhalePosition] | None = POSITIONS, since: timedelta = 30 * D) -> dict[str, Any]:
-    return watch.view(TRADES, positions, since=(NOW - since).timestamp(), now=NOW.timestamp())
+    return watch.view(TRADES, positions, since=(NOW - since).timestamp())
 
 
 def moves_of(v: dict[str, Any], market: str) -> list[dict[str, Any]]:
@@ -80,33 +80,23 @@ def test_each_move_says_what_it_did_to_their_position_from_what_they_hold_now() 
 def test_fills_far_apart_are_separate_moves_and_a_walk_back_never_goes_below_zero() -> None:
     trades = [fill(FED, "buy", 100, 0.5, 20 * H), fill(FED, "buy", 100, 0.5, 14 * H + 1 * M),  # one move: a resting order
               fill(FED, "buy", 100, 0.5, 8 * H)]  # just over 6 hours later: another  # fmt: skip
-    v = watch.view(trades, [held(FED, 600, 0.5, 0.5)], since=(NOW - D).timestamp(), now=NOW.timestamp())
+    v = watch.view(trades, [held(FED, 600, 0.5, 0.5)], since=(NOW - D).timestamp())
     assert [(m["kind"], m["usd"]) for m in v["moves"]] == [("added", 100), ("new", 200)]
     # a split or merge (not a trade) left them holding less than their buys add up to: zero, never negative
-    v = watch.view(trades, [held(FED, 100, 0.5, 0.5)], since=(NOW - D).timestamp(), now=NOW.timestamp())
+    v = watch.view(trades, [held(FED, 100, 0.5, 0.5)], since=(NOW - D).timestamp())
     assert [m["kind"] for m in v["moves"]] == ["new", "new"] and min(m["before"] for m in v["moves"]) == 0
 
 
 def test_without_their_positions_a_move_is_only_bought_or_sold() -> None:
     v = the_view(positions=None)
     assert {m["kind"] for m in v["moves"]} == {"bought", "sold"}
-    assert v["series"] == [] and v["holdings"] == [] and v["put_in"] is None
+    assert v["holdings"] == [] and v["put_in"] is None
 
 
-def test_the_line_ends_at_what_they_put_in_and_steps_at_each_move_in_what_they_hold() -> None:
+def test_what_they_hold_is_biggest_first_and_adds_up_to_what_they_put_in() -> None:
     v = the_view()
-    total = LAKERS_SIZE * 0.30 + 1850 + 1666.67 * 0.54
-    assert v["put_in"] == pytest.approx(total, abs=0.02)
-    assert [h["market"] for h in v["holdings"]] == [LAKERS, FED, CHIEFS]  # biggest first
-    s = v["series"]
-    assert s[0][0] == (NOW - 30 * D).timestamp() and s[-1] == [NOW.timestamp(), pytest.approx(total, abs=0.02)]
-    # before the 30 days: none of the Lakers, Fed or Chiefs bought yet, so nothing of what they hold now
-    assert s[0][1] == pytest.approx(0, abs=0.02)
-    assert [round(t) for t, _ in s[1:-1]] == sorted(round(t) for t, _ in s[1:-1])
-    # Arsenal and Bitcoin aren't held: their moves are listed but not in the line
-    assert len(s) == 2 + 3 + 2 + 1  # since, Lakers' 3 moves, the Chiefs' 2, the Fed's 1, now
-    # a shorter window starts the line at what they already held then
-    assert the_view(since=5 * D)["series"][0][1] == pytest.approx((1700 / 0.29 + 2000 / 0.30) * 0.30, abs=0.02)
+    assert v["put_in"] == pytest.approx(LAKERS_SIZE * 0.30 + 1850 + 1666.67 * 0.54, abs=0.02)
+    assert [h["market"] for h in v["holdings"]] == [LAKERS, FED, CHIEFS]
 
 
 # ---- the engine ----

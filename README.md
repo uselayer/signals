@@ -44,9 +44,9 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
 
 - **Watchlist** (signed in, like the Feed): the traders you follow (the same list as Follow, up to 20), a card each with
   their record, what they hold and their latest changes, and "+ Follow a trader" (paste a Polymarket profile link or
-  wallet, or type a name Signals knows). A trader's watch page (`#/watch/<wallet>`, no account needed) shows what they
-  hold now as they built it up, every change over the last 30 days (a new position, more bought, some sold, all sold)
-  and the facts that explain each one: what they did, where the position stands now, its size against their usual
+  wallet, or type a name Signals knows). A trader's watch page (`#/watch/<wallet>`, no account needed) shows their record,
+  every change over the last 30 days (a new position, more bought, some sold, all sold), what they hold now and the
+  facts that explain each one: what they did, where the position stands now, its size against their usual
   trade, their record in that category and the price now. Facts only, no AI write-up. The engine works the changes
   out from their last 500 trades and what they hold now (`/api/watch/<wallet>`, two reads on the checks' budget, kept
   30 seconds for everyone); the cards read nothing (`/api/me/watchlist`). "Since you last looked" is kept in your
