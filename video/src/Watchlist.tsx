@@ -185,27 +185,28 @@ const End = () => (
 );
 
 // Sound: ticks on the clicks and a ping when the alert lands (public/tick.wav, ping.wav), over the owner's pick of
-// music when public/watchlist-music.mp3 is there (not in git): "East Side Boulevard", from its drop at 62.59 s (a beat
-// of silence, then the full beat), so the video opens on it. It dips under the ping.
-const MUSIC_FROM = 62.58;
-const hasMusic = getStaticFiles().some((f) => f.name === "watchlist-music.mp3");
+// music when it's in public/ (not in git): `music` from `from` seconds, its drop, so the video opens on the beat, at
+// `gain`; it dips under the ping. The default is "East Side Boulevard" from 62.58 s (a beat of silence, then the full
+// beat); other tracks are props (npm run render:watchlist -- --props='{"music":"…","from":13.2}').
+export type WatchlistProps = { music: string; from: number; gain: number };
+export const WATCHLIST_DEFAULTS: WatchlistProps = { music: "watchlist-music.mp3", from: 62.58, gain: 0.68 };
 const CLICKS = [ev.followSheet, ev.lookUp, ev.followed - 0.06, ev.picked].map((t) => frameOf(t - 0.09));
 const PING = ALERT + 22;
-const Sound = () => (
+const Sound = ({ music, from, gain }: WatchlistProps) => (
   <>
-    {hasMusic && (
-      <Audio src={staticFile("watchlist-music.mp3")} trimBefore={Math.round(MUSIC_FROM * FPS)}
+    {getStaticFiles().some((f) => f.name === music) && (
+      <Audio src={staticFile(music)} trimBefore={Math.round(from * FPS)}
         volume={(f) => interpolate(f, [0, 2, PING - 4, PING, PING + 24, PING + 40, WATCHLIST_DURATION - 36, WATCHLIST_DURATION],
-          [0, 0.68, 0.68, 0.4, 0.4, 0.68, 0.68, 0], clamp)} />
+          [0, gain, gain, gain * 0.6, gain * 0.6, gain, gain, 0], clamp)} />
     )}
     {CLICKS.map((c) => <Sequence key={c} from={c} durationInFrames={6}><Audio src={staticFile("tick.wav")} volume={0.6} /></Sequence>)}
     <Sequence from={PING} durationInFrames={30}><Audio src={staticFile("ping.wav")} volume={1} /></Sequence>
   </>
 );
 
-export const Watchlist = () => (
+export const Watchlist = (music: WatchlistProps) => (
   <AbsoluteFill style={{ background: C.bg, color: C.fg, fontFamily: FONT }}>
-    <Sound />
+    <Sound {...music} />
     {SHOTS.map((s, i) => (
       <Sequence key={i} from={starts[i]} durationInFrames={len(i)}><ShotView shot={s} frames={len(i)} /></Sequence>
     ))}

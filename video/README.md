@@ -15,7 +15,8 @@ footage is `public/watchlist/app.mp4` (not in git; a copy is in `~/Desktop/Motio
 recorded from a local run of Signals by `npm run record:watchlist` (see the script's header for the run command and
 what it evens out against usesignals.app); `events.json` holds each step's time and the composition cuts on it, so a
 new recording re-times the video by itself. The alert is one real trade worded as Signals sends it (`src/watchlist.json`).
-No music: the owner picks the track.
+Music is the owner's pick, not in git: `public/watchlist-music.mp3` (East Side Boulevard) by default, or another track in
+`public/` from its drop, e.g. `npm run render:watchlist -- --props='{"music":"watchlist-music-traders.wav","from":81.85,"gain":0.68}'`.
 
 ```sh
 npm install
