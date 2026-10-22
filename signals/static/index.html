@@ -497,8 +497,8 @@
     .lb-nohist .lb-cons, .lb-nohist .lb-trend { display: none; } /* no profit history yet: nothing to show on a card */
   }
 
-  /* The Watchlist: a card per trader you follow. A trader's watch page: what they hold, as they built it up, then
-     each change beside the facts that explain it. Kinds of change are neutral labels (colour is only gains and losses). */
+  /* The Watchlist: a card per trader you follow. A trader's watch page: their record, each change beside the facts
+     that explain it, then what they hold. Kinds of change are neutral labels (colour is only gains and losses). */
   .wl-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 16px; }
   .wl-top h1 { font-size: 26px; }
   .wl-top .lede { margin: 4px 0 0; }
@@ -527,9 +527,6 @@
   .wl-pick .grow { flex: 1; min-width: 0; display: grid; }
   .wt-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-top: 20px; }
   .wt-tiles .tile { margin: 0; }
-  .wt-chart svg { width: 100%; height: auto; display: block; }
-  .wt-chart text { fill: var(--muted); font-size: 11px; font-family: inherit; }
-  .wt-mark { cursor: pointer; }
   .wt-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px 20px; align-items: start; margin-top: 16px; }
   .wt-grid > .pf-card { margin-top: 0; }
   .wt-list { padding: 0; overflow: hidden; }
@@ -3093,9 +3090,8 @@ async function followPreview(box, wallet) {
   $("a.btn", box)?.addEventListener("click", closeSheet);
 }
 
-// A trader's watch page: their record in a line of tiles, what they hold now as they built it up (the line steps at
-// each of their trades in it; every change is a dot), the changes beside what explains the one picked, then what they
-// hold now. Read again every 30 seconds while it's open.
+// A trader's watch page: their record in a line of tiles, the changes beside what explains the one picked, then what
+// they hold now. Read again every 30 seconds while it's open.
 const wt = { w: null, d: null, s: null, cats: null, sel: null, err: null, seen: null, sig: "" };
 async function watchPage(wallet) {
   Object.assign(wt, { w: wallet, d: null, s: null, cats: null, sel: null, err: null, seen: seenAt(wallet), sig: "" });
@@ -3139,10 +3135,6 @@ function renderWatch(force = false) {
         <div class="pf-tag">Read every 30 seconds · <span id="wtread">updated ${ago(d.read_at * 1000)}</span> · <a class="link" href="#/worth/${esc(w)}">Full profile</a> · ${profileLink(`https://polymarket.com/profile/${w}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(w)}"></div></div></div>
     <div class="wt-tiles">${watchTiles(d, s, wt.cats).map(([k, v, sub]) => `<div class="tile"><span>${esc(k)}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ""}</div>`).join("")}</div>
-    <section class="pf-card wt-chart"><div class="pf-card-head"><h2>What they hold now, as they built it up</h2></div>
-      ${watchChart(d)}
-      <div class="pf-legend"><span>● Bought</span><span>○ Sold</span><span>On the line: changes to what they still hold. Along the bottom: positions they've since closed.</span><span>Pick a dot to see it explained.</span></div>
-      <p class="pf-statnote">What they put into the positions they hold now, at the price they paid, over ${d.short ? `the ${period} their last ${d.trades_read.toLocaleString()} trades go back` : `the last ${period}`}. The line steps up when they buy more of something they still hold and down when they sell some of it.</p></section>
     <div class="wt-grid">
       <section class="pf-card wt-list"><div class="pf-card-head"><h2>Changes <small class="muted">${fresh ? `${fresh} new since you last looked` : `last ${period}`}</small></h2></div>
         ${d.moves.length ? d.moves.map((m) => moveRow(m)).join("") : `<p class="pf-empty" style="padding:0 18px 18px">No trades in the last ${period}.</p>`}</section>
@@ -3230,35 +3222,6 @@ function watchTiles(d, s, cats) {
   else if (best && best.usd > 0) tiles.push(["Best category", esc(best.category), `${pl(best.usd, usd(best.usd, true))} realized, all time`]);
   return tiles;
 }
-// What they hold now as they built it up: a step line (it steps at each of their trades in it), with a dot on it for each
-// change to what they still hold (filled: bought, hollow: sold): the changes that move it. Changes to positions they've
-// since closed don't move it, so their dots go in a lane along the bottom. Neutral: it's what they hold, not a gain or a loss.
-function watchChart(d) {
-  const pts = d.series || [];
-  if (pts.length < 2) return `<p class="pf-empty">Nothing to draw yet.</p>`;
-  // drawn at the width it's shown at, so its text and dots stay their size on a phone and a wide screen alike
-  const W = Math.max(300, Math.round(($("#app")?.clientWidth || 680) - 70)), H = W < 500 ? 230 : 270, L = 56, R = 12, T = 12, B = 56;
-  const lane = H - 30; // the lane for changes to positions they've since closed
-  const t0 = pts[0][0], t1 = Math.max(pts[pts.length - 1][0], t0 + 1);
-  const hi = Math.max(1, ...pts.map((p) => p[1])) * 1.08;
-  const X = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R), Y = (v) => T + (1 - v / hi) * (H - T - B);
-  let line = `${X(pts[0][0]).toFixed(1)},${Y(pts[0][1]).toFixed(1)}`;
-  for (let i = 1; i < pts.length; i++) line += ` ${X(pts[i][0]).toFixed(1)},${Y(pts[i - 1][1]).toFixed(1)} ${X(pts[i][0]).toFixed(1)},${Y(pts[i][1]).toFixed(1)}`;
-  const at = (t) => { let v = pts[0][1]; for (const p of pts) { if (p[0] <= t) v = p[1]; else break; } return v; };
-  const shown = d.moves.filter((m) => new Date(m.at) / 1000 >= t0);
-  const closed = shown.filter((m) => !m.held_now);
-  const dots = shown.map((m) => {
-    const t = new Date(m.at) / 1000, on = moveKey(m) === wt.sel, buy = m.action === "buy", r = m.held_now ? 5 : 3.5;
-    return `<circle class="wt-mark" data-move="${esc(moveKey(m))}" data-r="${r}" cx="${X(t).toFixed(1)}" cy="${(m.held_now ? Y(at(t)) : lane).toFixed(1)}" r="${on ? r + 2 : r}"
-      fill="${buy ? "var(--fg)" : "var(--card)"}" stroke="${on ? "var(--accent)" : "var(--fg)"}" stroke-width="${on ? 3 : 1.5}"><title>${esc(`${KIND[m.kind]}: ${usd(m.usd)} · ${m.title || m.market}`)}</title></circle>`;
-  }).join("");
-  const ticks = [0, hi / 2 / 1.08, hi / 1.08];
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="What they hold now, as they built it up: ${usd(pts[pts.length - 1][1])} put in">
-    ${ticks.map((v) => `<line x1="${L}" x2="${W - R}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1" ${v ? 'stroke-dasharray="3 4"' : ""}/><text x="${L - 8}" y="${(Y(v) + 4).toFixed(1)}" text-anchor="end">${usd(v)}</text>`).join("")}
-    <polyline points="${line}" fill="none" stroke="var(--fg)" stroke-width="2" stroke-linejoin="round"/>
-    ${closed.length ? `<line x1="${L}" x2="${W - R}" y1="${lane}" y2="${lane}" stroke="var(--line)" stroke-width="1"/><text x="${L - 8}" y="${lane + 4}" text-anchor="end">Closed</text>` : ""}${dots}
-    <text x="${L}" y="${H - 6}">${ago(t0 * 1000)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">Now</text></svg>`;
-}
 function bindWatch(app) {
   const pick = (key) => {
     wt.sel = key;
@@ -3267,11 +3230,7 @@ function bindWatch(app) {
       const panel = sheet(`<div class="wt-explain">${explainHtml(m)}</div>`);
       bindExplain(panel, m);
     }
-    $$("[data-move]", app).forEach((el) => {
-      const on = el.dataset.move === key;
-      if (el.tagName === "BUTTON") el.setAttribute("aria-pressed", on);
-      else { el.setAttribute("r", +el.dataset.r + (on ? 2 : 0)); el.setAttribute("stroke", on ? "var(--accent)" : "var(--fg)"); el.setAttribute("stroke-width", on ? 3 : 1.5); }
-    });
+    $$("[data-move]", app).forEach((el) => el.setAttribute("aria-pressed", el.dataset.move === key));
     const box = $("#wtexplain", app);
     if (box) { box.innerHTML = explainHtml(m); bindExplain(box, m); }
   };
