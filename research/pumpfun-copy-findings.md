@@ -47,3 +47,13 @@ copying.
 - About 6% of bot trades (293 of 4,461) had no later trade on the coin; those use its latest price.
 - 3 coins were skipped after repeated rate limits. 8 people and 1 bot had no trades in the window.
 - Costs are assumed (0/1/2% per side). Dawn's copy fee and speed are unpublished.
+
+## Forward run (first 6–7 hours after the boards were read)
+
+`pumpfun-copy-forward-results.txt`: the same 60 wallets, trades from 2026-10-21 2:34 PM PT to ~9:20 PM PT.
+
+- **Bots:** confirmed out of sample. They made +5.7%; a copy at ≈0.4 s lost −6.5% before costs and −8.5% after 1% per
+  side (8 of 23 copies made money).
+- **People:** too thin to judge. Only 7 of 30 traded (16 coins, 38 trades, $12.6K). The pooled copy was +25% after
+  1% per side, but 68% of it is unsold and the median copy was −0.8%, with 3 of 7 making money. Re-run with
+  `--since 1792618459` after ~2026-10-24 for a real answer.

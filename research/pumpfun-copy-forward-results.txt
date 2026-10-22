@@ -1,0 +1,47 @@
+60 wallets replayed; FORWARD: trades after 2026-10-21 2:34 PM PT
+
+=== bots: 30 wallets, 505 coins, 2479 trades (median 52 trades per wallet in 72 h)
+  Leader on these coins, own prices: money in $193,211, return +5.7% before costs
+  Copier at ≈0.4 s: 17% of its end value is still unsold (valued at the coin's latest price)
+  Copier, 0% cost per side:
+    same block: pooled return   -5.1%, wallets whose copy made money 8/23, median wallet   -3.8%, trades with no later price 157
+        ≈0.4 s: pooled return   -6.5%, wallets whose copy made money 8/23, median wallet   -5.5%, trades with no later price 157
+        ≈1.2 s: pooled return   -6.4%, wallets whose copy made money 8/23, median wallet   -5.5%, trades with no later price 157
+          ≈2 s: pooled return   -8.1%, wallets whose copy made money 7/23, median wallet   -6.5%, trades with no later price 157
+          ≈4 s: pooled return   -8.4%, wallets whose copy made money 8/23, median wallet   -6.6%, trades with no later price 158
+  Copier, 1% cost per side:
+    same block: pooled return   -7.1%, wallets whose copy made money 7/23, median wallet   -5.8%
+        ≈0.4 s: pooled return   -8.5%, wallets whose copy made money 8/23, median wallet   -7.5%
+        ≈1.2 s: pooled return   -8.4%, wallets whose copy made money 8/23, median wallet   -7.4%
+          ≈2 s: pooled return  -10.1%, wallets whose copy made money 7/23, median wallet   -8.4%
+          ≈4 s: pooled return  -10.4%, wallets whose copy made money 7/23, median wallet   -8.5%
+  Copier, 2% cost per side:
+    same block: pooled return   -9.0%, wallets whose copy made money 7/23, median wallet   -7.7%
+        ≈0.4 s: pooled return  -10.4%, wallets whose copy made money 7/23, median wallet   -9.4%
+        ≈1.2 s: pooled return  -10.3%, wallets whose copy made money 7/23, median wallet   -9.4%
+          ≈2 s: pooled return  -12.0%, wallets whose copy made money 6/23, median wallet  -10.4%
+          ≈4 s: pooled return  -12.3%, wallets whose copy made money 5/23, median wallet  -10.5%
+  Verdict (pre-registered: bots, 1 block, 1% per side): COPYING DOES NOT WORK
+
+=== persons: 30 wallets, 16 coins, 38 trades (median 0 trades per wallet in 72 h)
+  Leader on these coins, own prices: money in $12,619, return +36.3% before costs
+  Copier at ≈0.4 s: 68% of its end value is still unsold (valued at the coin's latest price)
+  Copier, 0% cost per side:
+    same block: pooled return  +24.6%, wallets whose copy made money 5/7, median wallet   +1.1%, trades with no later price 11
+        ≈0.4 s: pooled return  +27.1%, wallets whose copy made money 5/7, median wallet   +1.2%, trades with no later price 11
+        ≈1.2 s: pooled return  +25.7%, wallets whose copy made money 5/7, median wallet   +1.3%, trades with no later price 11
+          ≈2 s: pooled return  +27.5%, wallets whose copy made money 5/7, median wallet   +0.8%, trades with no later price 11
+          ≈4 s: pooled return  +27.8%, wallets whose copy made money 5/7, median wallet   +0.8%, trades with no later price 11
+  Copier, 1% cost per side:
+    same block: pooled return  +22.3%, wallets whose copy made money 3/7, median wallet   -0.9%
+        ≈0.4 s: pooled return  +24.8%, wallets whose copy made money 3/7, median wallet   -0.8%
+        ≈1.2 s: pooled return  +23.5%, wallets whose copy made money 3/7, median wallet   -0.7%
+          ≈2 s: pooled return  +25.3%, wallets whose copy made money 3/7, median wallet   -1.2%
+          ≈4 s: pooled return  +25.6%, wallets whose copy made money 3/7, median wallet   -1.2%
+  Copier, 2% cost per side:
+    same block: pooled return  +20.1%, wallets whose copy made money 3/7, median wallet   -2.9%
+        ≈0.4 s: pooled return  +22.6%, wallets whose copy made money 3/7, median wallet   -2.8%
+        ≈1.2 s: pooled return  +21.2%, wallets whose copy made money 3/7, median wallet   -2.8%
+          ≈2 s: pooled return  +23.0%, wallets whose copy made money 3/7, median wallet   -3.3%
+          ≈4 s: pooled return  +23.3%, wallets whose copy made money 3/7, median wallet   -3.2%
+
