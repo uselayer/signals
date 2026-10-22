@@ -273,22 +273,25 @@ def test_open_positions_are_the_sdks_one_read_of_open_bets(monkeypatch: pytest.M
     from uselayer.layer_api import LayerApi
     from uselayer.whales import Whales
 
+    # Polymarket's Data API v2 (uselayer 0.18.0; v1 is retired 2026-10-24): rows under "data", snake_case names.
     rows = [
-        {"conditionId": "0xa", "outcomeIndex": 0, "size": 10, "curPrice": 0.5, "avgPrice": 0.4, "title": "A"},
-        {"conditionId": "0xb", "outcomeIndex": 1, "size": 10, "curPrice": 0.7, "redeemable": True},  # settled
-        {"conditionId": "0xc", "outcomeIndex": 0, "size": 10, "curPrice": 1},  # settled, not redeemed yet
+        {"condition_id": "0xa", "outcome_index": 0, "current_size": 10, "current_price": 0.5, "avg_price": 0.4, "title": "A"},
+        {"condition_id": "0xb", "outcome_index": 1, "current_size": 10, "current_price": 0.7, "redeemable": True},  # settled
+        {"condition_id": "0xc", "outcome_index": 0, "current_size": 10, "current_price": 1},  # settled, not redeemed yet
     ]
     seen: list[tuple[str, str | None]] = []
 
     def handler(r: httpx.Request) -> httpx.Response:
         seen.append((r.url.path, r.url.params.get("user")))
-        return httpx.Response(200, json=rows if r.url.path == "/positions" else [])
+        if r.url.path == "/v2/positions":
+            return httpx.Response(200, json={"data": rows, "pagination": {"next_cursor": None}})
+        return httpx.Response(200, json={"data": []})
 
     http = Http(transport=httpx.MockTransport(handler), sleep=lambda s: None)
     monkeypatch.setattr(engine.reads, "whales", Whales(http, LayerApi(None, http)))
     got = engine._open_positions(COPY)
     assert [(p.market, p.avg_price, p.title) for p in got] == [("0xa:0", 0.4, "A")]
-    assert seen == [("/positions", COPY)]  # no profile, no stats
+    assert seen == [("/v2/positions", COPY)]  # no profile, no stats
 
 def test_the_others_give_way_only_while_followed_traders_are_read_and_alerts_go_at_once_after(
     api: TestClient, monkeypatch: pytest.MonkeyPatch
