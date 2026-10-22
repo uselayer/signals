@@ -298,3 +298,16 @@ def test_a_change_is_explained_from_its_facts_only(run_js: Any) -> None:
     sold = m | {"kind": "closed", "action": "sell", "price": 0.51, "paid": 0.54, "held_now": False}
     assert run_js(EXPLAIN, f"moveHeadline({js(sold)})") == "Sold all of it, below what they paid"
     assert run_js(EXPLAIN, "moveHeadline({kind: 'bought'})") == "Bought"
+
+
+def test_a_trader_in_one_category_still_shows_it_and_best_is_only_said_of_several(run_js: Any) -> None:
+    names = ("esc", "plural", "tenths", "cents", "usd", "pl", "WIN_MIN", "winText", "profitOf", "UNCATEGORISED", "watchTiles")
+    d = {"put_in": 164800, "worth": 170000}
+    one = {"rows": [{"category": "Sports", "usd": 361605.8}]}
+    tiles = run_js(names, f"watchTiles({js(d)}, null, {js(one)})")
+    assert tiles[-1][:2] == ["Category", "Sports"] and "+$362K" in tiles[-1][2]
+    several = {"rows": [{"category": "Sports", "usd": 2000}, {"category": "Politics", "usd": 14100},
+                        {"category": "Uncategorised", "usd": 99999}]}  # fmt: skip
+    assert run_js(names, f"watchTiles({js(d)}, null, {js(several)})")[-1][:2] == ["Best category", "Politics"]
+    lost = {"rows": [{"category": "Sports", "usd": -500}, {"category": "Politics", "usd": -100}]}
+    assert run_js(names, f"watchTiles({js(d)}, null, {js(lost)})")[-1][0] == "Holding now"  # no "best" of losses
