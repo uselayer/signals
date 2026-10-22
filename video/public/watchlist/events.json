@@ -1,0 +1,22 @@
+{
+  "wallet": "0x606ffc68a29ebf92f9dc1d041fec5d0127571083",
+  "name": "SleeperHunter",
+  "recorded": "2026-10-22T19:31:57.931Z",
+  "frames": 940,
+  "events": {
+    "start": -0.001,
+    "followSheet": 2.42,
+    "pasted": 3.655,
+    "lookUp": 5.45,
+    "found": 5.483,
+    "followed": 8.272,
+    "watch": 8.308,
+    "tilesSeen": 10.956,
+    "scrollDown": 11.977,
+    "scrollUp": 14.71,
+    "picked": 17.624,
+    "explainSeen": 20.577,
+    "holding": 21.491,
+    "end": 25.337
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "recorded": "Oct 22, 2026",
+  "name": "SleeperHunter",
+  "wallet": "0x606ffc68a29ebf92f9dc1d041fec5d0127571083",
+  "alert": {
+    "note": "SleeperHunter's buy at 2026-10-18 10:29:45 UTC (one fill, from /api/watch), worded as signals/app.py's _alert_text: paid 0.57, $1,140; 'Now' is Polymarket's price at 10:30:20 UTC (prices-history), 55.5¢ → 56¢, within 5¢ of what they paid so no 'price already moved'; a followed trader is read every 30 s, so 'under a minute'; Layer's matches weren't readable for this market, so the venue line is the plain one. Alerts skip anything at 98¢+ (settled), so their 99¢ buys never alert.",
+    "date": "Oct 18, 2026",
+    "outcome": "Yes",
+    "paid": "57¢",
+    "usd": "$1,140",
+    "title": "US x Iran ceasefire continues through November 15?",
+    "now": "Now 56¢.",
+    "traded": "Traded 10:29 UTC, under a minute before this alert.",
+    "where": "Traded on Polymarket International.",
+    "links": ["Check current price", "Their record", "Buy on Polymarket International"]
+  }
+}
