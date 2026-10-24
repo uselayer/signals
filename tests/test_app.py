@@ -291,7 +291,7 @@ def test_signals_reads_polymarket_only_unless_kalshi_is_switched_on(
     monkeypatch.setattr(engine, "SKILL_TEST", False)  # the default: the Leaderboard
     assert api.get("/api/config").json() == {
         "venues": ["polymarket"], "clerk_key": None, "alerts": False, "explore": False, "leaderboard": True,
-        "posthog_key": None}
+        "why": False, "posthog_key": None}
     api.get("/api/trading-now")
     api.get("/api/top")  # "all" means the venues Signals reads
     assert api.get("/api/top?venue=kalshi").status_code == 404
