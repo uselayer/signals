@@ -541,6 +541,8 @@
   .wt-explain { position: sticky; top: 76px; }
   .wt-explain h3 { font-size: 17px; margin: 10px 0 0; overflow-wrap: anywhere; }
   .wt-why { font-size: 15px; font-weight: 600; margin: 14px 0 0; }
+  .wt-ai { font-size: 14.5px; margin: 6px 0 0; line-height: 1.45; }
+  .wt-ai-by { display: block; font-size: 12px; color: var(--faint); margin-top: 3px; }
   .wt-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
   @media (max-width: 920px) { .wt-grid { grid-template-columns: minmax(0, 1fr); } .wt-explain { position: static; } }
 
@@ -3092,9 +3094,10 @@ async function followPreview(box, wallet) {
 
 // A trader's watch page: their record in a line of tiles, the changes beside what explains the one picked, then what
 // they hold now. Read again every 30 seconds while it's open.
-const wt = { w: null, d: null, s: null, cats: null, sel: null, err: null, seen: null, sig: "" };
+const wt = { w: null, d: null, s: null, cats: null, sel: null, err: null, seen: null, sig: "", why: {} };
+let whyOn = false; // /api/config's why: the engine has a model for the sentence under a change (OPENROUTER_API_KEY)
 async function watchPage(wallet) {
-  Object.assign(wt, { w: wallet, d: null, s: null, cats: null, sel: null, err: null, seen: seenAt(wallet), sig: "" });
+  Object.assign(wt, { w: wallet, d: null, s: null, cats: null, sel: null, err: null, seen: seenAt(wallet), sig: "", why: {} });
   markSeen(wallet); // what's new is from your last visit; this one counts as looking
   $("#app").innerHTML = `${watchBack()}<div class="pf-head">${avatar(wallet, 64)}<div class="grow"><div class="skel" style="width:40%;height:24px"></div>
     <div class="skel" style="width:25%;height:14px;margin-top:10px"></div></div></div><p class="muted" style="margin-top:24px">Reading their trades and what they hold (usually a few seconds)…</p>`;
@@ -3198,6 +3201,7 @@ function explainHtml(m) {
     <div><span class="wl-kind">${KIND[m.kind]}</span>${m.category ? ` <span class="pf-oc">${esc(m.category)}</span>` : ""}</div>
     <h3>${esc(m.title || m.market)}</h3>
     <p class="wt-why">${esc(moveHeadline(m))}</p>
+    ${whyHtml(m)}
     <dl class="pf-facts">${moveFacts(m).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
     <div class="wt-actions">${m.action === "buy" && m.market ? `<button class="btn small" data-wtcheck>Check your price</button>` : ""}${marketLink(m.url)}</div>
     <p class="pf-statnote">From their trades, what they hold now and their record. Past trades, not advice.</p>`;
@@ -3238,7 +3242,24 @@ function bindWatch(app) {
   bindExplain($("#wtexplain", app), selectedMove());
   bindActions(app);
 }
+// The sentence under the headline: written by AI from the engine's facts (/api/watch/<wallet>/why), each number
+// checked against them there. Nothing at all while it's asked, when nothing stands out or it couldn't be written.
+function whyHtml(m) {
+  const text = wt.why[moveKey(m)];
+  return text ? `<p class="wt-ai">${esc(text)}<span class="wt-ai-by">Written by AI from the facts below</span></p>` : `<span data-why="${esc(moveKey(m))}" hidden></span>`;
+}
+function loadWhy(m) {
+  const key = moveKey(m), w = wt.w;
+  if (!whyOn || key in wt.why) return;
+  wt.why[key] = null; // asked once per visit
+  api(`/api/watch/${w}/why?move=${encodeURIComponent(key)}`).then((r) => {
+    if (wt.w !== w || !r.text) return;
+    wt.why[key] = r.text;
+    $$("[data-why]").forEach((el) => { if (el.dataset.why === key) el.outerHTML = whyHtml(m); });
+  }, () => {});
+}
 function bindExplain(root, m) {
+  if (m) loadWhy(m);
   const b = root && $("[data-wtcheck]", root);
   if (!b || !m) return;
   b.onclick = () => tradeSheet({ wallet: wt.w, name: wt.d?.name, market: m.market, price: m.price, price_now: m.now, title: m.title, outcome: m.outcome,
@@ -3320,7 +3341,7 @@ function route() {
 }
 window.addEventListener("hashchange", route);
 api("/api/config").then((c) => {
-  venuesOn = c.venues; exploreOn = !!c.explore; boardOn = !!c.leaderboard;
+  venuesOn = c.venues; exploreOn = !!c.explore; boardOn = !!c.leaderboard; whyOn = !!c.why;
   if (c.clerk_key) startAuth(c.clerk_key, c.alerts);
   if (c.posthog_key) startAnalytics(c.posthog_key);
 })

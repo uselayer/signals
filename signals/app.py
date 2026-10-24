@@ -53,7 +53,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import monitoring, records, us_match, watch
+from signals import monitoring, records, us_match, watch, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -196,7 +196,7 @@ def config() -> dict[str, Any]:
     key when signing in (to follow traders) is switched on, and PostHog's project key when analytics is. Both keys
     are public by design."""
     return {"venues": list(VENUES), "clerk_key": CLERK_KEY or None, "alerts": bool(TG_TOKEN), "explore": EXPLORE_ON,
-            "leaderboard": not SKILL_TEST,
+            "leaderboard": not SKILL_TEST, "why": bool(WHY_KEY),
             "posthog_key": POSTHOG_KEY or None}
 
 
@@ -3155,6 +3155,68 @@ def watch_trader(wallet: str, request: Request) -> dict[str, Any]:
     account needed, as a trader's page; kept WATCH_TTL_S, under "Check now"'s limits (``limited_read``)."""
     w = _wallet_or_400(wallet)
     return limited_read(f"watch:{w}", WATCH_TTL_S, w, request, lambda: _watch(w))  # type: ignore[no-any-return]
+
+
+# ---- one sentence of context under a change ("Explained"), by a model from the engine's facts (signals/why.py) ----
+# The watch page asks for it when a change is picked: no Polymarket read (the last watch read and the kept record), one
+# model call per set of facts, kept for everyone (a sentence that failed its check too, so it isn't asked again), at
+# most WHY_DAILY calls a UTC day. Off without OPENROUTER_API_KEY: the page shows only the facts, as before.
+WHY_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+WHY_MODEL = os.environ.get("SIGNALS_WHY_MODEL", "anthropic/claude-haiku-5.5")
+WHY_DAILY = int(os.environ.get("SIGNALS_WHY_DAILY", "3000"))  # about $0.15 a day at Haiku 5.5's price (23 Oct)
+WHY_KEPT = 20_000
+WHY_AT_ONCE = 4
+_why_kept: dict[str, str | None] = {}
+_why_day: dict[str, Any] = {"day": None, "calls": 0, "usd": 0.0}
+_why_lock = threading.Lock()
+_why_turns = threading.BoundedSemaphore(WHY_AT_ONCE)
+
+
+@app.get("/api/watch/{wallet}/why")
+def watch_why(wallet: str, move: str) -> dict[str, Any]:
+    """The sentence under change ``move`` (the page's ``moveKey``: market|time|action) on their watch page, or
+    ``text`` None: off, the watch read isn't kept any more, nothing stands out, the day's calls are used up, the model
+    didn't answer or its sentence failed the check. The page then shows the facts alone."""
+    w = _wallet_or_400(wallet)
+    seen = _cache.get(f"watch:{w}")
+    view = seen[1] if WHY_KEY and seen else None
+    m = next((x for x in view["moves"] if f"{x['market']}|{x['at']}|{x['action']}" == move), None) if view else None
+    if m is None:
+        return {"text": None}
+    rec = _record_one.get(w)
+    if rec is None:
+        try:
+            rec = directory().record(w)
+        except (sqlite3.Error, OSError):
+            rec = None
+    f = why.facts(m, view, rec)
+    if f is None:
+        return {"text": None}
+    key = why.key_of(f, WHY_MODEL)
+    if key in _why_kept:
+        return {"text": _why_kept[key]}
+    with _why_lock:
+        day = datetime.now(UTC).date().isoformat()
+        if _why_day["day"] != day:
+            _why_day.update(day=day, calls=0, usd=0.0)
+        if _why_day["calls"] >= WHY_DAILY:
+            return {"text": None}
+        _why_day["calls"] += 1
+    if not _why_turns.acquire(timeout=5):
+        return {"text": None}
+    try:
+        text, cost = why.ask(f, key=WHY_KEY, model=WHY_MODEL)
+    except (OSError, ValueError, KeyError, IndexError) as e:  # not answered: not kept, asked again next time
+        print(f"watch why: {WHY_MODEL} didn't answer: {type(e).__name__}", flush=True)
+        return {"text": None}
+    finally:
+        _why_turns.release()
+    with _why_lock:
+        _why_day["usd"] += cost or 0.0
+        if len(_why_kept) >= WHY_KEPT:
+            _why_kept.clear()
+        _why_kept[key] = text
+    return {"text": text}
 
 
 def _watch_card(w: str, now: float) -> dict[str, Any]:
