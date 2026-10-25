@@ -47,7 +47,13 @@ follows it ("Your markets: … · Change" opens the same picker), so the two alw
   wallet, or type a name Signals knows). A trader's watch page (`#/watch/<wallet>`, no account needed) shows their record,
   every change over the last 30 days (a new position, more bought, some sold, all sold), what they hold now and the
   facts that explain each one: what they did, where the position stands now, its size against their usual
-  trade, their record in that category and the price now. Facts only, no AI write-up. The engine works the changes
+  trade, their record in that category and the price now. With `OPENROUTER_API_KEY` set, one sentence under the
+  headline, written by AI (Claude Haiku 5.5, `SIGNALS_WHY_MODEL`) and labelled so, joins the one or two facts that
+  stand out (a buy well over their usual trade, a sale against what they paid, a position up or down a lot, a big
+  share of their money, their other trades in the same market): the engine picks them and works out every figure, and
+  a sentence with a number or comparison its facts don't have isn't shown (`signals/why.py`, `/api/watch/<wallet>/why`:
+  no Polymarket read, kept per set of facts, at most `SIGNALS_WHY_DAILY` calls a day, 3,000 by default, about
+  $0.15). Nothing stands out, or no key: no sentence, the facts alone. The engine works the changes
   out from their last 500 trades and what they hold now (`/api/watch/<wallet>`, two reads on the checks' budget, kept
   30 seconds for everyone); the cards read nothing (`/api/me/watchlist`). "Since you last looked" is kept in your
   browser.

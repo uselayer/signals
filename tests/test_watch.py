@@ -301,3 +301,60 @@ def test_a_trader_in_one_category_still_shows_it_and_best_is_only_said_of_severa
     assert run_js(names, f"watchTiles({js(d)}, null, {js(several)})")[-1][:2] == ["Best category", "Politics"]
     lost = {"rows": [{"category": "Sports", "usd": -500}, {"category": "Politics", "usd": -100}]}
     assert run_js(names, f"watchTiles({js(d)}, null, {js(lost)})")[-1][0] == "Holding now"  # no "best" of losses
+
+
+def test_the_sentence_under_a_change_is_asked_once_from_the_kept_read_and_only_when_on(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "checker", lambda: Reads(TRADES, POSITIONS))
+    d = api.get(f"/api/watch/{W}").json()
+    lakers = next(m for m in d["moves"] if m["market"] == LAKERS)  # $2,400: 2.7x their usual trade of $900
+    key = f"{lakers['market']}|{lakers['at']}|{lakers['action']}"
+    monkeypatch.setattr(engine, "_record_one", {W: {"typical_usd": 900}})
+    monkeypatch.setattr(engine, "checker", lambda: pytest.fail("the sentence never reads Polymarket"))
+    asked: list[dict[str, Any]] = []
+
+    def ask(f: dict[str, Any], **k: Any) -> tuple[str | None, float]:
+        asked.append(f)
+        return "This trade was 2.7x their usual trade of $900.", 0.0001
+
+    monkeypatch.setattr(engine.why, "ask", ask)
+    monkeypatch.setattr(engine, "_why_kept", {})
+    monkeypatch.setattr(engine, "_why_day", {"day": None, "calls": 0, "usd": 0.0})
+    # off without a key: nothing asked, and the page knows not to ask
+    monkeypatch.setattr(engine, "WHY_KEY", "")
+    assert api.get(f"/api/watch/{W}/why", params={"move": key}).json() == {"text": None} and not asked
+    assert api.get("/api/config").json()["why"] is False
+    monkeypatch.setattr(engine, "WHY_KEY", "sk-or-test")
+    assert api.get("/api/config").json()["why"] is True
+    for _ in range(2):  # kept for everyone: one call for the same facts
+        assert api.get(f"/api/watch/{W}/why", params={"move": key}).json() == {"text": "This trade was 2.7x their usual trade of $900."}
+    assert len(asked) == 1 and asked[0]["facts"][0] == "this trade was 2.7x their usual trade of $900"
+    assert api.get(f"/api/watch/{W}/why", params={"move": "0xnope|x|buy"}).json() == {"text": None}
+    # the day's calls used up: nothing more asked
+    fed = next(m for m in d["moves"] if m["market"] == FED)  # $1,850: 2.1x
+    fed_key = f"{fed['market']}|{fed['at']}|buy"
+    monkeypatch.setattr(engine, "WHY_DAILY", 1)
+    assert api.get(f"/api/watch/{W}/why", params={"move": fed_key}).json() == {"text": None}
+    assert len(asked) == 1
+    # the model not answering: no sentence, and asked again next time (not kept)
+    monkeypatch.setattr(engine, "WHY_DAILY", 100)
+
+    def down(f: dict[str, Any], **k: Any) -> tuple[str | None, float]:
+        raise OSError("timed out")
+
+    monkeypatch.setattr(engine.why, "ask", down)
+    assert api.get(f"/api/watch/{W}/why", params={"move": fed_key}).json() == {"text": None}
+    monkeypatch.setattr(engine.why, "ask", ask)
+    assert api.get(f"/api/watch/{W}/why", params={"move": fed_key}).json()["text"]
+    # a watch read no longer kept: nothing to say it from
+    engine._cache.pop(f"watch:{W}")
+    assert api.get(f"/api/watch/{W}/why", params={"move": key}).json() == {"text": None}
+
+
+def test_the_sentence_is_labelled_as_written_by_ai_and_absent_until_there_is_one(run_js: Any) -> None:
+    names = ("esc", "moveKey", "wt", "whyHtml")
+    m = {"market": LAKERS, "at": "2026-10-23T18:00:00+00:00", "action": "buy"}
+    key = f"{LAKERS}|2026-10-23T18:00:00+00:00|buy"
+    html = run_js(names, f"(wt.why[{js(key)}] = 'This trade was 2.7x their usual trade of $900.', whyHtml({js(m)}))")
+    assert "This trade was 2.7x their usual trade of $900." in html and "Written by AI from the facts below" in html
+    empty = run_js(names, f"whyHtml({js(m)})")
+    assert "hidden" in empty and "AI" not in empty and "—" not in empty  # nothing on screen while it's asked

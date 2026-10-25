@@ -153,8 +153,13 @@ behind Vercel (see README, "Hosting").
     last 500 trades and open positions on the checks' budget under "Check now"'s limits, kept 30 s for everyone,
     worked out by `signals/watch.py`. A change (new, bought more, sold some, sold all) comes from walking back from what
     they hold now; where that isn't known (not held, last move a buy: it settled or was paid out) it's only "Bought" or
-    "Sold", never guessed. Its explanation is facts only (no AI write-up, no verdict, nothing about what happens next),
-    every change label neutral, and every buy keeps "Check your price".
+    "Sold", never guessed. Its explanation is facts (no verdict, nothing about what happens next), every change label
+    neutral, and every buy keeps "Check your price". The one exception is one sentence under the headline written by
+    AI (owner, 23 Oct; `signals/why.py`, Claude Haiku 5.5 through OpenRouter, off without `OPENROUTER_API_KEY`),
+    labelled "Written by AI from the facts below": the engine picks the one or two facts that stand out and works out
+    every figure, the model only joins them, and a sentence with a number or a comparison its facts don't have, a
+    guess, advice or "bet" isn't shown. Nothing stands out, or it failed: no sentence, never a placeholder. Keep the
+    model to wording: never hand it a fact to judge or a figure to work out.
   - Onboarding (first visit, once per browser) asks one question: which markets interest you (Politics, Sports,
     Crypto, Esports; Skip means all markets). Nothing else: no budget, goals or signup. The choice is kept in
     localStorage (and, when picked here or with the Feed's Change, on the account for big-trade alerts), every read and write in try/catch; if storage is blocked it holds for the visit, and no one is
