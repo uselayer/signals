@@ -72,9 +72,31 @@ def test_the_win_rate_counts_positions_closed_in_profit_in_each_period_unredeeme
 
 
 def test_a_period_a_cut_read_doesnt_reach_back_through_has_no_win_rate() -> None:
-    rows = [position(1, closed_days_ago=d / 10) for d in range(1, 50)]  # 49 closed in 5 days, more not read
+    cap = records.CLOSED_PAGES * 50
+    rows = [position(1, closed_days_ago=10 * (i + 1) / cap) for i in range(cap)]  # the closed list's cap, in 10 days
     p = records.build(history(100, 1.0), positions(rows, complete=False), [], NOW)["periods"]
-    assert p["7d"]["closed"] is None and p["30d"]["closed"] is None  # oldest read is inside both: unknown, never 49
+    assert (p["7d"]["won"], p["7d"]["closed"]) == (round(cap * 0.7), round(cap * 0.7))  # read in full back to 10 days
+    assert p["30d"]["closed"] is None and p["90d"]["closed"] is None  # the oldest read is inside both: unknown
+
+
+def test_old_unredeemed_losers_never_make_a_cut_read_look_like_it_reached_back() -> None:
+    """A busy trader: their newest closed positions (mostly wins) reach back 10 days, their losers never redeemed
+    months. The losers' dates aren't how far the read reached: 90 days counted every loser and only 10 days of wins
+    (THEHIGHLIFE, 23 Oct: 30% shown, 55% read in full)."""
+    cap = records.CLOSED_PAGES * 50
+    rows = [position(1, closed_days_ago=10 * (i + 1) / cap) for i in range(cap)]
+    rows += [position(-10, ended_days_ago=d) for d in (3, 20, 45, 80)]  # settled, never redeemed
+    p = records.build(history(100, 1.0), positions(rows, complete=False), [], NOW)["periods"]
+    assert p["30d"]["closed"] is None and p["90d"]["closed"] is None
+    assert p["7d"]["closed"] == round(cap * 0.7) + 1 and p["7d"]["won"] == round(cap * 0.7)  # the 3-day loser counts
+
+
+def test_a_cut_held_list_leaves_losers_out_so_no_period_has_a_win_rate() -> None:
+    """The closed list ended (fewer than its cap) but the read isn't complete: the held list was cut, where losers
+    never redeemed sit in no order of time (ic4cream, 23 Oct: 71% shown, 54% read in full)."""
+    rows = [position(1, closed_days_ago=d) for d in range(1, 60)] + [position(-5, ended_days_ago=40)]
+    p = records.build(history(100, 1.0), positions(rows, complete=False), [], NOW)["periods"]
+    assert all(p[k]["closed"] is None and p[k]["won"] is None for k in ("7d", "30d", "90d"))
 
 
 def test_without_their_positions_the_rest_of_the_record_stands() -> None:

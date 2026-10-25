@@ -13,7 +13,8 @@ Reads, about 5 to 8 a wallet where a full score takes about 50:
 - Polymarket's profit history (``whales.profit_history``, 1 read): profit, volume, the weeks, the profit line and
   the worst drop, the same history (and the same code) a score reads
 - their completed positions (``whales.completed_positions``: their stats, positions held, closed positions, 3 to 6
-  reads): the win rate, by when each closed (a position never redeemed, by when its market ended)
+  reads, a read more per 500 positions held past the first 500): the win rate, by when each closed (a position never
+  redeemed, by when its market ended)
 """
 
 from __future__ import annotations
@@ -27,7 +28,9 @@ from uselayer import ProfitHistory, Whales
 PERIODS = (7, 30, 90)  # days: the Leaderboard's 7D, 30D and 90D
 WEEKS = 12  # weeks up, of the last 12, as Recommended showed them
 CLOSED_PAGES = 4  # closed positions read, 50 a page, newest first: 200, enough to cover 90 days for most traders
-HELD_PAGES = 1  # positions held, 500 a page: the ones settled but never redeemed (mostly losers) count too
+# positions held, 500 a page, read to the end (up to 10,000): the ones settled but never redeemed (mostly losers)
+# count too, and they come in no order of time, so a held list cut short would leave out losers of any age
+HELD_PAGES = 20
 MERGE_S = 60  # fills of one market this close together are one trade, as the SDK's score merges them
 DAY = 86400
 
@@ -49,13 +52,29 @@ def _when(v: Any) -> float | None:
 
 def _wins(positions: list[Any], complete: bool, now: float) -> dict[int, tuple[int, int] | None]:
     """Positions closed in profit, and positions closed, in each of PERIODS: (won, closed). None for a period the
-    read may not cover in full: the list was cut at the read limit and its oldest closed position is inside it."""
+    read may not cover in full.
+
+    The two lists cover different times. Closed positions (mostly wins) are read newest first and cut at
+    CLOSED_PAGES; positions held (where losers never redeemed sit) are read to the end, in no order of time. So a
+    cut read covers back to its oldest closed position, and no further: a period reaching back past it has no win
+    rate. Its unredeemed losers can be months old, so they never say how far back the read reached (they did, and a
+    busy trader's 90 days counted every loser and only the last two weeks of wins: THEHIGHLIFE 30% against 55%
+    read in full, 23 Oct). An incomplete read whose closed list ended was cut in the held list instead (over
+    HELD_PAGES × 500 held), or Polymarket's paging slipped: losers may be missing anywhere, so no period has one."""
+    closed_at = [
+        t for p in positions
+        if getattr(p, "redeemed", p.closed_at is not None) and (t := _when(p.closed_at)) is not None
+    ]  # fmt: skip
+    cutoff = None  # how far back the read covers: every position closed or settled since was read
+    if not complete:
+        if len(closed_at) < CLOSED_PAGES * 50:
+            return {d: None for d in PERIODS}
+        cutoff = min(closed_at)
     done = [(t, p.pnl) for p in positions if (t := _when(p.closed_at) or _when(p.end_date)) is not None]
-    oldest = min((t for t, _ in done), default=None)
     out: dict[int, tuple[int, int] | None] = {}
     for d in PERIODS:
         start = now - d * DAY
-        if not complete and (oldest is None or oldest >= start):
+        if cutoff is not None and cutoff > start:
             out[d] = None
             continue
         inside = [pnl for t, pnl in done if start <= t <= now]
