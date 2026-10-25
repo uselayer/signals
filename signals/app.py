@@ -867,13 +867,13 @@ def evaluate_record(item: dict[str, Any]) -> str:
             d.quick_checked(w, replace(look, score=False, reason=reason))
             return reason
         d.quick_checked(w, replace(look, score=True, reason=None))
-        rec = records.read(background(), w, trades, now)
+        rec, kept = records.read(background(), w, trades, d.kept_positions(w), now)
     except Exception as e:  # VenueError mostly (the read's retries already spent)
         if _directory_stop.is_set() or sys.is_finalizing():  # a deploy stopping the app, not the wallet: it stays due
             raise
         d.score_failed(w, f"{type(e).__name__}: {e}")
         return "failed"
-    d.keep_record(w, rec)
+    d.keep_record(w, rec, positions=kept)
     return "recorded"
 
 
@@ -2308,11 +2308,15 @@ def record_now(w: str, request: Request | None = None) -> dict[str, Any]:
 
     def work() -> dict[str, Any]:
         got = checker().trades("polymarket", w, limit=QUICK_TRADES)
-        rec = records.read(checker(), w, _record_trades(got))
+        try:
+            before = directory().kept_positions(w)  # a read only: the writer thread keeps what this adds
+        except (sqlite3.Error, OSError):
+            before = None
+        rec, kept = records.read(checker(), w, _record_trades(got), before)
         if len(_record_one) >= WORTH_ONE_KEEP:
             _record_one.clear()
         _record_one[w] = rec | {"via": "read"}
-        _directory_later(lambda d: d.keep_record(w, rec))
+        _directory_later(lambda d: d.keep_record(w, rec, positions=kept))
         return _record_one[w]
 
     return _on_the_spot(w, request, lambda: _fresh_record(_record_one.get(w), time.time()), work)  # type: ignore[no-any-return]

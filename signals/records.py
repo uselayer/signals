@@ -19,7 +19,9 @@ Reads, about 5 to 8 a wallet where a full score takes about 50:
 
 from __future__ import annotations
 
+import math
 import statistics
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -31,6 +33,11 @@ CLOSED_PAGES = 4  # closed positions read, 50 a page, newest first: 200, enough 
 # positions held, 500 a page, read to the end (up to 10,000): the ones settled but never redeemed (mostly losers)
 # count too, and they come in no order of time, so a held list cut short would leave out losers of any age
 HELD_PAGES = 20
+# Positions kept between reads (``PositionHistory``, in directory.db): each read adds what closed since the last,
+# so a busy trader's win rate reaches back further each time instead of only as far as one read's 200.
+KEEP_DAYS = 95  # positions kept per wallet: the longest period (90 days) and a little more
+FIRST_PAGES = 20  # closed positions on a wallet's first read with nothing kept: up to 1,000, to start further back
+MAX_PAGES = 40  # never more than 2,000 closed positions in one read
 MERGE_S = 60  # fills of one market this close together are one trade, as the SDK's score merges them
 DAY = 86400
 
@@ -61,25 +68,83 @@ def _wins(positions: list[Any], complete: bool, now: float) -> dict[int, tuple[i
     busy trader's 90 days counted every loser and only the last two weeks of wins: THEHIGHLIFE 30% against 55%
     read in full, 23 Oct). An incomplete read whose closed list ended was cut in the held list instead (over
     HELD_PAGES × 500 held), or Polymarket's paging slipped: losers may be missing anywhere, so no period has one."""
+    since = _covered_since(positions, complete, CLOSED_PAGES)
+    if since is None:
+        return {d: None for d in PERIODS}
+    return _count(_done(positions), since, now)
+
+
+def _covered_since(positions: list[Any], complete: bool, pages: int) -> float | None:
+    """How far back a read of ``pages`` closed pages covers (``_wins``): 0 when it read everything, the oldest closed
+    position read when the closed list was cut, None when the held list may have been cut (no period can be)."""
+    if complete:
+        return 0.0
     closed_at = [
         t for p in positions
         if getattr(p, "redeemed", p.closed_at is not None) and (t := _when(p.closed_at)) is not None
     ]  # fmt: skip
-    cutoff = None  # how far back the read covers: every position closed or settled since was read
-    if not complete:
-        if len(closed_at) < CLOSED_PAGES * 50:
-            return {d: None for d in PERIODS}
-        cutoff = min(closed_at)
-    done = [(t, p.pnl) for p in positions if (t := _when(p.closed_at) or _when(p.end_date)) is not None]
+    return min(closed_at) if len(closed_at) >= pages * 50 else None
+
+
+def _done(positions: list[Any]) -> dict[str, tuple[float, bool]]:
+    """Each position read by market outcome: when it closed (or its market ended, for one never redeemed) and
+    whether it made money."""
+    return {
+        getattr(p, "market", None) or f"#{i}": (t, p.pnl > 0)
+        for i, p in enumerate(positions) if (t := _when(p.closed_at) or _when(p.end_date)) is not None
+    }  # fmt: skip
+
+
+def _count(done: dict[str, tuple[float, bool]], since: float, now: float) -> dict[int, tuple[int, int] | None]:
+    """(won, closed) in each of PERIODS from positions read in full back to ``since``; None for a period before it."""
     out: dict[int, tuple[int, int] | None] = {}
     for d in PERIODS:
         start = now - d * DAY
-        if cutoff is not None and cutoff > start:
+        if since > start:
             out[d] = None
             continue
-        inside = [pnl for t, pnl in done if start <= t <= now]
-        out[d] = (sum(1 for pnl in inside if pnl > 0), len(inside))
+        inside = [won for t, won in done.values() if start <= t <= now]
+        out[d] = (sum(inside), len(inside))
     return out
+
+
+@dataclass
+class PositionHistory:
+    """A wallet's positions kept between reads (directory.db's ``positions_kept``): every position closed or
+    settled from ``since`` up to ``read_at`` is in ``rows`` (by market outcome: when, and whether it made money),
+    none older than KEEP_DAYS. A read that reaches back to the last one's ``read_at`` extends it; one that doesn't
+    starts it again from what it read."""
+
+    since: float
+    read_at: float
+    rows: dict[str, tuple[float, bool]]
+
+
+def merge(kept: PositionHistory | None, positions: list[Any], complete: bool, pages: int,
+          now: float) -> PositionHistory | None:  # fmt: skip
+    """``kept`` with a new read of ``pages`` closed pages added. None when the read can't be trusted (its held list may
+    have been cut): nothing kept changes then, and no period has a win rate."""
+    since = _covered_since(positions, complete, pages)
+    if since is None:
+        return None
+    rows = _done(positions)
+    if kept is not None and since <= kept.read_at:  # nothing closed between the two reads was missed
+        rows = kept.rows | rows  # a position read again (one since redeemed) is the new read's
+        since = min(since, kept.since)
+    start = now - KEEP_DAYS * DAY
+    return PositionHistory(max(since, start), now, {m: r for m, r in rows.items() if r[0] >= start})
+
+
+def pages_for(kept: PositionHistory | None, now: float) -> int:
+    """Closed pages to read so this read reaches back to the last one: from how many positions they closed a day
+    over the last week kept, half again for safety. FIRST_PAGES with nothing kept; between CLOSED_PAGES and
+    MAX_PAGES."""
+    if kept is None:
+        return FIRST_PAGES
+    week = max(kept.since, kept.read_at - 7 * DAY)
+    per_day = sum(1 for t, _ in kept.rows.values() if t >= week) / max((kept.read_at - week) / DAY, 1.0)
+    need = per_day * max(now - kept.read_at, 0.0) / DAY * 1.5
+    return min(MAX_PAGES, max(CLOSED_PAGES, math.ceil(need / 50) + 1))
 
 
 def _decisions(buys: list[tuple[Any, ...]]) -> list[float]:
@@ -149,13 +214,18 @@ def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
     }
 
 
-def build(history: ProfitHistory, positions: Any, trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
+def build(history: ProfitHistory, positions: Any, trades: list[tuple[Any, ...]], now: float,
+          kept: PositionHistory | None = None) -> dict[str, Any]:  # fmt: skip
     """A record from what was read: their profit ``history`` (the SDK's ProfitHistory), ``positions`` (the SDK's
     PositionRecord, or None when it couldn't be read) and their latest ``trades``. Every figure that wasn't read is
-    None, never 0 (an empty history gives None for each)."""
+    None, never 0 (an empty history gives None for each). With ``kept`` (the positions kept, this read added:
+    ``merge``) the win rate is from those instead, back as far as they reach."""
     end, since = int(now), history.since
     periods: dict[str, dict[str, Any]] = {}
-    wins = _wins(positions.positions, positions.complete, now) if positions is not None else {}
+    if kept is not None:
+        wins = _count(kept.rows, kept.since, now)
+    else:
+        wins = _wins(positions.positions, positions.complete, now) if positions is not None else {}
     for d in PERIODS:
         p = history.period(end - d * DAY, end)
         won = wins.get(d)
@@ -187,15 +257,18 @@ def build(history: ProfitHistory, positions: Any, trades: list[tuple[Any, ...]],
     }
 
 
-def read(whales: Whales, wallet: str, trades: list[tuple[Any, ...]],
-         now: float | None = None) -> dict[str, Any]:  # fmt: skip
-    """A wallet's record, read now on ``whales``' budget (the background's). The profit history must be read; the
-    completed positions may fail on their own (Polymarket's firewall, a list that slipped), leaving the win rate
-    unknown rather than the whole record."""
+def read(whales: Whales, wallet: str, trades: list[tuple[Any, ...]], kept: PositionHistory | None = None,
+         now: float | None = None) -> tuple[dict[str, Any], PositionHistory | None]:  # fmt: skip
+    """A wallet's record, read now on ``whales``' budget (the background's), and their positions kept with this read
+    added (``merge``: to keep for the next one; None when there's nothing new to keep). The profit history must be
+    read; the completed positions may fail on their own (Polymarket's firewall, a list that slipped), leaving the
+    win rate unknown rather than the whole record, and what's kept as it was."""
     now = datetime.now(UTC).timestamp() if now is None else now
     history = whales.profit_history(wallet)
+    pages = pages_for(kept, now)
     try:
-        positions = whales.completed_positions(wallet, max_pages=CLOSED_PAGES, held_pages=HELD_PAGES)
+        positions = whales.completed_positions(wallet, max_pages=pages, held_pages=HELD_PAGES)
     except Exception:  # VenueError mostly: the record goes on without a win rate
         positions = None
-    return build(history, positions, trades, now)
+    merged = None if positions is None else merge(kept, positions.positions, positions.complete, pages, now)
+    return build(history, positions, trades, now, kept=merged), merged

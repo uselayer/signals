@@ -67,6 +67,8 @@ from typing import Any
 
 from uselayer.whale_scores import ACTIVE_DAYS, RECOMMENDED, RISING_BETS
 
+from signals.records import PositionHistory
+
 SOURCES = ("leaderboard", "market", "feed", "search", "follow", "check")
 STATUSES = ("found", "scored", "checked", "failed")
 # Why a wallet isn't recommended now. The first three are about the evidence (what a quick check or a score saw of
@@ -150,6 +152,9 @@ CREATE TABLE IF NOT EXISTS records (wallet TEXT PRIMARY KEY, read_at REAL NOT NU
   won_7d INTEGER, closed_7d INTEGER, won_30d INTEGER, closed_30d INTEGER, won_90d INTEGER, closed_90d INTEGER,
   weeks_up INTEGER, weeks_known INTEGER, typical_usd REAL, result BLOB NOT NULL);
 CREATE INDEX IF NOT EXISTS records_by_last_buy ON records (last_buy);
+CREATE TABLE IF NOT EXISTS positions_kept (wallet TEXT NOT NULL, market TEXT NOT NULL, at REAL NOT NULL,
+  won INTEGER NOT NULL, PRIMARY KEY (wallet, market)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS positions_covered (wallet TEXT PRIMARY KEY, since REAL NOT NULL, read_at REAL NOT NULL);
 """
 # A phase 1 directory.db has wallets without these: added when it's first opened, empty (status "found").
 _PHASE_2_COLUMNS = (("last_active", "REAL"), ("status", "TEXT NOT NULL DEFAULT 'found'"), ("scored_at", "REAL"),
@@ -1226,10 +1231,22 @@ class Directory:
 
     # ---- the Leaderboard: track records (signals/records.py) ----
 
-    def keep_record(self, wallet: str, rec: dict[str, Any], via: str = "read", at: float | None = None) -> None:
+    def kept_positions(self, wallet: str) -> PositionHistory | None:
+        """A wallet's positions kept from its earlier record reads (``records.merge``), None if none are."""
+        w = wallet.lower()
+        with self._db() as con:
+            cov = con.execute("SELECT since, read_at FROM positions_covered WHERE wallet = ?", (w,)).fetchone()
+            if cov is None:
+                return None
+            rows = con.execute("SELECT market, at, won FROM positions_kept WHERE wallet = ?", (w,)).fetchall()
+        return PositionHistory(cov[0], cov[1], {m: (t, bool(won)) for m, t, won in rows})
+
+    def keep_record(self, wallet: str, rec: dict[str, Any], via: str = "read", at: float | None = None,
+                    positions: PositionHistory | None = None) -> None:  # fmt: skip
         """Keeps a wallet's track record (``records.build``) as its latest, ``via`` a read or copied from a kept
         score (``seed_records``). A read one also schedules the wallet's next look (RECORD_REFRESH_S) and leaves it
-        ``checked`` with nothing said against it: a record is facts, never a verdict."""
+        ``checked`` with nothing said against it: a record is facts, never a verdict. With ``positions`` (the read's
+        ``records.merge``) those replace the positions kept for the wallet, in the same write."""
         now = time.time() if at is None else at
         w = wallet.lower()
         per = rec.get("periods") or {}
@@ -1240,6 +1257,15 @@ class Directory:
         with self._db() as con:
             if not self._has(con, w):
                 self._add(con, [Seen(w, "search")], now)
+            if positions is not None:
+                con.execute("DELETE FROM positions_kept WHERE wallet = ?", (w,))
+                con.executemany(
+                    "INSERT INTO positions_kept VALUES (?, ?, ?, ?)",
+                    [(w, m, t, int(won)) for m, (t, won) in positions.rows.items()],
+                )
+                con.execute(
+                    "INSERT OR REPLACE INTO positions_covered VALUES (?, ?, ?)", (w, positions.since, positions.read_at)
+                )
             con.execute(
                 "INSERT OR REPLACE INTO records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (w, rec.get("read_at") or now, via, rec.get("last_buy"),
