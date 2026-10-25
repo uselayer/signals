@@ -134,9 +134,87 @@ def test_a_record_read_takes_the_profit_history_and_the_completed_positions() ->
             asked.append(("positions", w, k))
             raise engine.VenueError("rate_limited", "Polymarket's firewall said no.", venue="polymarket")
 
-    rec = records.read(Sdk(), AMY, [], NOW)  # type: ignore[arg-type]
-    assert asked == [("pnl", AMY), ("positions", AMY, {"max_pages": records.CLOSED_PAGES, "held_pages": records.HELD_PAGES})]
+    rec, kept = records.read(Sdk(), AMY, [], None, NOW)  # type: ignore[arg-type]
+    assert asked == [("pnl", AMY), ("positions", AMY, {"max_pages": records.FIRST_PAGES, "held_pages": records.HELD_PAGES})]
     assert rec["periods"]["30d"]["trading_pnl"] == 30 and rec["periods"]["30d"]["closed"] is None
+    assert kept is None  # nothing read: what's kept stays as it was
+
+
+# ---- positions kept between reads ----
+
+
+def kept_position(market: str, pnl: float, closed_days_ago: float) -> Any:
+    return SimpleNamespace(market=market, pnl=pnl, redeemed=True, end_date=None,
+                           closed_at=datetime.fromtimestamp(NOW - closed_days_ago * DAY, UTC))  # fmt: skip
+
+
+def busy_read(start_days_ago: float, at: float = NOW, prefix: str = "m") -> list[Any]:
+    """A cut read of a busy trader: the closed list's cap, the newest reaching back ``start_days_ago`` days from
+    ``at``, two in three made money."""
+    cap = records.CLOSED_PAGES * 50
+    ago = (NOW - at) / DAY
+    return [kept_position(f"{prefix}{i}", 1 if i % 3 else -1, ago + start_days_ago * (i + 1) / cap) for i in range(cap)]
+
+
+def test_a_read_that_reaches_back_to_the_last_one_extends_what_is_kept() -> None:
+    """Each read adds what closed since the last, so a busy trader's win rate reaches back further each time instead
+    of one read's 200 (THEHIGHLIFE, 23 Oct: 200 closed reached back about 10 days)."""
+    first = records.merge(None, busy_read(10, at=NOW - 8 * DAY, prefix="a"), False, records.CLOSED_PAGES, NOW - 8 * DAY)
+    assert first is not None and first.since == pytest.approx(NOW - 18 * DAY)
+    second = records.merge(first, busy_read(10, prefix="b"), False, records.CLOSED_PAGES, NOW)  # back past 8 days
+    assert second is not None and second.since == pytest.approx(NOW - 18 * DAY) and second.read_at == NOW
+    assert len(second.rows) == 2 * records.CLOSED_PAGES * 50
+    p = records.build(history(100, 1.0), None, [], NOW, kept=second)["periods"]
+    assert p["7d"]["closed"] is not None and p["30d"]["closed"] is None  # 18 days kept: 7 in full, 30 not yet
+
+
+def test_a_read_that_doesnt_reach_back_to_the_last_one_starts_again_from_what_it_read() -> None:
+    first = records.merge(None, busy_read(10, at=NOW - 20 * DAY, prefix="a"), False, records.CLOSED_PAGES, NOW - 20 * DAY)
+    second = records.merge(first, busy_read(10, prefix="b"), False, records.CLOSED_PAGES, NOW)  # a 10-day gap
+    assert second is not None and second.since == pytest.approx(NOW - 10 * DAY)
+    assert all(m.startswith("b") for m in second.rows)  # what the gap may have missed isn't counted
+
+
+def test_a_read_whose_held_list_may_be_cut_changes_nothing_kept_and_gives_no_win_rate() -> None:
+    kept = records.PositionHistory(NOW - 50 * DAY, NOW - DAY, {"x": (NOW - 2 * DAY, True)})
+    rows = [kept_position(f"m{i}", 1, i + 1) for i in range(30)]  # the closed list ended: the held list was cut
+    assert records.merge(kept, rows, False, records.CLOSED_PAGES, NOW) is None
+
+
+def test_a_complete_read_keeps_everything_back_to_the_keep_limit() -> None:
+    rows = [kept_position("new", 5, 3), kept_position("old", -5, records.KEEP_DAYS + 10)]
+    got = records.merge(None, rows, True, records.CLOSED_PAGES, NOW)
+    assert got is not None and got.since == NOW - records.KEEP_DAYS * DAY and set(got.rows) == {"new"}
+    p = records.build(history(100, 1.0), None, [], NOW, kept=got)["periods"]
+    assert (p["90d"]["won"], p["90d"]["closed"]) == (1, 1)
+
+
+def test_a_redeemed_position_read_again_is_the_new_reads() -> None:
+    """A loser kept as never redeemed that they later redeemed is in the new read's closed list: counted once."""
+    kept = records.PositionHistory(NOW - 30 * DAY, NOW - DAY, {"x": (NOW - 5 * DAY, False)})
+    rows = [kept_position("x", 2, 0.5)] + [kept_position(f"m{i}", 1, 0.5 + 2 * i / 200) for i in range(199)]
+    got = records.merge(kept, rows, False, records.CLOSED_PAGES, NOW)
+    assert got is not None and got.rows["x"] == (pytest.approx(NOW - 0.5 * DAY), True) and len(got.rows) == 200
+
+
+def test_the_next_read_takes_enough_pages_to_reach_back_to_the_last() -> None:
+    assert records.pages_for(None, NOW) == records.FIRST_PAGES
+    quiet = records.PositionHistory(NOW - 60 * DAY, NOW - 2 * DAY, {f"m{i}": (NOW - 3 * DAY - i * DAY, True) for i in range(5)})
+    assert records.pages_for(quiet, NOW) == records.CLOSED_PAGES
+    busy = records.PositionHistory(NOW - 9 * DAY, NOW - 2 * DAY,
+                                   {f"m{i}": (NOW - 2 * DAY - i * 0.001 * DAY, True) for i in range(1400)})  # fmt: skip
+    assert records.pages_for(busy, NOW) == 13  # 200 a day for the 2 days since, half again: 600, 12 pages and 1
+    assert records.pages_for(busy, NOW + 30 * DAY) == records.MAX_PAGES
+
+
+def test_the_directory_keeps_a_wallets_positions_with_its_record(d: Directory) -> None:
+    kept = records.PositionHistory(NOW - 20 * DAY, NOW, {"m1": (NOW - DAY, True), "m2": (NOW - 3 * DAY, False)})
+    d.keep_record(AMY, rec(100.0), at=NOW, positions=kept)
+    assert d.kept_positions(AMY) == kept and d.kept_positions(BEN) is None
+    d.keep_record(AMY, rec(100.0), at=NOW, positions=records.PositionHistory(NOW - DAY, NOW, {"m3": (NOW, True)}))
+    assert set(d.kept_positions(AMY).rows) == {"m3"}  # type: ignore[union-attr]
+    d.keep_record(AMY, rec(100.0), at=NOW)  # a read with nothing new to keep leaves them as they were
+    assert set(d.kept_positions(AMY).rows) == {"m3"}  # type: ignore[union-attr]
 
 
 # ---- the directory ----
