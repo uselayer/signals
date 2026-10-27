@@ -1,7 +1,7 @@
 # This repo
 
-Signals, on the uselayer SDK: signal discovery and trading intelligence, not a copy-trading app. Top traders on
-Polymarket (Kalshi too when switched on, see below), a page per trader, cross-venue links (with Kalshi on), and
+Signals, on the uselayer SDK: signal discovery and trading intelligence, not a copy-trading app. A Leaderboard of
+Polymarket traders' track records (Kalshi too when switched on, see below), a page per trader, a Watchlist, cross-venue links (with Kalshi on), and
 for every open trade what buying it now would really cost. It runs on the user's
 machine (`uv run signals`) and is hosted at usesignals.app: the same engine with `SIGNALS_HOSTED=1` on Railway,
 behind Vercel (see README, "Hosting").
@@ -34,10 +34,11 @@ behind Vercel (see README, "Hosting").
   "Same person on the other venue?") while it's off.
 - Keys come from the environment (hosted: Railway's service variables), are never logged, returned by the
   engine or written to disk.
-- Trader directory (README, "Trader directory"): wallets found, and where, in the store's `directory.db`, with
+- Trader directory: wallets found, and where, in the store's `directory.db`, with
   each one's evaluation (status, last scored, last active) and every score worked out. Found is not checked and
   not recommended, and a kept score is a record, not a pick: never say a found wallet is any good, and scoring and
-  its thresholds stay as they are. Traders shows the directory only with `SIGNALS_DISCOVERY=directory` (phase 5,
+  its thresholds stay as they are. The rest of this point is the skill test's (`SIGNALS_SKILL_TEST=1`) only, and
+  the sweep is off on the hosted app (`SIGNALS_DIRECTORY=0`, the owner's choice). Traders shows the directory only with `SIGNALS_DISCOVERY=directory` (phase 5,
   the owner's flag; `check`, the default, is the Worth following check's own 200): its latest fresh scores in the
   check's shape and order, through `_worth_load`, so the Feed, alerts and trader pages follow. At most
   `SIGNALS_DISCOVERY_LIMIT` (the page and the Feed's poller stay their size); Explore is never limited by it. Explore's
@@ -94,7 +95,7 @@ behind Vercel (see README, "Hosting").
   "Only $X is for sale" is only for an amount bigger than the book holds within the limit. Transparency over a
   quote that always succeeds.
 - Traders (the leaderboard, Top profit) and trader pages need no account; everything in the Feed (Following,
-  Recommended, Big trades, an alert's "Check your price") is behind signing in (Clerk: Google, or Telegram as a
+  Top traders, Big trades, an alert's "Check your price") is behind signing in (Clerk: Google, or Telegram as a
   custom OpenID Connect provider). Signed out, a Feed page is the sign-in page ("Sign in to see the Feed", Sign in,
   Browse traders), and the engine refuses its reads (`feed_reader`: `/api/live`, `/api/trading-now`, `/api/bet`)
   without a valid session. Without Clerk's key (running locally) nothing is gated. On a trader's page the Follow
@@ -123,7 +124,7 @@ behind Vercel (see README, "Hosting").
   blocked the bot is disconnected. Every trade of a trader you follow alerts unless you chose fewer for them
   (`alert_for` in follows.json: only trades over an amount, or a summary every 6 hours; `_wants`), and a sale of
   something their alert told you about always comes. Following a busy trader (over 20 alerts a day over the past
-  week: `_measure_pace`, kept in alerts.db `pace`) says so with an amount about 3 of their bets a day reached, worded
+  week: `_measure_pace`, kept in alerts.db `pace`) says so with an amount about 3 of their trades a day reached, worded
   as an estimate from last week, never a promise. At most 200 alerts per person per UTC day (a safety limit), then
   one message that says when alerts resume (00:00 UTC, and how long until then) and nothing until the next day. When 2+ traders you follow buy the same outcome, each within 6 hours of the one before (1 hour in
   Sports and Esports), the second buy sends one grouped alert (each one's price and buy time, the price now, how
@@ -165,7 +166,7 @@ behind Vercel (see README, "Hosting").
     Crypto, Esports; Skip means all markets). Nothing else: no budget, goals or signup. The choice is kept in
     localStorage (and, when picked here or with the Feed's Change, on the account for big-trade alerts), every read and write in try/catch; if storage is blocked it holds for the visit, and no one is
     ever stuck on that screen.
-  - Two separate readings, never merged: profit (track record) and skill (the tier). The tier is skill and track
+  - With the skill test on only: two separate readings, never merged: profit (track record) and skill (the tier). The tier is skill and track
     record only (uselayer 0.10's `segment`; a kept older result is re-tiered with the SDK's `segment_of`). Nothing
     may present a trader's activity as a tested way to make money: following and the Feed are for learning what
     traders do, not a signal to buy (`NOT_A_TIP`).
@@ -175,8 +176,9 @@ behind Vercel (see README, "Hosting").
     column, sort, filter, "Copying is paused" callout, How-we-pick tab, copy line in an alert, the SDK's
     "Copyable" check on a trader page, or colour (an open trade reads the same for every trader). A guard test
     keeps the page's words free of "Copy", "Copyable" and "Copying". Bringing it back is the owner's call.
-  - Traders lists the traders we recommend in one section, **Sharps** (the engine's `section_of`: every recommended
-    tier), with its ranks and "Show more" in the sort picked (by default Recommended's tier order); "See all checked
+  - Traders is the Leaderboard (above): facts only, no tier, chip, "Sharp", "Recommended" or "Why they're here".
+    Only with the skill test on (`SIGNALS_SKILL_TEST=1`), the old way back: Traders lists the traders we recommend
+    in one section, **Sharps** (the engine's `section_of`: every recommended tier), with its ranks and "Show more" in the sort picked (by default Recommended's tier order); "See all checked
     traders" is one flat list. Recommended never vouches for a brand-new account or one it can't show in full (owner,
     19 Oct): a recommended tier needs a figure in every column (trading profit, trend, a win rate from 10 settled
     trades, usual trade) and 4 weeks of history (`VOUCH_WEEKS`), or `held_back` moves the trader to Limited evidence
@@ -187,7 +189,7 @@ behind Vercel (see README, "Hosting").
     recommended and the thresholds are the SDK's. Nothing a visitor reads says "Rising" (a guard test), and no new
     label or "hot" list. A Rising trader's "Why they're here" is a plain fact with no hedge ("The price has tended
     to move their way after they buy, over 12 trades so far."), never "too few to be sure" beside a Sharp chip,
-    and never "it holds without their best trades" (not shown for them). An open trade (their page, a Feed card, a trader page) says only "Now 52¢ · they paid 49¢", for every
+    and never "it holds without their best trades" (not shown for them). For everyone, whichever list: an open trade (their page, a Feed card, a trader page) says only "Now 52¢ · they paid 49¢", for every
     trader, never green or "you can still get in". The "Buy on Polymarket" link, which only opens the market, "Check your price" and "What buying now
     costs" stay for everyone: neutral market data. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; consistency is 12 weeks,
     win record and usual trade the last 30 days. Consistency is "X of N weeks up", where a week counts profit
@@ -200,7 +202,7 @@ behind Vercel (see README, "Hosting").
     copying them still lost after costs).
     One bar: filters on the left (market chips = the onboarding choice), how you view the list on
     the right (search name or wallet, period, sort). Columns are grouped as Track record and Style.
-    Recommendations never include Big profit, edge unproven; Profit rests on one win (big profit that's a loss
+    With the skill test on, recommendations never include Big profit, edge unproven; Profit rests on one win (big profit that's a loss
     without their biggest win: the only tier that says luck); Our price test didn't show skill (the SDK's "Edge not
     proven"); Not enough data (too few trades could be checked: never shown as a verdict on skill); or Market maker or
     arbitrage traders (the SDK's "No view"), and the checks are never loosened to
@@ -230,7 +232,8 @@ behind Vercel (see README, "Hosting").
     one sorts by realized profit in it (all time) and offers "Made money in X". Only the traders already listed are
     sorted or filtered: no new tier or label, no recommendation loosened, no raw-profit leaderboard beyond this sort.
     Its figures come from what's kept, never a read on a page load: a daily job (`_categories_loop`,
-    `categories_round`) reads each recommended trader's realized profit by category once a day on the
+    `categories_round`) reads each recommended trader's realized profit by category once a day (with the skill test
+    off there are no recommended traders, so it reads no one, and a profile reads its own on demand) on the
     background's budget (`background`, ~1,300 reads a day for ~110 traders) into directory.db
     (`realized_categories`); a trader profile uses the kept one while it's under a day old, with no turn. A kept
     figure over CATEGORY_KEPT_S old, or a trader not read yet, shows "—" and is never counted as having made money. SIGNALS_CATEGORY_READS=0 stops the reads.
@@ -244,28 +247,29 @@ behind Vercel (see README, "Hosting").
     (where the price is) is neutral for every trader. Nothing else is colored.
   - Plain words, sentence case, one font (Host Grotesk, as on Layer's site), tabular numbers, whole cents (tenths
     only under 1¢ or when two prices would look equal). No UPPERCASE headers, no tooltip-on-header help.
-  - Methodology (tests, z-scores, margins) stays out of the main view: in "How we pick traders" or a Details fold.
+  - Methodology (tests, z-scores, margins) stays out of the main view: in a Details fold.
   - No wallet addresses on screen: unnamed traders get "Trader 0x91…76" and an identicon.
   - Must look good at 390px as well as desktop. One width: the header, Feed, Traders and trader profiles share
     the 1200px container (Top profit keeps a 680px reading column), so the account sits at the header's right and
     nothing moves between tabs. Feed cards are a grid: three across on desktop, one on a phone. Keep loading,
     empty and error states.
   - The Feed has two parts. **Following** (`#/`, the default, `/api/me/feed`): every trade from the last day of
-    the traders you follow, whoever they are (following is also research). **Recommended** (`#/recommended`, `/api/live`): trades of $1,000 or more (`RECOMMENDED_MIN_USD`) from
-    the traders in Sharps, with the same neutral cards as Following. Recommended
+    the traders you follow, whoever they are (following is also research). **Top traders** (`#/recommended`, `/api/live`, `pool` "top"): trades of $1,000 or more (`RECOMMENDED_MIN_USD`) from
+    the Leaderboard's first `FEED_TOP` by trading profit over 30 days (with the skill test on, this part is
+    **Recommended**, from the traders in Sharps), with the same neutral cards as Following. It
     stays quiet (fewer, bigger trades) and never more prominent than Following: second in the switch, never the
     default. Both keep the switch "Only trades I can still get into", one card per outcome with "Also bought
-    by", and the delay line. Big trades (`#/big`) is linked from the foot of Recommended. Traders' trades come from
+    by", and the delay line. Big trades (`#/big`) is linked from the foot of Top traders. Traders' trades come from
     one background poller (`_live_loop`, one read at a time, in 30 s rounds: everyone followed each round,
-    Recommended's every 60 s while the round's slot allows, oldest first, so a bigger pool is read less often,
+    Top traders' every 60 s while the round's slot allows, oldest first, so a bigger pool is read less often,
     never faster). Per trader it reads their trades, and their open positions only when there's a trade from the
     last day to price (kept while their trades don't change, for 90 s); never the profile or stats. Polymarket's
-    shared $1,000+ trades feed (one read for everyone) moves a Recommended trader who just traded to the front.
+    shared $1,000+ trades feed (one read for everyone) moves a top trader who just traded to the front.
     Pages only read what it keeps, so a busy Feed never adds Polymarket reads: a view reads at most 3 traders the
     poller hasn't read yet itself ("Still reading N traders"), and "Updated" is when the oldest of it was read.
     The Feed never says "None of … traded" for traders it hasn't read: it says it's still reading them, or that
     they couldn't be read, and notes when some of it was last read over 5 minutes ago. Everyone followed is read
-    once every round however many there are (Recommended keeps a floor of 4 reads a round); alerts read what the
+    once every round however many there are (Top traders keeps a floor of 4 reads a round); alerts read what the
     poller keeps, never on their own; a gap of more than 100 trades between reads is read further back (500);
     a rate limit ends the round.
   - Market chips live on Traders only. The Feed follows the same choice and says so in one line ("Your markets:
@@ -278,8 +282,8 @@ behind Vercel (see README, "Hosting").
 ## Deploying (only when the owner asks)
 
 - **Engine** (Railway project and service `signals`): `railway up --service signals` from the repo root. It
-  builds the `Dockerfile`; the store is on the service's volume at `/data`. A deploy restarts the server, and a
-  Worth following check that hasn't finished starts over (20–30 min).
+  builds the `Dockerfile`; the store is on the service's volume at `/data`. A deploy restarts the server, and
+  record reads in progress start over (with the skill test on, an unfinished Worth following check takes 20–30 min).
 - **From a worktree** (`.claude/worktrees/…`), run `railway up . --path-as-root --service signals`. Without
   `--path-as-root` it uploads the linked folder (the owner's main checkout), which can be stale: this briefly
   put old code live on 12 Oct.
