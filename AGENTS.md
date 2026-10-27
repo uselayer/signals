@@ -64,7 +64,8 @@ behind Vercel (see README, "Hosting").
 - Analytics (README, "Analytics"): PostHog on the page, off unless `SIGNALS_POSTHOG_KEY` is set, sent through
   `/lyr` (`web/vercel.json`). A signed-in person is identified by their Clerk user id only: never send PostHog a
   name, email, Telegram account or anything from `/api/me`, and keep fields and Clerk's menus masked in replays.
-  It's for seeing how the page is used; Counting (above) stays the record of alerts and follows.
+  It's for seeing how the page is used; Counting (above) stays the record of alerts and follows. Named events go
+  through `track` (README lists them) and say where on the page, never which trader.
 - Signals is a consumer website (usesignals.app); running it locally is for development. It places no orders:
   no sandbox, no in-app trading, no automatic copying, and it never holds anyone's keys or funds. Buying means
   "What buying now costs", then "Buy on Polymarket ↗", where the user buys it themselves. A session never

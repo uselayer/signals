@@ -836,12 +836,14 @@ async function waitForPace(wallet) {
   }
   redrawFollow();
 }
+// Which page the Follow control is on, for analytics: a trader's watch page or their trader page.
+const followFrom = () => location.hash.startsWith("#/watch/") ? "watch page" : "trader page";
 function redrawFollow() {
   const el = $("#follow");
   if (!el) return;
   el.innerHTML = followHtml(el.dataset.wallet);
   $$("[data-follow]", el).forEach((b) => (b.onclick = () => whenSignedIn(async () => {
-    try { auth.me = await post("/api/me/follows", { wallet: b.dataset.follow }); } catch (e) { toast(esc(e.message)); }
+    try { auth.me = await post("/api/me/follows", { wallet: b.dataset.follow }); track("trader followed", { from: followFrom() }); } catch (e) { toast(esc(e.message)); }
     redrawFollow();
     waitForPace(b.dataset.follow);
   })));
@@ -856,7 +858,7 @@ function redrawFollow() {
     saveAlerts(b.dataset.saveOver, { mode: "over", usd });
   }));
   $$("[data-unfollow]", el).forEach((b) => (b.onclick = async () => {
-    try { auth.me = await api(`/api/me/follows/${b.dataset.unfollow}`, { method: "DELETE" }); } catch (e) { toast(esc(e.message)); }
+    try { auth.me = await api(`/api/me/follows/${b.dataset.unfollow}`, { method: "DELETE" }); track("trader unfollowed", { from: followFrom() }); } catch (e) { toast(esc(e.message)); }
     redrawFollow();
   }));
   $$("[data-tg]", el).forEach((b) => (b.onclick = () => connectTelegram(b)));
@@ -2985,7 +2987,7 @@ const wl = { d: null, err: null, seq: 0 };
 async function watchlistPage() {
   $("#app").innerHTML = `<div class="wl-top"><div><h1>Watchlist</h1><p class="lede">The traders you follow: what they hold and every change they make.</p></div>
     <button class="btn" id="wladd">+ Follow a trader</button></div><div id="wlbody">${skelCards(3)}</div>`;
-  $("#wladd").onclick = () => followSheet();
+  $("#wladd").onclick = () => followSheet("watchlist");
   await loadWatchlist();
 }
 async function loadWatchlist() {
@@ -3011,7 +3013,7 @@ function renderWatchlist() {
   if (!d.traders.length) {
     box.innerHTML = emptyState("You don't follow anyone yet", "Follow a trader to see what they hold and every change they make, a few minutes after they make it.",
       `<button class="btn" id="wlfirst">Follow a trader</button> <a class="btn ghost" href="#/traders">Find traders</a>`);
-    $("#wlfirst").onclick = () => followSheet();
+    $("#wlfirst").onclick = () => followSheet("empty watchlist");
     return;
   }
   const fresh = d.traders.map((t) => t.moves.filter((m) => isNew(m, seenAt(t.wallet))).length);
@@ -3042,7 +3044,8 @@ function wlCard(t, fresh) {
 
 // "Follow a trader": paste a profile link or wallet, or type a name the directory knows; see who it is and their
 // record; Follow. Their watch page opens, with their last 30 days already there.
-function followSheet() {
+function followSheet(from) {
+  track("follow sheet opened", { from });
   const panel = sheet(`<h2>Follow a trader</h2>
     <p class="explain">Paste their Polymarket profile link or wallet address, or type their name. You'll see what they hold, their record and every change they make.</p>
     <form class="wl-find" id="wlfind"><input id="wlq" type="text" autocomplete="off" spellcheck="false" placeholder="polymarket.com/profile/0x… or a name" aria-label="Profile link, wallet address or name">
@@ -3054,6 +3057,7 @@ function followSheet() {
     found.innerHTML = `<div class="skel" style="width:60%;height:14px;margin:18px 0"></div>`;
     let r;
     try { r = await api(`/api/find?q=${encodeURIComponent(q.value)}`); } catch (err) { found.innerHTML = `<p class="inline-err">${esc(err.message)}</p>`; return; }
+    track("trader looked up", { by: r.wallet ? "link or wallet" : "name", found: r.wallet ? 1 : r.results.length });
     if (r.wallet || r.results.length === 1) return followPreview(found, r.wallet || r.results[0].wallet);
     if (!r.results.length) {
       found.innerHTML = `<p class="explain">No trader by that name in Signals yet. Paste their Polymarket profile link (polymarket.com/profile/0x…) or wallet address instead: it's the address of their profile page on Polymarket.</p>`;
@@ -3084,7 +3088,7 @@ async function followPreview(box, wallet) {
     <p class="fine">Following is how you hear about their trades. Signals places no orders.</p>`;
   const go = $("#wlfollow", box);
   if (go) go.onclick = () => whenSignedIn(async () => {
-    try { auth.me = await post("/api/me/follows", { wallet }); } catch (e) { const err = $("#wlerr"); if (err) { err.hidden = false; err.textContent = e.message; } return; }
+    try { auth.me = await post("/api/me/follows", { wallet }); track("trader followed", { from: "follow sheet" }); } catch (e) { const err = $("#wlerr"); if (err) { err.hidden = false; err.textContent = e.message; } return; }
     closeSheet();
     location.hash = `#/watch/${wallet}`;
     toast(`Following ${esc(name)}. New changes show up within about 30 seconds.`);
@@ -3288,6 +3292,11 @@ function startAnalytics(key) {
     analyticsOn = true;
     if (auth.uid) window.posthog.identify(auth.uid);
   }).catch(() => {}); // blocked or down: the page works the same without it
+}
+// A named event for what page views and clicks can't say on their own (following, unfollowing, looking a trader up):
+// where on the page it happened, never which trader or anything from /api/me.
+function track(event, props) {
+  if (analyticsOn) window.posthog.capture(event, props);
 }
 // Signing in links this browser's visits to the account; signing out starts a new anonymous visitor.
 function analyticsAccount(uid, was) {

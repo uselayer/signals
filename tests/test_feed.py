@@ -489,6 +489,21 @@ def test_analytics_knows_a_signed_in_person_by_their_clerk_id_only(run_js: Any) 
     assert got == [["identify", "user_1"], ["identify", "user_2"], ["reset"]]
 
 
+def test_follow_events_say_where_never_which_trader(run_js: Any) -> None:
+    # Following and unfollowing are named PostHog events with the page they happened on, and nothing about the trader.
+    got = run_js(("analyticsOn", "track", "followFrom"), """(() => {
+      const calls = []; globalThis.window = { posthog: { capture: (...a) => calls.push(a) } };
+      globalThis.location = { hash: "#/watch/0xabc" };
+      track("trader followed", { from: followFrom() }); // analytics off (no key, or blocked): nothing is sent
+      analyticsOn = true;
+      track("trader followed", { from: followFrom() });
+      location.hash = "#/worth/0xabc";
+      track("trader unfollowed", { from: followFrom() });
+      return calls;
+    })()""")
+    assert got == [["trader followed", {"from": "watch page"}], ["trader unfollowed", {"from": "trader page"}]]
+
+
 def test_one_polling_loop_however_often_the_feed_is_loaded(run_js: Any) -> None:
     got = run_js(("feed", "FEED_KEYS", "loadFeed"), """(async () => {
       let timers = 0, live = 0; const pending = [];
