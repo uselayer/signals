@@ -7,9 +7,9 @@ import rec from "../public/nemi/events.json";
 // "Paper trade on Nemi": the launch, mostly the real app. public/nemi/app.mp4 is a scripted recording of Nemi's site
 // reading the live engine (npm run record:nemi); its step times are in events.json, and each shot below plays a stretch
 // of it with a camera on what matters, in the order the story needs (the recording opens the trades in another order).
-// Colors and fonts are the site's own (~/dev/nemi src/index.css: light paper, ink, one amber accent).
-const C = { bg: "#f3f3f1", raised: "#ffffff", ink: "#1f1f1f", ink2: "#5a5a56", ink3: "#8a8a86", rule: "#e2e2de",
-  accent: "#8a4b00", accentSoft: "#fbf0e6" };
+// Colors and fonts are the site's own (~/dev/nemi src/index.css: black, mint-tinted ink, one neon mint accent).
+const C = { bg: "#000000", raised: "#0e0e10", ink: "#e6f5ef", ink2: "#a3b5ae", ink3: "#6b7c76", rule: "#1c1c1f",
+  accent: "#3dffc5", accentSoft: "#06251c" };
 const SERIF = "Newsreader", SANS = "Inter", MONO = "JetBrains Mono";
 loadFont({ family: SERIF, url: staticFile("nemi/newsreader-latin-400-normal.woff2"), weight: "400" });
 loadFont({ family: SERIF, url: staticFile("nemi/newsreader-latin-500-normal.woff2"), weight: "500" });

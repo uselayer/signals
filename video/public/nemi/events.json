@@ -1,12 +1,12 @@
 {
-  "recorded": "2026-10-27T16:13:04.617Z",
-  "frames": 1538,
+  "recorded": "2026-10-27T23:43:22.298Z",
+  "frames": 1496,
   "strategy": {
     "id": "vwap-rider",
     "startingBalance": 5000,
-    "balance": 6189.19,
-    "pnl": 1189.19,
-    "pnlPct": 23.8
+    "balance": 148.13,
+    "pnl": -4851.87,
+    "pnlPct": -97
   },
   "trades": {
     "slip": {
@@ -55,25 +55,25 @@
   "events": {
     "start": -0.001,
     "home": 1,
-    "new": 3.976,
-    "pick": 5.391,
-    "strategy": 6.964,
-    "statsSeen": 9.484,
-    "slip": 11.055,
-    "slipBook": 13.307,
-    "slipCostScroll": 13.906,
-    "slipCost": 15.04,
-    "slipEndScroll": 17.146,
-    "settle": 18.271,
-    "settleEnd": 21.191,
-    "partial": 21.266,
-    "partialNote": 23.098,
-    "refused": 25.056,
-    "refusedNote": 26.771,
-    "report": 28.65,
-    "waterfallSeen": 31.064,
-    "reportScroll": 31.565,
-    "stats": 32.882,
-    "end": 35.592
+    "new": 3.971,
+    "pick": 5.386,
+    "strategy": 6.971,
+    "statsSeen": 9.497,
+    "slip": 11.065,
+    "slipBook": 13.285,
+    "slipCostScroll": 13.887,
+    "slipCost": 15.008,
+    "slipEndScroll": 17.119,
+    "settle": 18.249,
+    "settleEnd": 21.158,
+    "partial": 21.205,
+    "partialNote": 23.04,
+    "refused": 24.981,
+    "refusedNote": 26.714,
+    "report": 28.588,
+    "waterfallSeen": 31.009,
+    "reportScroll": 31.51,
+    "stats": 32.829,
+    "end": 35.537
   }
 }

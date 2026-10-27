@@ -35,7 +35,7 @@ rmSync(FRAMES, { recursive: true, force: true });
 mkdirSync(FRAMES, { recursive: true });
 
 const browser = await chromium.launch({ args: ["--disable-web-security"] });
-const page = await browser.newPage({ viewport: { width: 1920 * Z, height: 1080 * Z }, colorScheme: "light" });
+const page = await browser.newPage({ viewport: { width: 1920 * Z, height: 1080 * Z }, colorScheme: "dark" });
 
 await page.addInitScript((z) => {
   addEventListener("DOMContentLoaded", () => {
