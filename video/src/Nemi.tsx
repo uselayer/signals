@@ -144,10 +144,11 @@ const End = () => (
   </AbsoluteFill>
 );
 
-// Sound: ticks on the two clicks, over the owner's pick of music when it's in public/ (not in git): `music` from
-// `from` seconds (its drop, so the video opens on the beat), at `gain`. No track: ticks only.
+// Sound: a tick on the click, over the owner's pick of music when it's in public/ (not in git): `music` from `from`
+// seconds (its drop, so the video opens on the beat), at `gain`. No track: the tick only. The default is "Still I Rise"
+// from 61.22 s: a beat of silence ends there and the beat hits at 61.27 s.
 export type NemiProps = { music: string; from: number; gain: number };
-export const NEMI_DEFAULTS: NemiProps = { music: "nemi-music.mp3", from: 0, gain: 0.7 };
+export const NEMI_DEFAULTS: NemiProps = { music: "nemi-music.wav", from: 61.22, gain: 0.89 };
 const CLICKS = [ev.pick].map((t) => frameOf(t + 0.05));
 const Sound = ({ music, from, gain }: NemiProps) => (
   <>
