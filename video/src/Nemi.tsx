@@ -145,16 +145,16 @@ const End = () => (
 );
 
 // Sound: a tick on the click, over the owner's pick of music when it's in public/ (not in git): `music` from `from`
-// seconds (its drop, so the video opens on the beat), at `gain`. No track: the tick only. The default is "Still I Rise"
-// from 61.22 s: a beat of silence ends there and the beat hits at 61.27 s.
+// seconds, at `gain`, faded in over a third of a second. No track: the tick only. The default is "Precision Pulse" from
+// 27.34 s: its build-up plays under the hook and its drop (30.57 s) lands as the first shot cuts in (frame 97).
 export type NemiProps = { music: string; from: number; gain: number };
-export const NEMI_DEFAULTS: NemiProps = { music: "nemi-music.wav", from: 61.22, gain: 0.89 };
+export const NEMI_DEFAULTS: NemiProps = { music: "nemi-music.wav", from: 27.34, gain: 0.95 };
 const CLICKS = [ev.pick].map((t) => frameOf(t + 0.05));
 const Sound = ({ music, from, gain }: NemiProps) => (
   <>
     {getStaticFiles().some((f) => f.name === music) && (
       <Audio src={staticFile(music)} trimBefore={Math.round(from * FPS)}
-        volume={(f) => interpolate(f, [0, 2, NEMI_DURATION - 36, NEMI_DURATION], [0, gain, gain, 0], clamp)} />
+        volume={(f) => interpolate(f, [0, 10, NEMI_DURATION - 36, NEMI_DURATION], [0, gain, gain, 0], clamp)} />
     )}
     {CLICKS.map((c) => <Sequence key={c} from={c} durationInFrames={6}><Audio src={staticFile("tick.wav")} volume={0.6} /></Sequence>)}
   </>
