@@ -1,0 +1,79 @@
+{
+  "recorded": "2026-10-27T16:13:04.617Z",
+  "frames": 1538,
+  "strategy": {
+    "id": "vwap-rider",
+    "startingBalance": 5000,
+    "balance": 6189.19,
+    "pnl": 1189.19,
+    "pnlPct": 23.8
+  },
+  "trades": {
+    "slip": {
+      "id": "276",
+      "time": "2026-10-27T13:45:10.502Z",
+      "market": "Bitcoin Up or Down - October 27, 9:45AM-10:00AM ET",
+      "side": "BUY",
+      "token": "Down",
+      "askedQty": 500,
+      "askedPrice": 0.47,
+      "filledQty": 500,
+      "filledAvgPrice": 0.4833,
+      "fee": 8.73656,
+      "slippage": 0.0133,
+      "status": "full"
+    },
+    "partial": {
+      "id": "192",
+      "time": "2026-10-27T10:40:30.502Z",
+      "market": "Bitcoin Up or Down - October 27, 6:30AM-6:45AM ET",
+      "side": "BUY",
+      "token": "Up",
+      "askedQty": 500,
+      "askedPrice": 0.99,
+      "filledQty": 459.99,
+      "filledAvgPrice": 0.99,
+      "fee": 0.31877,
+      "slippage": 0,
+      "status": "partial"
+    },
+    "refused": {
+      "id": "170",
+      "time": "2026-10-27T09:44:50.501Z",
+      "market": "Bitcoin Up or Down - October 27, 5:30AM-5:45AM ET",
+      "side": "BUY",
+      "token": "Up",
+      "askedQty": 500,
+      "askedPrice": 0.99,
+      "filledQty": 0,
+      "filledAvgPrice": 0,
+      "fee": 0,
+      "slippage": 0,
+      "status": "refused"
+    }
+  },
+  "events": {
+    "start": -0.001,
+    "home": 1,
+    "new": 3.976,
+    "pick": 5.391,
+    "strategy": 6.964,
+    "statsSeen": 9.484,
+    "slip": 11.055,
+    "slipBook": 13.307,
+    "slipCostScroll": 13.906,
+    "slipCost": 15.04,
+    "slipEndScroll": 17.146,
+    "settle": 18.271,
+    "settleEnd": 21.191,
+    "partial": 21.266,
+    "partialNote": 23.098,
+    "refused": 25.056,
+    "refusedNote": 26.771,
+    "report": 28.65,
+    "waterfallSeen": 31.064,
+    "reportScroll": 31.565,
+    "stats": 32.882,
+    "end": 35.592
+  }
+}
