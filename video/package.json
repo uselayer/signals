@@ -1,0 +1,26 @@
+{
+  "name": "signals-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pull": "node scripts/pull.mjs",
+    "studio": "remotion studio",
+    "render": "remotion render TraderStory out/trader-story.mp4",
+    "still": "remotion still TraderStory out/frame.png",
+    "render:hl": "remotion render SameGame out/same-game.mp4",
+    "record:watchlist": "node scripts/record-watchlist.mjs",
+    "render:watchlist": "remotion render Watchlist out/signals-watchlist.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.534",
+    "@remotion/fonts": "4.0.534",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "remotion": "4.0.534"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.8",
+    "playwright": "1.64.0",
+    "typescript": "5.8.3"
+  }
+}
