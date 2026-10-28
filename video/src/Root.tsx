@@ -2,6 +2,7 @@ import { Composition } from "remotion";
 import { TraderStory, DURATION } from "./TraderStory";
 import { SameGame, SAME_GAME_DURATION } from "./SameGame";
 import { Watchlist, WATCHLIST_DEFAULTS, WATCHLIST_DURATION } from "./Watchlist";
+import { Baskets, BASKETS_DEFAULTS, BASKETS_DURATION } from "./Baskets";
 
 // 4:5 portrait fills the most of a phone's X feed.
 export const Root = () => (
@@ -11,5 +12,7 @@ export const Root = () => (
     {/* 16:9: most of it is the app on a desktop screen. */}
     <Composition id="Watchlist" component={Watchlist} durationInFrames={WATCHLIST_DURATION} fps={30} width={1920} height={1080}
       defaultProps={WATCHLIST_DEFAULTS} />
+    <Composition id="Baskets" component={Baskets} durationInFrames={BASKETS_DURATION} fps={30} width={1920} height={1080}
+      defaultProps={BASKETS_DEFAULTS} />
   </>
 );

@@ -1,0 +1,24 @@
+{
+  "recorded": "Oct 28, 2026",
+  "note": "The owner's real basket on usesignals.app, read 2026-10-28 ~22:20 UTC (5:20 PM CT): /api/me/baskets/<id>/view and the page as it showed it.",
+  "basket": "My traders",
+  "traders": ["NM-P", "gopfan2", "vibing123", "BreakTheBank"],
+  "cards": [
+    { "name": "NM-P", "moves": [["Bought", "$1.2K", "Spread: Hawks (−2.5)"], ["Bought", "$120", "Spread: Timberwolves (−3.5)"], ["Bought", "$30", "Knicks vs. Bulls"]] },
+    { "name": "gopfan2", "moves": [["Sold", "$26.9K", "Will Flávio Bolsonaro win…"], ["Bought", "$14.8K", "2026 Balance of Power: D Senate, D House"]] },
+    { "name": "vibing123", "moves": [["Bought", "$2.5K", "LoL: Top Esports vs Bilibili Gaming"], ["Bought", "$955", "LoL: Team Liquid vs LOUD"], ["Bought", "$3.2K", "Counter-Strike: Vitality…"]] },
+    { "name": "BreakTheBank", "moves": [["Bought", "$1.1K", "Thunder vs. Mavericks"], ["Bought", "$146", "Spread: Pistons (−6.5)"], ["Bought", "$3.04", "Will the Republican Party…"]] }
+  ],
+  "agree": [
+    { "title": "2026 Balance of Power: D Senate, D House", "side": "Yes", "count": 2, "of": 4, "who": ["BreakTheBank", "gopfan2"],
+      "other": "No one in the basket holds another side", "putIn": "$255K", "paid": "65¢", "now": "66¢", "last": "gopfan2 · $14.8K · 8d ago" },
+    { "title": "Will the Republicans win the Montana Senate race in 2026?", "side": "Yes", "count": 2, "of": 4, "who": ["BreakTheBank", "gopfan2"],
+      "other": "No one in the basket holds another side", "putIn": "$41K", "paid": "89¢", "now": "89¢" },
+    { "title": "Will the Republican Party control the Senate after the 2026 Midterm elections?", "side": "No", "count": 2, "of": 4, "who": ["BreakTheBank", "gopfan2"] }
+  ],
+  "split": [
+    { "title": "Will the Democratic Party control the Senate after the 2026 Midterm elections?", "sides": [["Yes", 1], ["No", 1]], "who": "BreakTheBank vs gopfan2" },
+    { "title": "Lakers vs. Clippers", "sides": [["Clippers", 1], ["Lakers", 1]], "who": "BreakTheBank vs NM-P" },
+    { "title": "Thunder vs. Mavericks", "sides": [["Mavericks", 1], ["Thunder", 1]], "who": "BreakTheBank vs NM-P" }
+  ]
+}

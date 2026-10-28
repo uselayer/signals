@@ -9,7 +9,8 @@
     "still": "remotion still TraderStory out/frame.png",
     "render:hl": "remotion render SameGame out/same-game.mp4",
     "record:watchlist": "node scripts/record-watchlist.mjs",
-    "render:watchlist": "remotion render Watchlist out/signals-watchlist.mp4"
+    "render:watchlist": "remotion render Watchlist out/signals-watchlist.mp4",
+    "render:baskets": "remotion render Baskets out/signals-baskets.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.534",
