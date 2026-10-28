@@ -538,6 +538,68 @@
   .wt-move .t { font-weight: 500; overflow-wrap: anywhere; }
   .wt-move .s { font-size: 13px; color: var(--muted); margin-top: 3px; }
   .wt-move .when { font-size: 12.5px; color: var(--faint); white-space: nowrap; }
+  /* Baskets: tabs over the Watchlist (everyone you follow, then each basket), and a basket's view: where its traders
+     agree beside where they split and their latest changes. Counts are facts in neutral colours (only gains and
+     losses get colour). */
+  .bk-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .bk-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--fg); font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  .bk-chip:hover { background: var(--soft); }
+  .bk-chip .n { color: var(--muted); font-size: 13px; }
+  .bk-chip.on { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  .bk-chip.on .n { color: var(--bg); opacity: .7; }
+  .bk-chip.add { border-style: dashed; color: var(--muted); }
+  .bk-head { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; margin-bottom: 16px; }
+  .bk-faces { display: flex; flex: none; }
+  .bk-faces > * { margin-right: -8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--card); }
+  .bk-head .grow { flex: 1 1 240px; min-width: 0; display: grid; gap: 2px; }
+  .bk-head .name { font-size: 17px; }
+  .bk-seen { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  .bk-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+  .bk-main { flex: 999 1 540px; min-width: 0; }
+  .bk-side { flex: 1 1 320px; min-width: 0; display: grid; gap: 16px; }
+  .bk-list { padding: 0; overflow: hidden; }
+  .bk-list .bk-h { padding: 16px 18px 12px; }
+  .bk-list h2 { font-size: 17px; }
+  .bk-list .bk-h p, .bk-none { margin: 3px 0 0; font-size: 13.5px; color: var(--muted); }
+  .bk-none { padding: 4px 18px 18px; margin: 0; }
+  .bk-row { border-top: 1px solid var(--line); padding: 15px 18px; display: grid; gap: 10px; }
+  .bk-top { display: flex; align-items: flex-start; gap: 10px; }
+  .bk-top .wl-dot { margin-top: 8px; }
+  .bk-top .t { flex: 1; min-width: 0; font-weight: 600; font-size: 15.5px; overflow-wrap: anywhere; }
+  .bk-count { flex: none; display: flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
+  .bk-side-tag { display: inline-block; font-size: 13px; font-weight: 600; background: var(--raised); border-radius: 6px; padding: 1px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bk-who { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding-left: 17px; font-size: 13.5px; color: var(--muted); }
+  .bk-bars { display: flex; gap: 3px; }
+  .bk-bars span { width: 16px; height: 6px; border-radius: 3px; background: var(--line); }
+  .bk-bars span.on { background: var(--fg); }
+  .bk-bars span.alt { background: var(--faint); opacity: .55; }
+  .bk-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-left: 17px; }
+  .bk-tiles div { background: var(--soft); border-radius: var(--r-sm); padding: 8px 10px; min-width: 0; }
+  .bk-tiles span { display: block; font-size: 12px; color: var(--muted); }
+  .bk-tiles b { font-weight: 600; }
+  .bk-last { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 17px; font-size: 13.5px; }
+  .bk-last .link { margin-left: auto; }
+  .bk-split { border-top: 1px solid var(--line); padding: 12px 18px; display: grid; gap: 6px; }
+  .bk-split .t { font-weight: 500; overflow-wrap: anywhere; }
+  .bk-split .s { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: 13.5px; }
+  .bk-change { border-top: 1px solid var(--line); padding: 11px 18px; display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; gap: 10px; align-items: start; font-size: 14px; }
+  .bk-change:hover { background: var(--soft); }
+  .bk-change .wl-dot { margin-top: 7px; }
+  .bk-change .s { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .bk-change .when { font-size: 12.5px; color: var(--faint); white-space: nowrap; }
+  .bk-note { font-size: 13.5px; color: var(--muted); margin: -6px 0 14px; }
+  .bk-label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+  .bk-input { width: 100%; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: var(--r-sm); padding: 11px 12px; font: inherit; }
+  .bk-input:focus { outline: none; border-color: var(--accent); }
+  .bk-pick-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin: 16px 0 8px; font-size: 14px; }
+  .bk-pick-head span { color: var(--muted); font-size: 13px; }
+  .bk-picks { display: grid; gap: 6px; max-height: 46vh; overflow-y: auto; }
+  .bk-pick { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: var(--r-sm); padding: 9px 12px; cursor: pointer; min-height: 48px; }
+  .bk-pick:has(input:checked) { background: var(--soft); }
+  .bk-pick input { width: 18px; height: 18px; margin: 0; accent-color: var(--fg); flex: none; }
+  .bk-pick .grow { flex: 1; min-width: 0; display: grid; }
+  .bk-actions { display: grid; gap: 8px; margin-top: 16px; }
+  @media (max-width: 560px) { .bk-tiles { grid-template-columns: 1fr 1fr; } .bk-who, .bk-tiles, .bk-last { padding-left: 0; } }
   .wt-explain { position: sticky; top: 76px; }
   .wt-explain h3 { font-size: 17px; margin: 10px 0 0; overflow-wrap: anywhere; }
   .wt-why { font-size: 15px; font-weight: 600; margin: 14px 0 0; }
@@ -2986,7 +3048,7 @@ let watchTimer = null;
 const wl = { d: null, err: null, seq: 0 };
 async function watchlistPage() {
   $("#app").innerHTML = `<div class="wl-top"><div><h1>Watchlist</h1><p class="lede">The traders you follow: what they hold and every change they make.</p></div>
-    <button class="btn" id="wladd">+ Follow a trader</button></div><div id="wlbody">${skelCards(3)}</div>`;
+    <button class="btn" id="wladd">+ Follow a trader</button></div><div id="wlchips"></div><div id="wlbody">${skelCards(3)}</div>`;
   $("#wladd").onclick = () => followSheet("watchlist");
   await loadWatchlist();
 }
@@ -2994,6 +3056,9 @@ async function loadWatchlist() {
   clearTimeout(watchTimer);
   const my = ++wl.seq;
   if (!canFollowFeed()) { renderWatchlist(); return; } // who you follow isn't known yet (or signing in is off)
+  renderChips();
+  const id = pickedBasket();
+  if (id) return loadBasket(id, my);
   try { wl.d = await api("/api/me/watchlist"); wl.err = null; } catch (e) { wl.err = e.message; }
   if (my !== wl.seq || routeName() !== "watchlist") return;
   watchTimer = setTimeout(() => { if (routeName() === "watchlist") loadWatchlist(); }, 30000);
@@ -3040,6 +3105,158 @@ function wlCard(t, fresh) {
       ${fresh ? `<span class="wl-new">${fresh} new</span>` : ""}</div>
     ${held}
     <div class="wl-moves">${moves || `<span class="wl-sub">No trades in the last ${wl.d?.days || 30} days yet.</span>`}</div></article>`;
+}
+
+// Baskets: a name and 2 or more of the traders you follow (kept on your account, auth.me.baskets), shown as tabs over
+// the Watchlist after "Everyone you follow" (the cards above). A basket's view is where its traders agree and where
+// they split, from what each holds now (/api/me/baskets/<id>/view: one read per trader, kept a minute for everyone),
+// read again every minute while it's open, beside their latest changes. Counts are facts, never a verdict. The tab
+// picked is kept in this browser; "since you last looked" is when you last opened that basket here.
+const BASKET_KEY = "signals.basket";
+const BASKET_MIN_USD = 10; // the engine's basket.MIN_USD
+let basketPick = null; // null: not picked this visit (the browser's kept one); "": everyone you follow
+const bk = { id: null, d: null, err: null, seen: null };
+function pickedBasket() {
+  let id = basketPick;
+  if (id === null) { try { id = localStorage.getItem(BASKET_KEY); } catch { id = null; } }
+  return (auth.me?.baskets || []).some((b) => b.id === id) ? id : null;
+}
+function pickBasket(id) {
+  basketPick = id || "";
+  try { if (id) localStorage.setItem(BASKET_KEY, id); else localStorage.removeItem(BASKET_KEY); } catch {}
+}
+function renderChips() {
+  const el = $("#wlchips");
+  if (!el || !auth.me) return;
+  const bs = auth.me.baskets || [], id = pickedBasket();
+  const chip = (bid, name, n) => `<button type="button" class="bk-chip${(bid || null) === id ? " on" : ""}" role="tab" aria-selected="${(bid || null) === id}" data-basket="${esc(bid)}">${esc(name)} <span class="n">${n}</span></button>`;
+  el.innerHTML = `<div class="bk-chips" role="tablist" aria-label="Baskets">${chip("", "Everyone you follow", auth.me.follows.length)}${bs.map((b) => chip(b.id, b.name, b.wallets.length)).join("")}
+    ${bs.length < (auth.me.max_baskets || 10) ? `<button type="button" class="bk-chip add" id="bknew">+ New basket</button>` : ""}</div>`;
+  $$("[data-basket]", el).forEach((c) => (c.onclick = () => {
+    pickBasket(c.dataset.basket);
+    track("basket picked", { everyone: !c.dataset.basket });
+    $("#wlbody").innerHTML = skelCards(2);
+    loadWatchlist();
+  }));
+  $("#bknew", el)?.addEventListener("click", () => basketSheet(null));
+}
+async function loadBasket(id, my) {
+  if (bk.id !== id) {
+    Object.assign(bk, { id, d: null, err: null, seen: seenAt(`basket:${id}`) });
+    markSeen(`basket:${id}`);
+    renderBasket();
+  }
+  try { bk.d = await api(`/api/me/baskets/${encodeURIComponent(id)}/view`); bk.err = null; } catch (e) { bk.err = e; }
+  if (my !== wl.seq || routeName() !== "watchlist" || pickedBasket() !== id) return;
+  watchTimer = setTimeout(() => { if (routeName() === "watchlist") loadWatchlist(); }, 60000);
+  renderBasket();
+}
+function renderBasket() {
+  const box = $("#wlbody");
+  if (!box) return;
+  const d = bk.d, b = (auth.me?.baskets || []).find((x) => x.id === bk.id);
+  if (!d || !b) {
+    box.innerHTML = bk.err ? errorState(bk.err.message) : `<p class="explain">Reading what each trader in this basket holds (usually a few seconds)…</p>${skelCards(2)}`;
+    bindActions(box);
+    return;
+  }
+  const names = (ws) => ws.map((w) => esc(displayName(d.traders.find((t) => t.wallet === w)?.name, w)));
+  const fresh = d.changes.filter((m) => isNew(m, bk.seen)).length;
+  const head = `<section class="card bk-head"><span class="bk-faces">${d.traders.slice(0, 8).map((t) => avatar(t.wallet, 34)).join("")}</span>
+    <span class="grow"><span class="name">${esc(d.name)}</span><span class="wl-sub">${names(d.traders.map((t) => t.wallet)).join(", ")}</span></span>
+    ${d.traders.length >= 2 ? `<span class="bk-seen">${fresh ? `<span class="wl-dot"></span><span><b>Since you last looked:</b> ${plural(fresh, "change")}</span>` : `<span class="wl-sub">No changes since you last looked</span>`}</span>` : ""}
+    <button type="button" class="btn ghost" id="bkedit">Edit basket</button></section>`;
+  if (d.traders.length < 2) {
+    box.innerHTML = head + emptyState("Add another trader", "A basket shows where 2 or more of the traders in it agree. Traders you unfollow leave your baskets.");
+    $("#bkedit").onclick = () => basketSheet(b);
+    return;
+  }
+  const unread = d.unread.length ? `<p class="bk-note">Couldn't read what ${names(d.unread).join(", ")} ${d.unread.length === 1 ? "holds" : "hold"} just now: left out until the next read.</p>` : "";
+  box.innerHTML = `${head}${unread}<div class="bk-grid">
+    <section class="card bk-list bk-main"><div class="bk-h"><h2>Where they agree</h2><p>Markets where 2 or more of this basket hold the same side, more than hold any other side. Most agreement first.</p></div>
+      ${d.agree.map((r) => agreeRow(r, d.read)).join("") || `<p class="bk-none">No market where 2 or more of them hold the same side right now.</p>`}</section>
+    <div class="bk-side">
+      <section class="card bk-list"><div class="bk-h"><h2>Where they split</h2><p>Traders in this basket on different sides of the same market.</p></div>
+        ${d.split.map(splitRow).join("") || `<p class="bk-none">No market they're split on right now.</p>`}</section>
+      <section class="card bk-list"><div class="bk-h"><h2>Latest changes</h2><p>Every change from this basket, newest first.</p></div>
+        ${d.changes.map(basketChange).join("") || `<p class="bk-none">No trades in the last ${wl.d?.days || 30} days yet.</p>`}</section>
+    </div></div>
+    <p class="foot-note">Counts are the traders in this basket who hold each side now, with at least $${BASKET_MIN_USD} in, in markets still open (above 2¢, below 98¢). What they hold is read about every minute. Past trades, not advice: Signals places no orders.</p>`;
+  $("#bkedit").onclick = () => basketSheet(b);
+  bindActions(box);
+}
+function agreeRow(r, of) {
+  const m = r.latest, bars = Array.from({ length: of }, (_, i) => `<span class="${i < r.count ? "on" : i < r.count + r.others ? "alt" : ""}"></span>`).join("");
+  const other = r.others ? `${plural(r.others, "trader")} ${r.others === 1 ? "holds" : "hold"} ${esc(r.other_outcomes.join(" or "))}` : "No one in the basket holds another side";
+  return `<article class="bk-row"><div class="bk-top"><span class="wl-dot${m && isNew(m, bk.seen) ? "" : " off"}"></span><span class="t">${esc(r.title || r.market)}</span>
+      <span class="bk-count"><span class="bk-side-tag">${esc(r.outcome || "")}</span>${r.count} of ${of}</span></div>
+    <div class="bk-who"><span class="bk-bars" aria-hidden="true">${bars}</span><span class="bk-faces">${r.holders.map((h) => avatar(h.wallet, 24)).join("")}</span>
+      <span>${r.holders.map((h) => esc(displayName(h.name, h.wallet))).join(", ")} · ${other}</span></div>
+    <div class="bk-tiles"><div><span>They put in</span><b>${usd(r.put_in)}</b></div><div><span>They paid on average</span><b>${cents(r.paid)}</b></div><div><span>Market price now</span><b>${cents(r.now)}</b></div></div>
+    ${m ? `<div class="bk-last"><span class="wl-kind">${KIND[m.kind]}</span><span>${esc(displayName(m.name, m.wallet))} · ${usd(m.usd)} · ${ago(m.at)}</span>
+      ${m.action === "buy" ? `<a class="link" href="#/check/${esc(m.wallet)}/${encodeURIComponent(r.market)}">Check your price</a>` : ""}</div>` : ""}</article>`;
+}
+function splitRow(r) {
+  return `<div class="bk-split"><span class="t">${esc(r.title || r.condition)}</span>
+    <span class="s">${r.sides.map((s) => `<span class="bk-side-tag">${esc(s.outcome || "")}</span><span>${s.count}</span>`).join(`<span class="muted">vs</span>`)}</span></div>`;
+}
+function basketChange(m) {
+  return `<a class="bk-change" href="#/watch/${esc(m.wallet)}"><span class="wl-dot${isNew(m, bk.seen) ? "" : " off"}"></span>
+    <span><span><b>${esc(displayName(m.name, m.wallet))}</b> <span class="wl-kind">${KIND[m.kind]}</span> ${usd(m.usd)}</span>
+    <span class="s" style="display:block">${esc(m.title || m.market)}${m.outcome ? ` · ${esc(m.outcome)}` : ""}</span></span><span class="when">${ago(m.at)}</span></a>`;
+}
+// New basket / Edit basket: a name and the traders you follow to put in it (2 or more).
+async function basketSheet(b) {
+  track("basket sheet opened", { editing: !!b });
+  if (!wl.d) { try { wl.d = await api("/api/me/watchlist"); } catch {} } // names and records only: it reads nothing
+  const follows = auth.me?.follows || [], card = (w) => wl.d?.traders.find((t) => t.wallet === w);
+  const panel = sheet(`<h2>${b ? "Edit basket" : "New basket"}</h2>
+    <p class="explain">Group traders you follow to see where they agree.</p>
+    ${follows.length < 2 ? `<p class="explain">Follow at least 2 traders to make a basket.</p><button class="btn wide" id="bkfollow">+ Follow a trader</button>`
+      : `<form id="bkform"><label class="bk-label" for="bkname">Name</label>
+      <input id="bkname" class="bk-input" maxlength="40" autocomplete="off" placeholder="Sports traders" value="${esc(b?.name || "")}">
+      <div class="bk-pick-head"><b>Traders you follow</b><span id="bkcount"></span></div>
+      <div class="bk-picks">${follows.map((w) => { const t = card(w), win = winText(t?.record?.win); return `<label class="bk-pick"><input type="checkbox" value="${esc(w)}"${b?.wallets.includes(w) ? " checked" : ""}>${avatar(w, 30)}
+        <span class="grow"><span class="name">${esc(displayName(t?.name, w))}</span>${win ? `<span class="wl-sub">Win rate ${win}</span>` : ""}</span></label>`; }).join("")}</div>
+      <p class="inline-err" id="bkerr" hidden></p>
+      <div class="bk-actions"><button class="btn wide" type="submit" id="bksave"></button>${b ? `<button class="btn ghost wide" type="button" id="bkdel">Delete basket</button>` : ""}</div></form>`}`);
+  $("#bkfollow", panel)?.addEventListener("click", () => followSheet("new basket"));
+  const form = $("#bkform", panel);
+  if (!form) return;
+  const boxes = $$("input[type=checkbox]", form), save = $("#bksave", form), err = $("#bkerr", form);
+  const update = () => {
+    const n = boxes.filter((x) => x.checked).length;
+    $("#bkcount", form).textContent = `${n} picked`;
+    save.textContent = `${b ? "Save" : "Create basket"} · ${plural(n, "trader")}`;
+    save.disabled = n < 2;
+  };
+  boxes.forEach((x) => (x.onchange = update));
+  update();
+  if (!b) $("#bkname", form).focus();
+  const fail = (e) => { err.hidden = false; err.textContent = e.message; };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { name: $("#bkname", form).value, wallets: boxes.filter((x) => x.checked).map((x) => x.value) };
+    save.disabled = true;
+    try {
+      auth.me = b ? await api(`/api/me/baskets/${encodeURIComponent(b.id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+        : await post("/api/me/baskets", body);
+    } catch (x) { fail(x); update(); return; }
+    track(b ? "basket changed" : "basket created", { traders: body.wallets.length });
+    if (!b) pickBasket(auth.me.baskets[auth.me.baskets.length - 1].id);
+    bk.id = b ? bk.id : null;
+    closeSheet();
+    loadWatchlist();
+  };
+  const del = $("#bkdel", form);
+  if (del) del.onclick = async () => {
+    if (!del.dataset.sure) { del.dataset.sure = "1"; del.textContent = "Tap again to delete this basket"; return; }
+    try { auth.me = await api(`/api/me/baskets/${encodeURIComponent(b.id)}`, { method: "DELETE" }); } catch (x) { fail(x); return; }
+    track("basket deleted", {});
+    pickBasket("");
+    closeSheet();
+    loadWatchlist();
+  };
 }
 
 // "Follow a trader": paste a profile link or wallet, or type a name the directory knows; see who it is and their

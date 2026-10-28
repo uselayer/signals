@@ -53,7 +53,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import monitoring, records, us_match, watch, why
+from signals import basket, monitoring, records, us_match, watch, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -3428,7 +3428,7 @@ def _me_view(u: dict[str, Any]) -> dict[str, Any]:
                 "busy": p["per_day"] > BUSY_PER_DAY} for w in follows if (p := _pace(w))}  # fmt: skip
     return {"follows": follows, "telegram": u.get("chat") is not None, "alerts": bool(TG_TOKEN),
             "interests": u.get("interests"), "alert_for": choices, "pace": pace, "daily_cap": DAILY_CAP,
-            "summary_hours": SUMMARY_S // 3600}  # fmt: skip
+            "summary_hours": SUMMARY_S // 3600, "baskets": list(u.get("baskets") or []), "max_baskets": MAX_BASKETS}  # fmt: skip
 
 
 class Follow(BaseModel):
@@ -3512,6 +3512,9 @@ def unfollow(wallet: str, response: Response, uid: str = Depends(signed_in)) -> 
         if wallet.lower() in u["follows"]:
             u["follows"].remove(wallet.lower())
             (u.get("alert_for") or {}).pop(wallet.lower(), None)  # following them again starts at every trade
+            for b in u.get("baskets") or []:  # a basket holds traders you follow
+                if wallet.lower() in b["wallets"]:
+                    b["wallets"].remove(wallet.lower())
             _save_follows(d)
             count("unfollow", uid=uid, trader=wallet.lower())
     return _me_view(u)
@@ -3542,6 +3545,122 @@ def my_watchlist(response: Response, uid: str = Depends(signed_in)) -> dict[str,
     follows = list((_load_follows()["users"].get(uid) or {}).get("follows") or [])
     now = time.time()
     return {"traders": [_watch_card(w, now) for w in follows], "max": MAX_FOLLOWS, "days": WATCH_DAYS}
+
+
+# ---- baskets: where a group of the traders you follow agree (the Watchlist; signals/basket.py) ----
+# A basket is a name and 2 or more of the traders you follow, kept on your account (follows.json: "baskets" [{"id",
+# "name", "wallets"}]), at most MAX_BASKETS; unfollowing a trader takes them out of your baskets. Its view reads what
+# each of them holds now: one positions read per trader on the checks' budget, kept HELD_TTL_S for everyone (a trader in
+# several people's baskets is read once), BASKET_READS at a time so "Check now" keeps a turn. A trader whose read failed
+# or waited too long is left out and named. Its latest changes read nothing: each trader's Watchlist card's.
+MAX_BASKETS = 10
+BASKET_NAME_MAX = 40
+HELD_TTL_S = 60
+BASKET_READS = 2
+BASKET_CHANGES = 12
+
+
+class BasketIn(BaseModel):
+    name: str
+    wallets: list[str]
+
+
+def _basket_in(req: BasketIn, follows: list[str]) -> tuple[str, list[str]]:
+    name = " ".join(req.name.split())
+    if not name:
+        raise HTTPException(400, detail="Give the basket a name.")
+    if len(name) > BASKET_NAME_MAX:
+        raise HTTPException(400, detail=f"Keep the name to {BASKET_NAME_MAX} characters.")
+    wallets = list(dict.fromkeys(w.lower() for w in req.wallets))
+    if any(w not in follows for w in wallets):
+        raise HTTPException(400, detail="A basket holds traders you follow. Follow them first.")
+    if len(wallets) < 2:
+        raise HTTPException(400, detail="Pick at least 2 traders: a basket shows where they agree.")
+    return name, wallets
+
+
+def _basket_of(u: dict[str, Any], bid: str) -> dict[str, Any]:
+    b = next((x for x in u.get("baskets") or [] if x["id"] == bid), None)
+    if b is None:
+        raise HTTPException(404, detail="That basket isn't there any more.")
+    return b  # type: ignore[no-any-return]
+
+
+@app.post("/api/me/baskets")
+def make_basket(req: BasketIn, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
+    _private(response)
+    with _follow_lock:
+        d = _load_follows()
+        u = _user(d, uid)
+        name, wallets = _basket_in(req, u["follows"])
+        baskets = u.setdefault("baskets", [])
+        if len(baskets) >= MAX_BASKETS:
+            raise HTTPException(400, detail=f"You can have up to {MAX_BASKETS} baskets. Delete one to make another.")
+        baskets.append({"id": secrets.token_hex(4), "name": name, "wallets": wallets})
+        _save_follows(d)
+    return _me_view(u)
+
+
+@app.put("/api/me/baskets/{bid}")
+def change_basket(bid: str, req: BasketIn, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
+    _private(response)
+    with _follow_lock:
+        d = _load_follows()
+        u = _user(d, uid)
+        b = _basket_of(u, bid)
+        b["name"], b["wallets"] = _basket_in(req, u["follows"])
+        _save_follows(d)
+    return _me_view(u)
+
+
+@app.delete("/api/me/baskets/{bid}")
+def delete_basket(bid: str, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
+    _private(response)
+    with _follow_lock:
+        d = _load_follows()
+        u = _user(d, uid)
+        u.setdefault("baskets", []).remove(_basket_of(u, bid))
+        _save_follows(d)
+    return _me_view(u)
+
+
+def _held_now(w: str) -> list[Any] | None:
+    """What ``w`` holds now (kept HELD_TTL_S for everyone), or None when it couldn't be read in time."""
+    hit = _cache.get(f"held:{w}")
+    if hit and time.monotonic() - hit[0] < HELD_TTL_S:
+        return hit[1]  # type: ignore[no-any-return]
+    if not _checks.acquire(timeout=CHECK_WAIT_S):
+        return None
+    try:
+        return cached(f"held:{w}", HELD_TTL_S, lambda: checker().positions("polymarket", w, limit=POSITIONS_READ))  # type: ignore[no-any-return]
+    except VenueError as e:
+        print(f"basket: couldn't read what {w} holds ({e.code}): {str(e)[:200]}", flush=True)
+        return None
+    finally:
+        _checks.release()
+
+
+@app.get("/api/me/baskets/{bid}/view")
+def basket_view(bid: str, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
+    """One of your baskets (``basket.view``): where its traders agree and where they split, from what each holds now,
+    and their latest changes, newest first. ``unread``: traders whose holdings couldn't be read just now (left out)."""
+    _private(response)
+    b = _basket_of(_load_follows()["users"].get(uid) or {}, bid)
+    now = time.time()
+    cards = {w: _watch_card(w, now) for w in b["wallets"]}
+    names = {w: c["name"] for w, c in cards.items()}
+    with ThreadPoolExecutor(max_workers=BASKET_READS, thread_name_prefix="basket") as pool:
+        got = dict(zip(b["wallets"], pool.map(_held_now, b["wallets"]), strict=True))
+    held = {w: p for w, p in got.items() if p is not None}
+    out = basket.view(held, names, settled=(SETTLED_LOW, SETTLED_HIGH))
+    changes = sorted(({**m, "wallet": w, "name": names[w]} for w, c in cards.items() for m in c["moves"]),
+                     key=lambda m: m["at"], reverse=True)  # fmt: skip
+    for r in out["agree"]:
+        who = {h["wallet"] for h in r["holders"]}
+        r["latest"] = next((m for m in changes if m["market"] == r["market"] and m["wallet"] in who), None)
+    return out | {"id": b["id"], "name": b["name"], "traders": [{"wallet": w, "name": names[w]} for w in b["wallets"]],
+                  "read": len(held), "unread": [w for w, p in got.items() if p is None], "read_at": now,
+                  "changes": changes[:BASKET_CHANGES]}  # fmt: skip
 
 
 # What "Follow a trader" takes: a wallet, a Polymarket profile link (polymarket.com/profile/0x…, which names the wallet)
