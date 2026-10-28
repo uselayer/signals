@@ -21,7 +21,7 @@ const ease = Easing.inOut(Easing.cubic);
 const out = Easing.out(Easing.cubic);
 
 // The scenes, in frames.
-const HOOK = 96, CARDS = 156, APP = 420, END = 126;
+const HOOK = 200, CARDS = 156, APP = 420, END = 126;
 const T_CARDS = HOOK, T_APP = T_CARDS + CARDS, T_END = T_APP + APP;
 export const BASKETS_DURATION = T_END + END;
 const SPLIT_AT = 290; // into the app scene: the camera moves to where they split
@@ -84,20 +84,38 @@ const Caption = ({ text, frames }: { text: string; frames: number }) => {
   );
 };
 
-// ---- 1. the hook ----
+// ---- 1. why: one trader's buy is one opinion; two on the same side is worth a look (the basket's real top agreement) ----
+const Holder = ({ name, t }: { name: string; t: number }) => (
+  <div style={{ display: "flex", alignItems: "center", gap: 18, opacity: t, transform: `translateX(${(1 - t) * -40}px)` }}>
+    <Avatar name={name} size={64} /><span style={{ fontSize: 34, fontWeight: 600 }}>{name}</span>
+    <span style={{ fontSize: 30, color: C.muted }}>holds</span><Tag><span style={{ fontSize: 28 }}>Yes</span></Tag>
+  </div>
+);
 const Hook = () => {
-  const f = useCurrentFrame();
+  const f = useCurrentFrame(), { fps } = useVideoConfig();
+  const [first, second] = data.agree[0].who;
+  const one = spring({ frame: f - 14, fps, config: { damping: 16 } }), two = spring({ frame: f - 92, fps, config: { damping: 16 } });
+  const swap = interpolate(f, [84, 96], [0, 1], clamp);
   return (
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", opacity: interpolate(f, [HOOK - 12, HOOK], [1, 0], clamp) }}>
-      {/* Mostly in at frame 0: X shows the first frame before the video plays. */}
-      <Rise delay={-10} style={{ display: "flex", alignItems: "center", gap: 22 }}>
-        <Logo size={72} /><span style={{ fontSize: 56, fontWeight: 650 }}>Signals</span>
-        <span style={{ fontSize: 30, fontWeight: 600, color: C.accent, border: `2px solid ${C.accent}`, borderRadius: 999,
-          padding: "6px 18px", marginLeft: 8 }}>New: Baskets</span>
-      </Rise>
-      <Rise delay={-6} style={{ fontSize: 124, fontWeight: 700, letterSpacing: -4.5, marginTop: 44, textAlign: "center", lineHeight: 1.04 }}>
-        Where do the traders<br />you follow <span style={{ color: C.accent }}>agree?</span>
-      </Rise>
+      {/* The brand and the first line are in at frame 0: X shows the first frame before the video plays. */}
+      <div style={{ position: "absolute", top: 72, display: "flex", alignItems: "center", gap: 18 }}>
+        <Logo size={56} /><span style={{ fontSize: 42, fontWeight: 650 }}>Signals</span>
+        <span style={{ fontSize: 24, fontWeight: 600, color: C.accent, border: `2px solid ${C.accent}`, borderRadius: 999,
+          padding: "4px 14px", marginLeft: 6 }}>New: Baskets</span>
+      </div>
+      <div style={{ position: "relative", height: 120, width: 1760, textAlign: "center", fontSize: 88, fontWeight: 700, letterSpacing: -3 }}>
+        <div style={{ position: "absolute", inset: 0, opacity: 1 - swap, transform: `translateY(${swap * -30}px)` }}>
+          One trader buying is <span style={{ color: C.muted }}>one opinion.</span></div>
+        <div style={{ position: "absolute", inset: 0, opacity: swap, transform: `translateY(${(1 - swap) * 30}px)` }}>
+          Two on the same side? <span style={{ color: C.accent }}>Worth a look.</span></div>
+      </div>
+      <div style={{ marginTop: 48, width: 1180, boxSizing: "border-box", background: C.card, border: `1.5px solid ${C.line}`,
+        borderRadius: 22, padding: "30px 40px", display: "grid", gap: 22, opacity: one, transform: `translateY(${(1 - one) * 40}px)` }}>
+        <div style={{ fontSize: 34, fontWeight: 600 }}>{data.agree[0].title}</div>
+        <Holder name={first} t={one} />
+        <div style={{ height: Math.max(0, two) * 64, overflow: "hidden" }}><Holder name={second} t={two} /></div>
+      </div>
     </AbsoluteFill>
   );
 };
@@ -146,8 +164,8 @@ const Cards = () => {
           {data.basket} <span style={{ opacity: 0.6, fontWeight: 500 }}>{data.traders.length}</span>
         </span>
       </div>
-      <Sequence from={0} durationInFrames={104}><Caption text="Checking each one?" frames={104} /></Sequence>
-      <Sequence from={118}><Caption text="Put them in one basket." frames={CARDS - 118} /></Sequence>
+      <Sequence from={0} durationInFrames={104}><Caption text="But you'd have to check every trader you follow." frames={104} /></Sequence>
+      <Sequence from={118}><Caption text="Put them in a basket instead." frames={CARDS - 118} /></Sequence>
     </AbsoluteFill>
   );
 };
@@ -270,7 +288,7 @@ const App = () => {
     <AbsoluteFill style={{ background: C.bg, overflow: "hidden", opacity: interpolate(f, [0, 10, APP - 10, APP], [0, 1, 1, 0], clamp) }}>
       <div style={{ position: "absolute", width: W, height: H, transformOrigin: "0 0",
         transform: `translate(${W / 2 - cx * z}px, ${H / 2 - cy * z}px) scale(${z})` }}><Screen /></div>
-      <Sequence from={20} durationInFrames={SPLIT_AT - 50}><Caption text="See where they agree" frames={SPLIT_AT - 50} /></Sequence>
+      <Sequence from={20} durationInFrames={SPLIT_AT - 50}><Caption text="Signals finds where they agree" frames={SPLIT_AT - 50} /></Sequence>
       <Sequence from={SPLIT_AT - 24}><Caption text="…and where they split" frames={APP - SPLIT_AT + 24} /></Sequence>
       <div style={{ position: "absolute", right: 96, bottom: 84, fontSize: 24, color: C.muted }}>A real basket, live Polymarket data, {data.recorded}</div>
     </AbsoluteFill>
@@ -284,7 +302,7 @@ const End = () => (
       <Logo size={104} /><span style={{ fontSize: 92, fontWeight: 700, letterSpacing: -3 }}>Signals</span>
     </Rise>
     <Rise delay={6} style={{ fontSize: 50, marginTop: 40, lineHeight: 1.25 }}>
-      Baskets: group the traders you follow.<br />See where they agree.
+      One trader is one opinion.<br />Baskets show you where several agree.
     </Rise>
     <Rise delay={12} style={{ fontSize: 56, marginTop: 40, color: C.accent, fontWeight: 650 }}>usesignals.app</Rise>
     <Rise delay={18} style={{ fontSize: 24, marginTop: 44, color: C.muted }}>Past trades, not advice. Signals places no orders.</Rise>
