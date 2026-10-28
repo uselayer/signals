@@ -22,15 +22,18 @@ const ease = Easing.inOut(Easing.cubic);
 
 // A stretch of the recording [from, to] (seconds in app.mp4) played at `rate`, under a caption (and a smaller line),
 // with camera keyframes [source second, center x, center y, zoom] in the recording's 1920×1080 layout.
-type Shot = { from: number; to: number; rate: number; caption: string; sub?: string; top?: boolean;
+// `showcase`: the shot is of rec.showcase's page (entry-bands), not the trades' strategy (rec.strategy, vwap-rider).
+type Shot = { from: number; to: number; rate: number; caption: string; sub?: string; top?: boolean; showcase?: boolean;
   cam: [number, number, number, number][] };
 const DRAWER = 1640;  // the trade drawer's middle, x
 const SHOTS: Shot[] = [
-  { from: ev.new - 0.3, to: ev.strategy - 0.1, rate: 1.25, caption: "Pick a strategy",
+  { from: ev.new - 0.3, to: ev.strategy - 0.1, rate: 1.25, caption: "Pick a strategy", showcase: true,
     sub: "It trades Polymarket's Bitcoin 15-minute markets",
-    cam: [[ev.new - 0.3, 960, 330, 1.5], [ev.pick, 1130, 380, 1.85]] },
-  { from: ev.strategy, to: ev.slip - 0.15, rate: 1.4, caption: "Paper money, real order books",
-    cam: [[ev.strategy, 640, 170, 1.75], [ev.statsSeen, 900, 190, 1.75]] },
+    // On entry-bands' card (x 548–955); the right edge stays ≤ 1069, short of vwap-rider's "−79.7%" (x 1087).
+    cam: [[ev.new - 0.3, 650, 300, 2.3], [ev.pick, 700, 382, 2.6]] },
+  { from: ev.strategy, to: ev.slip - 0.15, rate: 1.4, caption: "Paper money, real order books", showcase: true,
+    // The frame's left edge stays at x ≥ 222: the sidebar (x < 210) shows vwap-rider, out of money since 10-27.
+    cam: [[ev.strategy, 770, 170, 1.75], [ev.statsSeen, 950, 190, 1.75]] },
   { from: ev.slip, to: ev.slipCostScroll, rate: 1.05, caption: "Big orders walk the book",
     sub: "Asked 47¢. Paid 48.3¢ on average, level by level.",
     cam: [[ev.slip, DRAWER, 300, 1.85], [ev.slip + 0.9, DRAWER, 440, 2.25], [ev.slipBook, DRAWER, 540, 2.25]] },
@@ -46,8 +49,8 @@ const SHOTS: Shot[] = [
   // The drawer's end is the recording's bottom edge, so this caption sits at the top.
   { from: ev.settle - 0.15, to: ev.settleEnd, rate: 1.05, caption: "Settled by Polymarket's own result", top: true,
     cam: [[ev.settle - 0.15, DRAWER, 760, 2.0], [ev.settleEnd, DRAWER, 900, 2.25]] },
-  { from: ev.report, to: ev.end - 0.3, rate: 1.3, caption: "See where the money went",
-    cam: [[ev.report, 600, 390, 1.75], [ev.waterfallSeen, 600, 420, 1.75], [ev.stats, 640, 430, 1.5]] },
+  { from: ev.report, to: ev.end - 0.3, rate: 1.3, caption: "See where the money went", showcase: true,
+    cam: [[ev.report, 825, 390, 1.6], [ev.waterfallSeen, 825, 420, 1.6], [ev.stats, 910, 430, 1.4]] },  // left edge ≥ 222
 ];
 const XF = 8;
 const HOOK = 105;
@@ -96,7 +99,7 @@ const ShotView = ({ shot, frames }: { shot: Shot; frames: number }) => {
       {shot.sub && <div style={{ position: "absolute", left: 98, bottom: 66, opacity: sub, transform: `translateY(${(1 - sub) * 14}px)`,
         fontSize: 32, color: C.ink2 }}>{shot.sub}</div>}
       {!shot.top && <div style={{ position: "absolute", right: 96, bottom: 74, fontSize: 22, color: C.ink3, opacity: cap }}>
-        Real paper trades from {rec.strategy.id}, {recorded}</div>}
+        Real paper trades from {(shot.showcase ? rec.showcase : rec.strategy).id}, {recorded}</div>}
     </AbsoluteFill>
   );
 };

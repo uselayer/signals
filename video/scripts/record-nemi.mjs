@@ -18,6 +18,8 @@ import path from "node:path";
 const APP = process.env.APP || "http://localhost:5174";
 const ENGINE = process.env.ENGINE || "https://engine-production-fcc0.up.railway.app";
 const STRATEGY = process.env.STRATEGY || "vwap-rider";
+// The strategy page and report are shown from SHOWCASE: vwap-rider ran out of paper money on 10-27 (−$4,852 of $5,000).
+const SHOWCASE = process.env.SHOWCASE || "entry-bands";
 const SLIP = process.env.SLIP || "276", PARTIAL = process.env.PARTIAL || "192", REFUSED = process.env.REFUSED || "170";
 const OUT = path.resolve("public/nemi");
 const FRAMES = path.join(OUT, "frames");
@@ -29,7 +31,8 @@ const trades = {};
 for (const id of [SLIP, PARTIAL, REFUSED]) trades[id] = await (await fetch(`${ENGINE}/api/trades/${id}`)).json();
 if (trades[PARTIAL].status !== "partial" || trades[REFUSED].status !== "refused" || !(trades[SLIP].slippage > 0))
   throw new Error(`trades aren't slip/partial/refused: ${JSON.stringify(Object.values(trades).map((t) => [t.id, t.status, t.slippage]))}`);
-const strategy = (await (await fetch(`${ENGINE}/api/strategies`)).json()).find((s) => s.id === STRATEGY);
+const all = await (await fetch(`${ENGINE}/api/strategies`)).json();
+const strategy = all.find((s) => s.id === STRATEGY), showcase = all.find((s) => s.id === SHOWCASE);
 
 rmSync(FRAMES, { recursive: true, force: true });
 mkdirSync(FRAMES, { recursive: true });
@@ -45,12 +48,12 @@ await page.addInitScript((z) => {
         pointer-events:none;transition:transform .08s ease-out;filter:drop-shadow(0 ${2 * z}px ${4 * z}px rgba(0,0,0,.35))}
       #rec-cursor.down{transform:scale(.86)}
       .rec-ring{position:fixed;width:${44 * z}px;height:${44 * z}px;margin:${-22 * z}px 0 0 ${-22 * z}px;border-radius:50%;
-        border:${3 * z}px solid #8a4b00;z-index:99998;pointer-events:none;animation:rec-ring .5s ease-out forwards}
+        border:${3 * z}px solid #3dffc5;z-index:99998;pointer-events:none;animation:rec-ring .5s ease-out forwards}
       @keyframes rec-ring{from{opacity:.9;transform:scale(.3)}to{opacity:0;transform:scale(1.4)}}`;
     document.head.append(s);
     const c = document.createElement("div");
     c.id = "rec-cursor";
-    c.innerHTML = `<svg viewBox="0 0 24 24" width="100%" height="100%"><path d="M3 2l17 9.5-7.2 1.6L9.6 20z" fill="#1f1f1f" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
+    c.innerHTML = `<svg viewBox="0 0 24 24" width="100%" height="100%"><path d="M3 2l17 9.5-7.2 1.6L9.6 20z" fill="#fff" stroke="#000" stroke-width="1.4" stroke-linejoin="round"/></svg>`;
     document.documentElement.append(c);
     addEventListener("mousemove", (e) => { c.style.left = `${e.clientX}px`; c.style.top = `${e.clientY}px`; }, true);
     addEventListener("mousedown", (e) => {
@@ -117,7 +120,7 @@ async function openTrade(id, title) {
 }
 
 // Warm everything the camera will see.
-await page.goto(`${APP}/s/${STRATEGY}/report`);
+await page.goto(`${APP}/s/${SHOWCASE}/report`);
 await page.getByText("Where the money went").waitFor({ timeout: 30000 });
 for (const id of [SLIP, PARTIAL, REFUSED]) { await openTrade(id, "What it bought"); await page.getByText("How it ended").last().waitFor({ timeout: 30000 }); }
 await page.goto(`${APP}/`);
@@ -138,13 +141,13 @@ await click('a[href="/new"] >> nth=-1', 800);
 await page.getByText("OR PICK A TEMPLATE", { exact: false }).waitFor();
 mark("new");
 await wait(500);
-await glide("text=Buys the side Bitcoin", 900);
+await glide("text=Buys the side priced", 900);  // SHOWCASE's template, the strategy the next shot shows
 mark("pick");
 await page.mouse.down(); await wait(90); await page.mouse.up();
 await wait(1400);
 
 // 2. The strategy, running.
-await go(`/s/${STRATEGY}`);
+await go(`/s/${SHOWCASE}`);
 await page.getByText("Trades ·", { exact: false }).waitFor();
 mark("strategy");
 await glide([300, 150], 500);
@@ -192,7 +195,7 @@ mark("refusedNote");
 await wait(1800);
 
 // 6. Where the money went.
-await go(`/s/${STRATEGY}/report`);
+await go(`/s/${SHOWCASE}/report`);
 await page.getByText("Where the money went").waitFor();
 mark("report");
 await glide([500, 330], 600);
@@ -220,6 +223,7 @@ const pick = (t) => ({ id: t.id, time: t.time, market: t.marketTitle, side: t.si
   askedPrice: t.askedPrice, filledQty: t.filledQty, filledAvgPrice: t.filledAvgPrice, fee: t.fee, slippage: t.slippage, status: t.status });
 writeFileSync(path.join(OUT, "events.json"), JSON.stringify({ recorded: new Date().toISOString(), frames: frames.length,
   strategy: { id: strategy.id, startingBalance: strategy.startingBalance, balance: strategy.balance, pnl: strategy.pnl, pnlPct: strategy.pnlPct },
+  showcase: { id: showcase.id, startingBalance: showcase.startingBalance, balance: showcase.balance, pnl: showcase.pnl, pnlPct: showcase.pnlPct },
   trades: { slip: pick(trades[SLIP]), partial: pick(trades[PARTIAL]), refused: pick(trades[REFUSED]) },
   events: Object.fromEntries(Object.entries(events).map(([k, v]) => [k, Number((v - offset).toFixed(3))])) }, null, 2));
 rmSync(FRAMES, { recursive: true, force: true });
