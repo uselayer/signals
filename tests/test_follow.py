@@ -88,7 +88,7 @@ def test_following_needs_a_valid_clerk_session(api: TestClient) -> None:
     assert api.get("/api/me", headers=auth(token(azp="https://evil.test"))).status_code == 401  # another site's
     r = api.get("/api/me", headers=auth())
     assert r.status_code == 200 and r.json() == {"follows": [], "telegram": False, "alerts": True, "interests": None, "alert_for": {},
-                                                "pace": {}, "daily_cap": 200, "summary_hours": 6}  # fmt: skip
+                                                "pace": {}, "daily_cap": 200, "summary_hours": 6, "baskets": [], "max_baskets": 10}  # fmt: skip
     assert r.headers["cache-control"] == "private, no-store"
 
 
@@ -142,7 +142,7 @@ def test_connecting_telegram_takes_a_one_time_link(api: TestClient) -> None:
     engine._on_update({"message": {"chat": {"id": 555}, "text": "/stop"}})
     assert api.get("/api/me", headers=auth()).json() == {"follows": [SHARP], "telegram": False, "alerts": True, "interests": None,
                                                           "alert_for": {SHARP: {"mode": "all", "usd": None}}, "pace": {},
-                                                          "daily_cap": 200, "summary_hours": 6}  # fmt: skip
+                                                          "daily_cap": 200, "summary_hours": 6, "baskets": [], "max_baskets": 10}  # fmt: skip
 
 
 def buy(i: int, at: datetime, price: float = 0.40, market: str = "0xcid:0", size: float = 1000) -> WhaleTrade:

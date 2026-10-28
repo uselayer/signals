@@ -162,6 +162,15 @@ behind Vercel (see README, "Hosting").
     every figure, the model only joins them, and a sentence with a number or a comparison its facts don't have, a
     guess, advice or "bet" isn't shown. Nothing stands out, or it failed: no sentence, never a placeholder. Keep the
     model to wording: never hand it a fact to judge or a figure to work out.
+  - Baskets (owner, 28 Oct: "when deciding on a trade, show me whether several traders I trust agree"): tabs over the
+    Watchlist, "Everyone you follow" (the cards) first. A basket is a name and 2+ traders you follow (follows.json
+    `baskets`, at most `MAX_BASKETS`; unfollowing takes a trader out). Its view (`/api/me/baskets/<id>/view`,
+    `signals/basket.py`) is where they agree (most of a market's holders in the basket on one side, 2 or more) and
+    where they split, from what each holds now: one positions read per trader on the checks' budget, kept
+    `HELD_TTL_S` for everyone, `BASKET_READS` at a time so "Check now" keeps a turn; a trader whose read failed is
+    left out and named. Holding a side means $10+ put in at a price still open (2¢–98¢). Counts and what they paid
+    are facts, never a verdict or a promise; "Market price now", not a price you can buy at; buys keep "Check your
+    price".
   - Onboarding (first visit, once per browser) asks one question: which markets interest you (Politics, Sports,
     Crypto, Esports; Skip means all markets). Nothing else: no budget, goals or signup. The choice is kept in
     localStorage (and, when picked here or with the Feed's Change, on the account for big-trade alerts), every read and write in try/catch; if storage is blocked it holds for the visit, and no one is
