@@ -176,7 +176,9 @@ behind Vercel (see README, "Hosting").
     walked back from what they hold now through the poller's kept trades (no new read). That change is "not known"
     whenever the kept trades don't reach back 7 days or don't add up; never show it as "no trades" then.
   - Onboarding (first visit, once per browser) asks one question: which markets interest you (Politics, Sports,
-    Crypto, Esports; Skip means all markets). Nothing else: no budget, goals or signup. The choice is kept in
+    Crypto, Esports; Skip means all markets), with Sports already picked (owner, 29 Oct: niching to sports; people
+    from X picked it first). The Leaderboard opens on the one market picked (`boardCatOf`: Sports before any
+    choice, All for Skip or several). Nothing else: no budget, goals or signup. The choice is kept in
     localStorage (and, when picked here or with the Feed's Change, on the account for big-trade alerts), every read and write in try/catch; if storage is blocked it holds for the visit, and no one is
     ever stuck on that screen.
   - With the skill test on only: two separate readings, never merged: profit (track record) and skill (the tier). The tier is skill and track

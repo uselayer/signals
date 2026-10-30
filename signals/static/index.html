@@ -1758,6 +1758,9 @@ function toggleInterest(c) {
   setInterests([...INTERESTS.filter((x) => now.has(x)), ...[...now].filter((x) => !INTERESTS.includes(x)).sort()]);
 }
 const interestNames = (cs) => cs.length < 2 ? cs.join("") : `${cs.slice(0, -1).join(", ")} or ${cs[cs.length - 1]}`;
+// The Leaderboard's market chip to start on: Sports until a choice is made (people from X pick it first), the one
+// market picked, or All for Skip or several.
+const boardCatOf = (v) => v === null ? "Sports" : v.length === 1 && INTERESTS.includes(v[0]) ? v[0] : "";
 // A trader matches when an interest is their most-traded category or one they're strong in.
 const matchesInterests = (s, picked) => !picked.length || picked.includes(s.categories[0]?.category)
   || s.strong_categories.some((c) => picked.includes(c));
@@ -1781,9 +1784,10 @@ function onboardingPage() {
   $$("[data-tab]").forEach((a) => a.classList.remove("on"));
   $("#app").innerHTML = `<section class="onb"><h1>Find traders worth following.</h1>
     <p class="lede">Discover interesting traders, understand how they trade, and decide who to follow.</p><div id="onbpick"></div></section>`;
-  interestPicker($("#onbpick"), { go: "Discover traders →", alt: "Skip", onDone: (v) => {
+  interestPicker($("#onbpick"), { selected: ["Sports"], go: "Discover traders →", alt: "Skip", onDone: (v) => {
     if (v.length) post("/api/count/picked", {}).catch(() => {}); // counted, anonymously: no id of any kind
     setInterests(v, { picked: true });
+    bd.cat = boardCatOf(v); // the Leaderboard opens on what was just picked
     if (location.hash === "#/traders") route(); else location.hash = "#/traders";
   } });
 }
@@ -2075,7 +2079,7 @@ function renderWorth() {
 let boardOn = false; // /api/config's leaderboard: SIGNALS_SKILL_TEST off
 // New accounts (under 4 weeks of history) are hidden unless "Show new accounts" is on: one big first week shouldn't top
 // a list of track records (the owner, 19 Oct). The foot says how many are hidden.
-const bd = { period: "30d", sort: "profit", cat: "", q: "", newOn: false, rows: [], total: null, more: false, counts: null, newHidden: 0, busy: false };
+const bd = { period: "30d", sort: "profit", cat: boardCatOf(interests), q: "", newOn: false, rows: [], total: null, more: false, counts: null, newHidden: 0, busy: false };
 const BOARD_SORTS = { profit: "Trading profit", return: "Profit per $ traded", win: WIN_LABEL, volume: "Volume", weeks: "Most weeks up" };
 const BOARD_PERIODS = { "7d": "7D", "30d": "30D", "90d": "90D", all: "All" };
 let boardTimer = null;

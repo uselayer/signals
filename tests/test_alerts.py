@@ -526,6 +526,11 @@ def test_traders_chips_never_change_the_saved_markets(api: TestClient, run_js: A
     assert got == [0, 0, [["Politics"]]]
 
 
+def test_the_leaderboard_opens_on_sports_or_the_one_market_picked(run_js: Any) -> None:
+    got = run_js(("INTERESTS", "boardCatOf"), """[null, ["Politics"], [], ["Sports", "Crypto"], ["Weather"]].map(boardCatOf)""")
+    assert got == ["Sports", "Politics", "", "", ""]  # not asked yet, one picked, Skip, several, not a chip
+
+
 def test_an_alerts_db_from_before_trigger_at_gets_the_column(api: TestClient) -> None:
     import sqlite3
 
