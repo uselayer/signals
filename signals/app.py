@@ -3552,12 +3552,14 @@ def my_watchlist(response: Response, uid: str = Depends(signed_in)) -> dict[str,
 # "name", "wallets"}]), at most MAX_BASKETS; unfollowing a trader takes them out of your baskets. Its view reads what
 # each of them holds now: one positions read per trader on the checks' budget, kept HELD_TTL_S for everyone (a trader in
 # several people's baskets is read once), BASKET_READS at a time so "Check now" keeps a turn. A trader whose read failed
-# or waited too long is left out and named. Its latest changes read nothing: each trader's Watchlist card's.
+# or waited too long is left out and named. Its latest changes read nothing: each trader's Watchlist card's. Nor does
+# each holder's change over the last week: it walks back from what they hold now through the trades the poller keeps.
 MAX_BASKETS = 10
 BASKET_NAME_MAX = 40
 HELD_TTL_S = 60
 BASKET_READS = 2
 BASKET_CHANGES = 12
+BASKET_TRADES_S = LIVE_STALE_S  # the poller's kept trades are used for a holder's recent change while under this old
 
 
 class BasketIn(BaseModel):
@@ -3640,6 +3642,25 @@ def _held_now(w: str) -> list[Any] | None:
         _checks.release()
 
 
+def _basket_trades(wallets: Any) -> dict[str, tuple[list[Any], float]]:
+    """Each trader's trades the poller keeps (it reads everyone followed every round; no read here), with the time from
+    which all their trades are there: all of them when the read held fewer than it asks for, else from the oldest. The
+    walk back starts from what they held when their positions were read, so a trade made after that is left out, and a
+    trader whose kept read is older than BASKET_TRADES_S is left out altogether (a trade since could be missing): their
+    recent change is then not known."""
+    out = {}
+    mono, now = time.monotonic(), time.time()
+    for w in wallets:
+        live, held = _live_kept(w), _cache.get(f"held:{w}")
+        if live is None or mono - live[0] > BASKET_TRADES_S:
+            continue
+        ts = live[1].trades
+        complete_from = 0.0 if len(ts) < LIVE_TRADES else min(t.at.timestamp() for t in ts)
+        held_at = now - (mono - held[0]) if held else now
+        out[w] = ([t for t in ts if t.at.timestamp() <= held_at], complete_from)
+    return out
+
+
 @app.get("/api/me/baskets/{bid}/view")
 def basket_view(bid: str, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
     """One of your baskets (``basket.view``): where its traders agree and where they split, from what each holds now,
@@ -3652,7 +3673,8 @@ def basket_view(bid: str, response: Response, uid: str = Depends(signed_in)) -> 
     with ThreadPoolExecutor(max_workers=BASKET_READS, thread_name_prefix="basket") as pool:
         got = dict(zip(b["wallets"], pool.map(_held_now, b["wallets"]), strict=True))
     held = {w: p for w, p in got.items() if p is not None}
-    out = basket.view(held, names, settled=(SETTLED_LOW, SETTLED_HIGH))
+    cut = frozenset(w for w, p in held.items() if len(p) >= POSITIONS_READ)
+    out = basket.view(held, names, settled=(SETTLED_LOW, SETTLED_HIGH), trades=_basket_trades(held), cut=cut, at=now)
     changes = sorted(({**m, "wallet": w, "name": names[w]} for w, c in cards.items() for m in c["moves"]),
                      key=lambda m: m["at"], reverse=True)  # fmt: skip
     for r in out["agree"]:

@@ -170,7 +170,11 @@ behind Vercel (see README, "Hosting").
     `HELD_TTL_S` for everyone, `BASKET_READS` at a time so "Check now" keeps a turn; a trader whose read failed is
     left out and named. Holding a side means $10+ put in at a price still open (2¢–98¢). Counts and what they paid
     are facts, never a verdict or a promise; "Market price now", not a price you can buy at; buys keep "Check your
-    price".
+    price". A market's "Each trader's position" (feedback, 29 Oct: "5 of 8 agree" hid who had sold most and who had
+    $100K against $100) shows per holder what it's worth now (exposure, never what they once put in), their share of
+    the side's worth, its rank among their own open positions, and what their trades did to it over the last 7 days,
+    walked back from what they hold now through the poller's kept trades (no new read). That change is "not known"
+    whenever the kept trades don't reach back 7 days or don't add up; never show it as "no trades" then.
   - Onboarding (first visit, once per browser) asks one question: which markets interest you (Politics, Sports,
     Crypto, Esports; Skip means all markets). Nothing else: no budget, goals or signup. The choice is kept in
     localStorage (and, when picked here or with the Feed's Change, on the account for big-trade alerts), every read and write in try/catch; if storage is blocked it holds for the visit, and no one is
