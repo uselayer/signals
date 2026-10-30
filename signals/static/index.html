@@ -869,10 +869,21 @@ function whenSignedIn(f) {
   auth.then = f;
   window.Clerk.openSignIn();
 }
-// The Follow control on a trader's page (#follow, data-wallet): Follow, or Following ✓ with Telegram alerts.
+// Followed on Telegram with no account, in this browser (localStorage; blocked storage just forgets it). Telegram's
+// /list is the record: an unfollow there isn't seen here.
+const TG_FOLLOWS_KEY = "signals.tgfollows";
+const tgFollows = () => { try { const v = JSON.parse(localStorage.getItem(TG_FOLLOWS_KEY)); return Array.isArray(v) ? v : []; } catch { return []; } };
+function tgFollowed(wallet) {
+  try { localStorage.setItem(TG_FOLLOWS_KEY, JSON.stringify([...new Set([...tgFollows(), wallet])])); } catch {}
+}
+// The Follow control on a trader's page (#follow, data-wallet): Follow, or Following ✓ with Telegram alerts. Signed
+// out, with alerts on, Follow needs no account: it opens Telegram, and Start there follows them (followOnTelegram).
 function followHtml(wallet) {
   if (!auth.on) return "";
   const w = esc(wallet);
+  if (!signedIn() && auth.alerts) return tgFollows().includes(wallet)
+    ? `<span class="btn ghost" style="cursor:default">Following ✓</span><small>Alerts on Telegram · /list there shows who you follow</small>`
+    : `<button class="btn" data-tgfollow="${w}">Follow · get an alert after they trade</button><small>Opens Telegram. No account needed.</small>`;
   if (!auth.me?.follows.includes(wallet)) return `<button class="btn" data-follow="${w}">Follow · get an alert after they trade</button>`;
   const alerts = !auth.alerts ? `<small>Alerts aren't switched on yet.</small>`
     : auth.me.telegram ? `<small>Alerts on Telegram · <button class="link" data-unfollow="${w}">Unfollow</button></small>`
@@ -934,6 +945,26 @@ function redrawFollow() {
     redrawFollow();
   }));
   $$("[data-tg]", el).forEach((b) => (b.onclick = () => connectTelegram(b)));
+  $$("[data-tgfollow]", el).forEach((b) => (b.onclick = () => followOnTelegram(b)));
+}
+// Follow with no account: a one-time link to our bot that carries the trader; Start there follows them with alerts on.
+// The tab opens in the tap, so it isn't blocked; the page asks until Start is pressed (up to 15 minutes, while open).
+async function followOnTelegram(btn) {
+  const wallet = btn.dataset.tgfollow, from = followFrom(), win = window.open("", "_blank");
+  let r;
+  try { r = await post("/api/follow/telegram", { wallet }); } catch (e) { win?.close(); toast(esc(e.message)); return; }
+  if (win) win.location = r.link; else location.href = r.link;
+  track("follow telegram opened", { from });
+  btn.parentElement.innerHTML = `<small>Tap Start in Telegram to finish…</small>`;
+  for (let i = 0; i < 300 && $("#follow")?.dataset.wallet === wallet; i++) {
+    await new Promise((ok) => setTimeout(ok, 3000));
+    if (!(await api(`/api/follow/telegram/${encodeURIComponent(r.code)}`).catch(() => null))?.done) continue;
+    tgFollowed(wallet);
+    track("trader followed", { from, via: "telegram" });
+    toast("Following. You'll get a message on Telegram a few minutes after they trade.");
+    break;
+  }
+  redrawFollow();
 }
 // A one-time link to our bot; Start there connects the chat. The tab opens in the tap, so it isn't blocked.
 async function connectTelegram(btn) {
@@ -1758,6 +1789,9 @@ function toggleInterest(c) {
   setInterests([...INTERESTS.filter((x) => now.has(x)), ...[...now].filter((x) => !INTERESTS.includes(x)).sort()]);
 }
 const interestNames = (cs) => cs.length < 2 ? cs.join("") : `${cs.slice(0, -1).join(", ")} or ${cs[cs.length - 1]}`;
+// The Leaderboard's market chip to start on: Sports until a choice is made (people from X pick it first), the one
+// market picked, or All for Skip or several.
+const boardCatOf = (v) => v === null ? "Sports" : v.length === 1 && INTERESTS.includes(v[0]) ? v[0] : "";
 // A trader matches when an interest is their most-traded category or one they're strong in.
 const matchesInterests = (s, picked) => !picked.length || picked.includes(s.categories[0]?.category)
   || s.strong_categories.some((c) => picked.includes(c));
@@ -1781,9 +1815,10 @@ function onboardingPage() {
   $$("[data-tab]").forEach((a) => a.classList.remove("on"));
   $("#app").innerHTML = `<section class="onb"><h1>Find traders worth following.</h1>
     <p class="lede">Discover interesting traders, understand how they trade, and decide who to follow.</p><div id="onbpick"></div></section>`;
-  interestPicker($("#onbpick"), { go: "Discover traders →", alt: "Skip", onDone: (v) => {
+  interestPicker($("#onbpick"), { selected: ["Sports"], go: "Discover traders →", alt: "Skip", onDone: (v) => {
     if (v.length) post("/api/count/picked", {}).catch(() => {}); // counted, anonymously: no id of any kind
     setInterests(v, { picked: true });
+    bd.cat = boardCatOf(v); // the Leaderboard opens on what was just picked
     if (location.hash === "#/traders") route(); else location.hash = "#/traders";
   } });
 }
@@ -2075,7 +2110,7 @@ function renderWorth() {
 let boardOn = false; // /api/config's leaderboard: SIGNALS_SKILL_TEST off
 // New accounts (under 4 weeks of history) are hidden unless "Show new accounts" is on: one big first week shouldn't top
 // a list of track records (the owner, 19 Oct). The foot says how many are hidden.
-const bd = { period: "30d", sort: "profit", cat: "", q: "", newOn: false, rows: [], total: null, more: false, counts: null, newHidden: 0, busy: false };
+const bd = { period: "30d", sort: "profit", cat: boardCatOf(interests), q: "", newOn: false, rows: [], total: null, more: false, counts: null, newHidden: 0, busy: false };
 const BOARD_SORTS = { profit: "Trading profit", return: "Profit per $ traded", win: WIN_LABEL, volume: "Volume", weeks: "Most weeks up" };
 const BOARD_PERIODS = { "7d": "7D", "30d": "30D", "90d": "90D", all: "All" };
 let boardTimer = null;

@@ -100,6 +100,9 @@ minutes behind. A trade's time is when it was made on Polymarket.
 "Connect Telegram" on a trader's page links your chat to the bot. You then get a message after a trader you follow
 buys or sells: who, what, at what price, the price now, and how long before the alert they traded.
 
+Signed out, Follow needs no account: it opens the bot, and Start there follows that trader from your chat with
+alerts on. Connecting the same chat to an account later keeps those follows.
+
 - Every trade by default. Per trader you can choose only trades over an amount, or one summary every 6 hours.
 - Two or more followed traders buying the same outcome make one message, updated as more buy.
 - Trades of $10,000 or more in the markets you picked alert you too, at most 5 a day.
@@ -185,7 +188,8 @@ The same key opens `/api/monitoring` (how the wallet search and reads are going,
 ### Analytics
 
 With `SIGNALS_POSTHOG_KEY` set: page views, clicks, scroll depth and session replay in PostHog, plus a few named
-events (`trader followed`, `trader unfollowed`, `follow sheet opened`, `trader looked up`), never which trader. It's
+events (`trader followed`, with `via: "telegram"` when followed with no account, `follow telegram opened`,
+`trader unfollowed`, `follow sheet opened`, `trader looked up`), never which trader. It's
 sent through `/lyr` on usesignals.app (`web/vercel.json`), so it only works behind Vercel. A signed-in person is
 known by their Clerk user id only. Replays mask every field and Clerk's menus.
 

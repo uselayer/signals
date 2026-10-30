@@ -57,7 +57,7 @@ class Telegram:
 @pytest.fixture
 def api(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> TestClient:
     engine._cache.clear()
-    for d in (engine._codes, engine._seen, engine._alerted, engine._whale_alerted):
+    for d in (engine._codes, engine._follow_codes, engine._followed, engine._seen, engine._alerted, engine._whale_alerted):
         d.clear()
     monkeypatch.setattr(engine, "_whale", {"started": False, "seen": set()})
     monkeypatch.setattr(engine, "STORE_DIR", tmp_path)
@@ -145,6 +145,91 @@ def test_connecting_telegram_takes_a_one_time_link(api: TestClient) -> None:
                                                           "daily_cap": 200, "summary_hours": 6, "baskets": [], "max_baskets": 10}  # fmt: skip
 
 
+def follow_on_telegram(api: TestClient, chat: int = 900, wallet: str = SHARP) -> str:
+    """Follow with no account: the page's link, then Start in Telegram. The link's code."""
+    r = api.post("/api/follow/telegram", json={"wallet": wallet}).json()
+    assert r["link"] == f"https://t.me/SignalsAlertsBot?start={r['code']}"
+    engine._on_update({"message": {"chat": {"id": chat}, "text": f"/start {r['code']}"}})
+    return str(r["code"])
+
+
+def test_following_on_telegram_needs_no_account(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    r = api.post("/api/follow/telegram", json={"wallet": SHARP})
+    assert r.status_code == 200 and r.headers["cache-control"] == "private, no-store"
+    code = r.json()["code"]
+    assert api.get(f"/api/follow/telegram/{code}").json() == {"done": False}  # not Started yet
+    engine._on_update({"message": {"chat": {"id": 900}, "text": f"/start {code}"}})
+    assert api.get(f"/api/follow/telegram/{code}").json() == {"done": True}
+    users = engine._load_follows()["users"]
+    [(uid, u)] = users.items()
+    assert uid.startswith(engine.TG_ONLY) and "900" not in uid  # a random id, never the chat's
+    assert u == {"follows": [SHARP], "chat": "900"}
+    said = engine.tg.sent[-1]["text"]
+    assert said.startswith("You're following Sharp &lt;Sam&gt;.") and "Connected" in said
+    engine._on_update({"message": {"chat": {"id": 900}, "text": f"/start {code}"}})  # used already
+    assert "expired" in engine.tg.sent[-1]["text"]
+    follow_on_telegram(api, 900, "0x" + "cd" * 20)  # a second trader: the same follower
+    assert [u["follows"] for u in engine._load_follows()["users"].values()] == [[SHARP, "0x" + "cd" * 20]]
+    assert api.post("/api/follow/telegram", json={"wallet": "0x12"}).status_code == 400
+    monkeypatch.setattr(engine, "FOLLOW_CODES_MAX", 0)
+    assert api.post("/api/follow/telegram", json={"wallet": SHARP}).status_code == 503  # a ceiling: anyone can ask
+    monkeypatch.setattr(engine, "TG_TOKEN", "")
+    assert api.post("/api/follow/telegram", json={"wallet": SHARP}).status_code == 404  # alerts off: no such follow
+
+
+def test_signed_out_follow_opens_telegram_and_signed_in_follow_stays_as_it_was(run_js: Any) -> None:
+    got = run_js(("esc", "TG_FOLLOWS_KEY", "tgFollows", "tgFollowed", "followHtml"), f"""(() => {{
+      globalThis.localStorage = {{ d: {{}}, getItem(k) {{ return this.d[k] ?? null; }}, setItem(k, v) {{ this.d[k] = String(v); }} }};
+      globalThis.window = {{ Clerk: {{ isSignedIn: false }} }};
+      globalThis.signedIn = () => window.Clerk.isSignedIn;
+      globalThis.auth = {{ on: true, alerts: true, me: null }};
+      const out = [followHtml("{SHARP}")];
+      tgFollowed("{SHARP}");                      // Start pressed: kept in this browser
+      out.push(followHtml("{SHARP}"));
+      auth.alerts = false;                        // alerts off here: Follow signs in, as before
+      out.push(followHtml("0xother"));
+      auth.alerts = true; window.Clerk.isSignedIn = true; auth.me = {{ follows: [] }};
+      out.push(followHtml("0xother"));            // signed in: the account's Follow, as before
+      return out;
+    }})()""")
+    assert 'data-tgfollow="' + SHARP + '"' in got[0] and "No account needed" in got[0]
+    assert "Following ✓" in got[1] and "data-tgfollow" not in got[1]
+    assert 'data-follow="0xother"' in got[2] and 'data-follow="0xother"' in got[3]
+
+
+def test_following_on_telegram_from_an_accounts_chat_follows_on_that_account(api: TestClient) -> None:
+    connect(api, 555)
+    follow_on_telegram(api, 555)
+    assert list(engine._load_follows()["users"]) == ["user_1"]
+    assert api.get("/api/me", headers=auth()).json()["follows"] == [SHARP]
+
+
+def test_signing_in_and_connecting_the_same_telegram_keeps_what_it_followed(api: TestClient) -> None:
+    follow_on_telegram(api, 555)
+    engine._on_update({"callback_query": {"id": "q", "data": f"am:{SHARP}:s", "message": {"chat": {"id": 555}}}})  # a summary
+    api.post("/api/me/follows", json={"wallet": "0x" + "cd" * 20}, headers=auth())
+    connect(api, 555)
+    assert list(engine._load_follows()["users"]) == ["user_1"]  # the Telegram-only follower joined the account
+    me = api.get("/api/me", headers=auth()).json()
+    assert me["follows"] == ["0x" + "cd" * 20, SHARP] and me["telegram"] is True
+    assert me["alert_for"][SHARP]["mode"] == "summary"
+
+
+def test_stop_forgets_a_telegram_only_follower(api: TestClient) -> None:
+    follow_on_telegram(api, 900)
+    engine._on_update({"message": {"chat": {"id": 900}, "text": "/stop"}})
+    assert engine._load_follows()["users"] == {}
+
+
+def test_following_on_telegram_keeps_the_most_follows(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "MAX_FOLLOWS", 1)
+    follow_on_telegram(api, 900)
+    code = follow_on_telegram(api, 900, "0x" + "cd" * 20)
+    assert "the most there can be" in engine.tg.sent[-1]["text"]
+    assert api.get(f"/api/follow/telegram/{code}").json() == {"done": False}
+    assert [u["follows"] for u in engine._load_follows()["users"].values()] == [[SHARP]]
+
+
 def buy(i: int, at: datetime, price: float = 0.40, market: str = "0xcid:0", size: float = 1000) -> WhaleTrade:
     return WhaleTrade("polymarket", SHARP, "Sharp", market, "yes", "buy", price, size, size * price, at, f"t{i}",
                       title="Will it <rain>?", outcome="Yes", url="https://polymarket.com/event/rain")  # fmt: skip
@@ -184,6 +269,21 @@ def test_every_new_buy_alerts_with_how_far_the_price_moved(api: TestClient, monk
     # "Stop alerts from …" under the message unfollows them for that chat
     engine._on_update({"callback_query": {"id": "q1", "data": f"unf:{SHARP}", "message": {"chat": {"id": 555}}}})
     assert api.get("/api/me", headers=auth()).json()["follows"] == []
+
+
+def test_a_telegram_only_follower_gets_alerts(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    follow_on_telegram(api, 900)
+    trades = [buy(1, datetime(2026, 10, 1, tzinfo=UTC))]
+    detail = lambda *a, **k: TraderDetail(  # noqa: E731
+        Trader(venue="polymarket", id=SHARP, name="Sharp"), "visible", {},
+        [WhalePosition("0xcid:0", None, "Yes", 100, 0.4, 0.41, None, None)], list(trades))  # fmt: skip
+    live_reads(monkeypatch, detail)
+    monkeypatch.setattr(engine, "copy_offer", lambda s: (False, "Not offered."))
+    assert engine.alert_pass() == 0  # the first round only notes what they've done already
+    trades.insert(0, buy(2, datetime.now(UTC)))
+    engine._cache.clear()
+    assert engine.alert_pass() == 1
+    assert engine.tg.sent[-1]["chat_id"] == "900" and "bought <b>Yes</b>" in engine.tg.sent[-1]["text"]
 
 
 def test_an_alert_gives_the_same_facts_for_every_trader_and_never_a_copy_line(
