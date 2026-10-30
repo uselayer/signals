@@ -579,6 +579,16 @@
   .bk-tiles b { font-weight: 600; }
   .bk-last { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 17px; font-size: 13.5px; }
   .bk-last .link { margin-left: auto; }
+  details.bk-more { margin: 0 0 0 17px; }
+  details.bk-more > summary { padding-top: 10px; }
+  .bk-holder { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+  .bk-holder > :first-child { grid-row: span 2; }
+  .bk-holder .name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+  .bk-holder .bk-amt { grid-column: 3; grid-row: 1 / span 2; }
+  .bk-subs { grid-column: 2; grid-row: 2; display: grid; gap: 2px; }
+  .bk-amt { flex: none; display: grid; justify-items: end; gap: 2px; font-size: 14px; }
+  .bk-amt span { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+  details.bk-more p { color: var(--muted); margin: 8px 0 0; }
   .bk-split { border-top: 1px solid var(--line); padding: 12px 18px; display: grid; gap: 6px; }
   .bk-split .t { font-weight: 500; overflow-wrap: anywhere; }
   .bk-split .s { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: 13.5px; }
@@ -599,7 +609,7 @@
   .bk-pick input { width: 18px; height: 18px; margin: 0; accent-color: var(--fg); flex: none; }
   .bk-pick .grow { flex: 1; min-width: 0; display: grid; }
   .bk-actions { display: grid; gap: 8px; margin-top: 16px; }
-  @media (max-width: 560px) { .bk-tiles { grid-template-columns: 1fr 1fr; } .bk-who, .bk-tiles, .bk-last { padding-left: 0; } }
+  @media (max-width: 560px) { .bk-tiles { grid-template-columns: 1fr 1fr; } .bk-who, .bk-tiles, .bk-last { padding-left: 0; } details.bk-more { margin-left: 0; } .bk-holder .bk-amt { grid-row: 1; } .bk-subs { grid-column: 2 / -1; } }
   .wt-explain { position: sticky; top: 76px; }
   .wt-explain h3 { font-size: 17px; margin: 10px 0 0; overflow-wrap: anywhere; }
   .wt-why { font-size: 15px; font-weight: 600; margin: 14px 0 0; }
@@ -3194,7 +3204,42 @@ function agreeRow(r, of) {
       <span>${r.holders.map((h) => esc(displayName(h.name, h.wallet))).join(", ")} · ${other}</span></div>
     <div class="bk-tiles"><div><span>They put in</span><b>${usd(r.put_in)}</b></div><div><span>They paid on average</span><b>${cents(r.paid)}</b></div><div><span>Market price now</span><b>${cents(r.now)}</b></div></div>
     ${m ? `<div class="bk-last"><span class="wl-kind">${KIND[m.kind]}</span><span>${esc(displayName(m.name, m.wallet))} · ${usd(m.usd)} · ${ago(m.at)}</span>
-      ${m.action === "buy" ? `<a class="link" href="#/check/${esc(m.wallet)}/${encodeURIComponent(r.market)}">Check your price</a>` : ""}</div>` : ""}</article>`;
+      ${m.action === "buy" ? `<a class="link" href="#/check/${esc(m.wallet)}/${encodeURIComponent(r.market)}">Check your price</a>` : ""}</div>` : ""}
+    ${r.holders[0]?.worth != null ? `<details class="qmore bk-more"><summary>Each trader's position</summary>
+      ${r.holders.map(holderRow).join("")}
+      <p>Worth now is what their contracts come to at the market price now. Changes are worked out from their trades over the last ${BASKET_DAYS} days.</p></details>` : ""}</article>`;
+}
+// A holder in "Each trader's position": what their position is worth now (what they have at stake, not what they once
+// put in), their share of the basket's worth on this side, where it ranks among their own open positions, and what
+// their trades did to it over the last BASKET_DAYS. That change is told only when the trades kept reach back that
+// far: otherwise it's "not known", never "no trades".
+const BASKET_DAYS = 7; // the engine's basket.RECENT_S
+const sharePct = (x) => x < 0.005 ? "under 1%" : `${Math.round(x * 100)}%`;
+function holderChange(c) {
+  const d = `${BASKET_DAYS} days`, known = `Last ${d} not known`;
+  if (!c) return "";
+  if (c.kind === "new") return `New in the last ${d}`;
+  if (c.kind === "none") return `No trades in it in the last ${d}`;
+  if (c.kind === "same") return `Traded it, holds the same as ${d} ago`;
+  if (c.kind === "added") return c.ratio >= 2 ? `Holds ${(Math.round(c.ratio * 10) / 10).toLocaleString()}× what they held ${d} ago` : `Holds ${sharePct(c.ratio - 1)} more than ${d} ago`;
+  if (c.kind === "reduced") return `Holds ${sharePct(1 - c.ratio)} less than ${d} ago`;
+  if (c.why === "short") {
+    const h = Math.max(1, Math.round((Date.now() - new Date(c.from)) / 3600000));
+    return `${known}: the trades we keep only cover the last ${h < 48 ? plural(h, "hour") : plural(Math.round(h / 24), "day")}`;
+  }
+  if (c.why === "unplaced") return `${known}: a trade in this market couldn't be matched to a side`;
+  if (c.why === "outside") return `${known}: what they hold changed outside trades`;
+  return `${known}: their trades weren't read just now`;
+}
+function holderRank(h) {
+  if (!h.rank) return "";
+  if (h.rank === 1) return h.of === 1 && !h.of_more ? "Their only open position" : "Their biggest open position";
+  return `#${h.rank} of ${h.of.toLocaleString()}${h.of_more ? "+" : ""} open positions`;
+}
+function holderRow(h) {
+  const sub = [holderChange(h.recent), holderRank(h)].filter(Boolean).map((s) => `<span class="wl-sub">${s}</span>`).join("");
+  return `<div class="bk-holder">${avatar(h.wallet, 28)}<span class="name">${esc(displayName(h.name, h.wallet))}</span>
+    <span class="bk-amt"><b>${usd(h.worth)}</b>${h.share != null ? `<span>${sharePct(h.share)} of this side</span>` : ""}</span>${sub ? `<span class="bk-subs">${sub}</span>` : ""}</div>`;
 }
 function splitRow(r) {
   return `<div class="bk-split"><span class="t">${esc(r.title || r.condition)}</span>
