@@ -9,7 +9,7 @@ import shot from "../public/nemi/strategy.json";
 // each order filled in full at the price it asked, no fee; real = what Nemi filled and charged. Motion graphics, then
 // the product itself: a still of a strategy's page (public/nemi/strategy.png, scripts/shot-nemi.mjs). 4:5 for the phone. Colors and fonts are the site's (~/dev/nemi src/index.css).
 const C = { bg: "#000000", raised: "#0e0e10", ink: "#e6f5ef", ink2: "#a3b5ae", ink3: "#6b7c76", rule: "#1c1c1f",
-  accent: "#3dffc5", accentSoft: "#06251c", loss: "#ff4d4d" };
+  accent: "#3dffc5", accentSoft: "#06251c", win: "#00d26a", loss: "#ff4d4d" };
 const SERIF = "Newsreader", SANS = "Inter", MONO = "JetBrains Mono";
 loadFont({ family: SERIF, url: staticFile("nemi/newsreader-latin-400-normal.woff2"), weight: "400" });
 loadFont({ family: SERIF, url: staticFile("nemi/newsreader-latin-500-normal.woff2"), weight: "500" });
@@ -23,10 +23,11 @@ const FEE_AT = COSTS + 30, SLIP_AT = COSTS + 95, LAND = COSTS + 170;  // when ea
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
 const out3 = Easing.out(Easing.cubic);
-const money = (v: number) => `${v < 0 ? "−" : ""}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money = (v: number) => `${v < 0 ? "−" : v > 0 ? "+" : ""}$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const cents = (p: number) => `${Math.round(p * 1000) / 10}¢`;
 const hours = Math.round((Date.parse(data.to) - Date.parse(data.from)) / 3.6e6);
-const times = (data.real / data.paper).toFixed(1);
+const whole = (v: number) => `$${Math.trunc(Math.abs(v)).toLocaleString("en-US")}`;  // the cents dropped, never rounded up
+const pnlColor = (v: number) => (v < 0 ? C.loss : v > 0 ? C.win : C.ink);
 const gap = Math.round(data.paper - data.real).toLocaleString("en-US");
 
 const Rise = ({ at = 0, children, style }: { at?: number; children: ReactNode; style?: CSSProperties }) => {
@@ -49,7 +50,7 @@ const Paper = () => {
         Same strategy · {data.orders} orders · {hours} hours</div>
       <div style={{ fontFamily: SERIF, fontSize: interpolate(shrink, [0, 1], [52, 78]), color: C.ink2, marginTop: 34 }}>Paper said</div>
       <div style={{ marginTop: 10, transformOrigin: "0 50%", transform: `scale(${interpolate(shrink, [0, 1], [0.5, 1])})` }}>
-        <Big value={data.paper} color={C.ink} /></div>
+        <Big value={data.paper} color={pnlColor(data.paper)} /></div>
       <div style={{ fontSize: 28, color: C.ink3, marginTop: interpolate(shrink, [0, 1], [-60, 26]), opacity: shrink }}>
         Every order filled at the price it asked. No fees.</div>
     </div>
@@ -93,20 +94,27 @@ const Book = ({ at }: { at: number }) => {
   );
 };
 
-const Costs = () => {
-  const f = useCurrentFrame() + COSTS;
+// The live number at frame f: paper, less each cost as it eats in; exactly the real result from the landing on.
+const realAt = (f: number) => {
+  if (f >= LAND) return data.real;
   const feeT = interpolate(f, [FEE_AT, FEE_AT + 60], [0, 1], { ...clamp, easing: Easing.inOut(Easing.cubic) });
   const slipT = interpolate(f, [SLIP_AT, SLIP_AT + 60], [0, 1], { ...clamp, easing: Easing.inOut(Easing.cubic) });
   const rest = interpolate(f, [LAND - 20, LAND], [0, 1], clamp);
-  const real = f >= LAND ? data.real : data.paper - data.fees * feeT - data.slippage * slipT - data.other * rest;
-  const landed = interpolate(f, [LAND, LAND + 10], [0, 1], { ...clamp, easing: out3 });
+  return data.paper - data.fees * feeT - data.slippage * slipT - data.other * rest;
+};
+// When it crosses zero (a win on paper turning into a loss), if it does: a tick there too.
+const ZERO = data.paper > 0 && data.real < 0 ? Array.from({ length: LAND - COSTS }, (_, i) => COSTS + i).find((f) => realAt(f) < 0) : undefined;
+
+const Costs = () => {
+  const f = useCurrentFrame() + COSTS;
+  const real = realAt(f);
   const pulse = 1 + 0.06 * Math.sin(Math.min(1, Math.max(0, (f - LAND) / 10)) * Math.PI);
   const ex = data.example;
   return (
     <div style={{ position: "absolute", left: 90, right: 90, top: 500 }}>
       <Rise at={-2} style={{ fontFamily: SERIF, fontSize: 78, color: C.ink }}>Live order book said</Rise>
       <div style={{ marginTop: 10, transformOrigin: "0 50%", transform: `scale(${pulse})` }}>
-        <Big value={real} color={landed > 0 ? C.loss : C.ink} /></div>
+        <Big value={real} color={pnlColor(real)} /></div>
       <Row at={FEE_AT - COSTS} label="Polymarket's fee" sub="Charged on every fill. Paper tests skip it." value={data.fees} />
       <Row at={SLIP_AT - COSTS} label="Slippage" value={data.slippage}
         sub={`Big orders walk the book: asked ${cents(ex.asked)}, paid ${cents(ex.paid)} on average`}>
@@ -119,8 +127,10 @@ const Costs = () => {
 const Punch = () => (
   <AbsoluteFill style={{ background: C.bg, justifyContent: "center", padding: "0 90px",
     opacity: interpolate(useCurrentFrame(), [0, 8], [0, 1], clamp) }}>
-    <Rise style={{ fontFamily: SANS, fontWeight: 700, fontSize: 230, letterSpacing: -10, color: C.loss, lineHeight: 1 }}>{times}×</Rise>
-    <Rise at={6} style={{ fontFamily: SERIF, fontSize: 82, color: C.ink, marginTop: 20, lineHeight: 1.1 }}>the loss paper showed.</Rise>
+    <Rise style={{ fontFamily: SERIF, fontSize: 84, color: C.ink, lineHeight: 1.1, whiteSpace: "nowrap" }}>
+      {data.paper >= 0 ? "Won " : "Lost "}<span style={{ color: pnlColor(data.paper) }}>{whole(data.paper)}</span> on paper.</Rise>
+    <Rise at={10} style={{ fontFamily: SERIF, fontSize: 84, color: C.ink, lineHeight: 1.1, marginTop: 14, whiteSpace: "nowrap" }}>
+      {data.real >= 0 ? "Won " : "Lost "}<span style={{ color: pnlColor(data.real) }}>{whole(data.real)}</span> live.</Rise>
     <Rise at={20} style={{ fontSize: 40, color: C.ink2, marginTop: 44, lineHeight: 1.35 }}>
       ${gap} in fees, slippage and missed fills that a paper test never charged.</Rise>
   </AbsoluteFill>
@@ -169,7 +179,7 @@ const EndCard = () => (
       Paper trading that charges you<br /><span style={{ color: C.accent }}>like live does.</span></Rise>
     <Rise at={12} style={{ fontFamily: MONO, fontSize: 56, marginTop: 52, color: C.accent }}>nemi.markets</Rise>
     <Rise at={18} style={{ fontSize: 26, marginTop: 60, color: C.ink3, lineHeight: 1.45 }}>
-      Real paper trades by Nemi's example strategy {data.strategy}, Oct 26–27.<br />
+      Real paper trades by Nemi's example strategy {data.strategy}:<br />its first {data.orders} orders, Oct 26–27.<br />
       Paper: each order filled in full at the price it asked, no fees.</Rise>
   </AbsoluteFill>
 );
@@ -180,7 +190,7 @@ export type NemiCostsProps = { music: string; from: number; gain: number };
 // "Still I Rise" (the owner's pick, 10-30) from 190.5 s: a near-silent gap, its build under the hook, and the drop into
 // the track's loudest stretch (about 193.5–214 s) as "Live order book said" comes in.
 export const NEMI_COSTS_DEFAULTS: NemiCostsProps = { music: "still-i-rise.wav", from: 190.5, gain: 0.9 };
-const TICKS = [FEE_AT, SLIP_AT, LAND, PUNCH];
+const TICKS = [FEE_AT, SLIP_AT, ...(ZERO ? [ZERO] : []), LAND, PUNCH];
 const Sound = ({ music, from, gain }: NemiCostsProps) => (
   <>
     {getStaticFiles().some((f) => f.name === music) && (
