@@ -179,7 +179,11 @@ behind Vercel (see README, "Hosting").
     market, a row per trader (a bar for their share of the side's money, what their position is worth now, never what
     they once put in, and their last buy or sell of it with an arrow); tapping a row shows when they opened it, what
     they paid, bought and sold, and its rank among their own open positions. No explainer paragraphs, no "latest
-    changes" list. The history is one more read per trader of their trades in just the markets they agree on (the
+    changes" list. Each card opens with one plain line (owner, 30 Oct: show whose money it is and what they're doing):
+    "Mostly X's money" (one trader has `basket.MOSTLY` of it), "Led by X" or "Shared evenly" (within `basket.EVEN`),
+    with the dollars ("$211K of the $245K on Yes"), then what they did last, a move being their trades one way each
+    within `watch.MOVE_S` of the one before ("They sold $67.6K of it yesterday"; over more than a day, "since Oct 28").
+    Times follow the viewer's calendar. No score, no verdict. The history is one more read per trader of their trades in just the markets they agree on (the
     SDK's Polymarket reader, `BASKET_HISTORY_IDS` markets a read, kept like the positions), so a busy trader's is
     whole. A fact that wasn't read (a failed read, or more trades than `BASKET_HISTORY_ROWS`) is left out, never
     guessed or shown as "no trades".

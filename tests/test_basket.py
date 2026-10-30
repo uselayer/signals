@@ -110,8 +110,8 @@ def test_each_holder_gets_their_story_in_the_market_from_their_trades_in_it() ->
     }  # fmt: skip
     basket.add_history(out, history)
     s = {h["wallet"]: h["story"] for h in out["agree"][0]["holders"]}
-    assert s[A] == {"last": {"action": "sell", "usd": 250.0, "at": at(1)}, "opened": at(40), "bought": 1000.0, "sold": 250.0}
-    assert s[B] == {"last": {"action": "buy", "usd": 500.0, "at": at(2)}, "opened": None, "bought": None, "sold": None}
+    assert s[A] == {"last": {"action": "sell", "usd": 250.0, "from": at(1), "at": at(1)}, "opened": at(40), "bought": 1000.0, "sold": 250.0}
+    assert s[B] == {"last": {"action": "buy", "usd": 500.0, "from": at(2), "at": at(2)}, "opened": None, "bought": None, "sold": None}
     assert s[C] is None  # not "no trades": not read
 
 
@@ -124,7 +124,30 @@ def test_a_trade_is_placed_by_its_outcome_and_one_that_cant_be_placed_leaves_the
     })  # fmt: skip
     s = {h["wallet"]: h["story"] for h in out["agree"][0]["holders"]}
     assert s[A]["bought"] == 80.0 and s[A]["last"]["action"] == "buy"
-    assert s[B]["last"] == {"action": "buy", "usd": 80.0, "at": at(2)} and s[B]["bought"] is None and s[B]["sold"] is None
+    assert s[B]["last"] == {"action": "buy", "usd": 80.0, "from": at(2), "at": at(2)} and s[B]["bought"] is None and s[B]["sold"] is None
+
+
+def test_a_last_move_is_their_trades_one_way_each_close_to_the_one_before() -> None:
+    held = {w: [pos("0xcel:0", "Celtics", 500, 0.5, 0.5)] for w in (A, B)}
+    out = basket.view(held, NAMES, settled=SETTLED)
+    six_h = engine.watch.MOVE_S / 86400
+    basket.add_history(out, {A: ([row("0xcel", 0, "BUY", 900, 9), row("0xcel", 0, "SELL", 3685, 1.2),
+                                  row("0xcel", 0, "SELL", 17117, 1.2 - six_h / 2)], True),  # two sales, 3 h apart: one
+                             B: ([row("0xcel", 0, "BUY", 40, 3), row("0xcel", 0, "BUY", 60, 3 - 2 * six_h)], True)})  # 12 h apart
+    s = {h["wallet"]: h["story"] for h in out["agree"][0]["holders"]}
+    assert s[A]["last"] == {"action": "sell", "usd": 20802.0, "from": at(1.2), "at": at(1.2 - six_h / 2)}
+    assert s[B]["last"]["usd"] == 60.0 and s[B]["last"]["from"] == at(3 - 2 * six_h)
+
+
+def test_whose_money_a_side_is_mostly_one_traders_led_by_one_or_shared_evenly() -> None:
+    def lead(*worths: float) -> dict[str, Any]:
+        held = {w: [pos("0xcel:0", "Celtics", x / 2, 0.5, 0.5)] for w, x in zip((A, B, C), worths, strict=False)}
+        return basket.view(held, NAMES, settled=SETTLED)["agree"][0]["lead"]  # type: ignore[no-any-return]
+
+    assert lead(207481, 34250) == {"kind": "mostly", "wallets": [A]}  # 86%
+    assert lead(28060, 12319) == {"kind": "led", "wallets": [A]}  # 69%: the most, not most of it
+    assert lead(20000, 18000) == {"kind": "shared", "wallets": [A, B]}  # within a quarter of each other
+    assert lead(20000, 17000, 9000) == {"kind": "shared", "wallets": [A, B]}  # the third isn't that close
 
 
 # ---- the engine ----
@@ -249,7 +272,8 @@ def test_a_basket_reads_each_holders_trades_in_just_the_markets_they_agree_on(ap
 # ---- the page ----
 
 ROW = ("esc", "plural", "tenths", "cents", "usd", "ago", "ADDR", "SHORT_ADDR", "displayName", "hash32", "avatar", "bk",
-       "agreeCard", "UP", "DOWN", "sharePct", "dayText", "lastText", "holderRank", "holderRow", "holderDetail", "splitCard")  # fmt: skip
+       "agreeCard", "UP", "DOWN", "sharePct", "dayText", "lastText", "holderRank", "holderRow", "holderDetail", "splitCard",
+       "whenText", "moveText", "leadLine")  # fmt: skip
 
 
 
@@ -275,7 +299,7 @@ def test_an_agreement_card_is_a_row_per_trader_with_their_money_and_last_move_an
     html = card(run_js, r, 3)
     old = (datetime.now(UTC) - timedelta(days=60)).astimezone()  # the page writes the day in the viewer's time
     for said in ("2026 Balance of Power: D Senate, D House", "69¢", "Market price now", "Yes", "2 of 3 agree",
-                 "BreakTheBank", "$207K", "Sold 1d ago", "gopfan2", "$34.3K", f"Bought {old:%b} {old.day}",
+                 "BreakTheBank", "$207K", "Sold yesterday", "gopfan2", "$34.3K", f"Bought {old:%b} {old.day}",
                  "Trader 0xee…ee", "86% of the money on this side", "width:86%", "width:2%"):  # fmt: skip
         assert said in html, said
     assert "0x" + "e" * 40 not in re.sub(r"<[^>]+>", "", html)  # never shown as text (it keys the row and its links)
@@ -300,3 +324,33 @@ def test_a_disagreement_card_is_each_sides_traders_and_money(run_js: Any) -> Non
     for said in ("Will Dan Sullivan win the Alaska Senate race in 2026?", "Yes", "BreakTheBank", "$30.9K", "No", "gopfan2", "$16.1K",
                  "flex:30899", "flex:16079"):  # fmt: skip
         assert said in html, said
+
+
+LINE = ("esc", "usd", "ADDR", "SHORT_ADDR", "displayName", "dayText", "whenText", "moveText", "leadLine")
+
+
+def test_a_cards_line_says_whose_money_it_is_how_much_and_what_they_did_last(run_js: Any) -> None:
+    def line(lead: dict[str, Any], worth: float, holders: list[dict[str, Any]], outcome: str = "Yes") -> str:
+        r = {"outcome": outcome, "worth": worth, "lead": lead, "holders": holders}
+        return re.sub(r"<[^>]+>", "", run_js(LINE, f"leadLine({json.dumps(r)})"))
+
+    def h(w: str, name: str, worth: float, action: str | None = None, usd: float = 0, days: float = 0, opened: bool = False,
+          since: float | None = None) -> dict[str, Any]:  # fmt: skip
+        when = iso(days)
+        last = {"action": action, "usd": usd, "from": when if since is None else iso(since), "at": when}
+        return {"wallet": w, "name": name, "worth": worth, "story": action and {"last": last, "opened": last["from"] if opened else iso(90)}}
+
+    btb, gop = (B, "BreakTheBank"), (A, "gopfan2")
+    assert line({"kind": "mostly", "wallets": [B]}, 241731, [h(*btb, 207481, "sell", 20802, 1), h(*gop, 34250, "buy", 7736, 9)]) == (
+        "Mostly BreakTheBank's money: $207K of the $242K on Yes. They sold $20.8K of it yesterday.")
+    assert line({"kind": "mostly", "wallets": [B]}, 39972, [h(*btb, 38925, "buy", 40050, 1, opened=True), h(*gop, 1047, "buy", 256, 205)]) == (
+        "Mostly BreakTheBank's money: $38.9K of the $40K on Yes. They put it all in yesterday.")
+    began = (datetime.now(UTC) - timedelta(days=3)).astimezone()  # a run of buys over days: since when, not "just now"
+    assert line({"kind": "mostly", "wallets": [B]}, 49200, [h(*btb, 41600, "buy", 30460, 0.004, since=3), h(*gop, 7600, "buy", 2301, 23)]) == (
+        f"Mostly BreakTheBank's money: $41.6K of the $49.2K on Yes. They have added $30.5K since {began:%b} {began.day}.")
+    assert line({"kind": "led", "wallets": [B]}, 40379, [h(*btb, 28060, "buy", 43, 0.04), h(*gop, 12319, "buy", 11, 23)], "No") == (
+        "Led by BreakTheBank: $28.1K of the $40.4K on No. They added $43 58 minutes ago; gopfan2 last bought 3 weeks ago.")
+    assert line({"kind": "shared", "wallets": [B, A]}, 38000, [h(*btb, 20000, "buy", 5000, 2), h(*gop, 18000, "sell", 1000, 5)]) == (
+        "Shared evenly: $20K from BreakTheBank, $18K from gopfan2. BreakTheBank added $5K 2 days ago; gopfan2 sold $1K of it 5 days ago.")
+    assert line({"kind": "mostly", "wallets": [B]}, 241731, [h(*btb, 207481), h(*gop, 34250)]) == (
+        "Mostly BreakTheBank's money: $207K of the $242K on Yes.")  # their trades weren't read: no guess at what they did
