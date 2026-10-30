@@ -17,8 +17,10 @@ loadFont({ family: SANS, url: staticFile("nemi/inter-latin-wght-normal.woff2"), 
 loadFont({ family: MONO, url: staticFile("nemi/jetbrains-mono-latin-400-normal.woff2"), weight: "400" });
 
 const FPS = 30;
-const HOOK = 90, COSTS = 90, PUNCH = 330, PLATFORM = 420, END = 540;
-export const NEMI_COSTS_DURATION = 660;
+// Each scene [start, end); between the last three, half a second of black to breathe (DIPS).
+const HOOK = 90, COSTS = 90, COSTS_END = 330, PUNCH = 345, PUNCH_END = 465, PLATFORM = 480, PLATFORM_END = 675, END = 690;
+export const NEMI_COSTS_DURATION = 840;
+const DIPS = [[COSTS_END, PUNCH], [PUNCH_END, PLATFORM], [PLATFORM_END, END]];
 const FEE_AT = COSTS + 30, SLIP_AT = COSTS + 95, LAND = COSTS + 170;  // when each cost starts eating, and the landing
 
 const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
@@ -140,7 +142,7 @@ const Punch = () => (
 // ringed). Camera keyframes [frame, center x, center y, zoom] in the still's layout pixels (1920×1200, drawn at 2×); the
 // frame's left edge stays right of the sidebar (x < 220), which lists the other example strategy.
 const SW = 1920, SH = 1200, FW = 1080, FH = 1350;
-const CAM: [number, number, number, number][] = [[0, 800, 371, 0.92], [48, 800, 371, 0.92], [82, 1053, 584, 1.75], [120, 1053, 600, 1.75]];
+const CAM: [number, number, number, number][] = [[0, 800, 371, 0.92], [75, 800, 371, 0.92], [111, 1053, 584, 1.75], [195, 1053, 604, 1.75]];
 const COLS = { x: 914, y: 404, w: 278, h: 482 };  // Asked, Filled, Slip and Fee: header and the first rows (Book at fill: x 1204)
 const Ring = ({ box, at, pad = 10 }: { box: { x: number; y: number; w: number; h: number }; at: number; pad?: number }) => {
   const t = interpolate(useCurrentFrame(), [at, at + 10], [0, 1], { ...clamp, easing: out3 });
@@ -149,7 +151,7 @@ const Ring = ({ box, at, pad = 10 }: { box: { x: number; y: number; w: number; h
     boxShadow: `0 0 28px ${C.accent}55` }} />;
 };
 const Platform = () => {
-  const f = useCurrentFrame(), n = END - PLATFORM;
+  const f = useCurrentFrame(), n = PLATFORM_END - PLATFORM;
   const pick = (j: number) => interpolate(f, CAM.map((c) => c[0]), CAM.map((c) => c[j]), { ...clamp, easing: Easing.inOut(Easing.cubic) });
   const z = pick(3), cx = pick(1), cy = pick(2);
   const fade = interpolate(f, [0, 8, n - 8, n], [0, 1, 1, 0], clamp);
@@ -159,10 +161,10 @@ const Platform = () => {
         transform: `translate(${FW / 2 - cx * z}px, ${FH / 2 - cy * z}px) scale(${z})` }}>
         <Img src={staticFile("nemi/strategy.png")} style={{ width: SW, height: SH }} />
         {shot.costs && <Ring box={shot.costs} at={14} />}
-        <Ring box={COLS} at={84} pad={4} />
+        <Ring box={COLS} at={113} pad={4} />
       </div>
-      <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: 400,
-        background: `linear-gradient(to bottom, ${C.bg} 72%, ${C.bg}00)` }} />
+      <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: 420,
+        background: `linear-gradient(to bottom, ${C.bg} 78%, ${C.bg}00)` }} />
       <Rise at={2} style={{ position: "absolute", left: 90, right: 90, top: 70, fontFamily: SERIF, fontSize: 70, fontWeight: 500,
         letterSpacing: -1.2, lineHeight: 1.05, color: C.ink }}>Nemi shows every<br />fee and fill.</Rise>
       <Rise at={10} style={{ position: "absolute", left: 92, top: 236, fontSize: 28, color: C.ink2 }}>
@@ -204,12 +206,20 @@ const Sound = ({ music, from, gain }: NemiCostsProps) => (
 export const NemiCosts = (music: NemiCostsProps) => (
   <AbsoluteFill style={{ background: C.bg, color: C.ink, fontFamily: SANS }}>
     <Sound {...music} />
-    <Sequence from={0} durationInFrames={PUNCH}><Paper /></Sequence>
-    <Sequence from={COSTS} durationInFrames={PUNCH - COSTS}><Costs /></Sequence>
-    <Sequence from={PUNCH} durationInFrames={END - PUNCH}><Punch /></Sequence>
-    <Sequence from={PLATFORM} durationInFrames={END - PLATFORM}><Platform /></Sequence>
+    <Sequence from={0} durationInFrames={COSTS_END}><Paper /></Sequence>
+    <Sequence from={COSTS} durationInFrames={COSTS_END - COSTS}><Costs /></Sequence>
+    <Sequence from={PUNCH} durationInFrames={PUNCH_END - PUNCH}><Punch /></Sequence>
+    <Sequence from={PLATFORM} durationInFrames={PLATFORM_END - PLATFORM}><Platform /></Sequence>
     <Sequence from={END}><EndCard /></Sequence>
-    <div style={{ position: "absolute", left: 90, bottom: 60, opacity: interpolate(useCurrentFrame(), [COSTS + 60, COSTS + 75, PUNCH, PUNCH + 8, PLATFORM - 8, PLATFORM], [1, 0, 0, 1, 1, 0], clamp) }}>
+    <div style={{ position: "absolute", left: 90, bottom: 60, opacity: interpolate(useCurrentFrame(), [COSTS + 60, COSTS + 75, PUNCH, PUNCH + 8, PUNCH_END - 10, PUNCH_END], [1, 0, 0, 1, 1, 0], clamp) }}>
       <Wordmark size={44} /></div>
+    <Dip />
   </AbsoluteFill>
 );
+
+// Black over the cut: in over the scene's last 10 frames, held through the gap, out over the next scene's first 10.
+const Dip = () => {
+  const f = useCurrentFrame();
+  const o = Math.max(0, ...DIPS.map(([a, b]) => interpolate(f, [a - 10, a, b, b + 10], [0, 1, 1, 0], clamp)));
+  return o > 0 ? <AbsoluteFill style={{ background: C.bg, opacity: o }} /> : null;
+};
