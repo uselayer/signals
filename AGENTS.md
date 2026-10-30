@@ -99,7 +99,12 @@ behind Vercel (see README, "Hosting").
   custom OpenID Connect provider). Signed out, a Feed page is the sign-in page ("Sign in to see the Feed", Sign in,
   Browse traders), and the engine refuses its reads (`feed_reader`: `/api/live`, `/api/trading-now`, `/api/bet`)
   without a valid session. Without Clerk's key (running locally) nothing is gated. On a trader's page the Follow
-  button says why you'd sign in ("Follow · get an alert after they trade"). Alerts go
+  button says what you get ("Follow · get an alert after they trade"). Signed out, with alerts on, Follow needs no
+  account (owner, 29 Oct: visitors left at the sign-in box): it opens Telegram with a one-time link that carries the
+  trader (`/api/follow/telegram`), and Start there follows them with alerts on (`_follow_from_chat`): on the chat's
+  account if it has one, else a Telegram-only follower (`TG_ONLY` plus a random id, never the chat's). Connecting
+  that chat to an account later moves its follows and choices there; `/stop` forgets a Telegram-only follower. The
+  page keeps such follows in this browser only (`signals.tgfollows`) and never signs anyone in. Alerts go
   to Telegram (`alert_pass` in `app.py`). Signals is trader discovery and trading intelligence first, copying
   second: following is research, so every buy by a trader you follow alerts you, whatever the amount and whoever
   the trader (their buys of one outcome within 30 minutes add up, across rounds and restarts, shown as the total

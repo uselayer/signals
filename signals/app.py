@@ -3325,6 +3325,10 @@ INTEREST_CHOICES = ("Politics", "Sports", "Crypto", "Esports", *(c for c, _ in C
 _follow_lock = threading.Lock()  # one change to follows.json at a time
 _follow_stop = threading.Event()
 _codes: dict[str, tuple[str, float]] = {}  # one-time "Connect Telegram" codes: code -> (Clerk user id, made at)
+_follow_codes: dict[str, tuple[str, float]] = {}  # one-time "Follow on Telegram" codes, no account: code -> (wallet, made at)
+_followed: dict[str, float] = {}  # those codes once Start followed: code -> when (the page asks, to show Following)
+FOLLOW_CODES_MAX = 5000  # outstanding at once: anyone can ask for one, so there's a ceiling
+TG_ONLY = "tg_"  # a follower with no account, only a Telegram chat: a random id after it, never the chat's
 _tg: dict[str, Any] = {"bot": None, "offset": 0, "error": None}
 _seen: dict[str, set[str]] = {}  # per followed trader: trade ids already looked at
 _alerted: dict[tuple[str, str], float] = {}  # (trader, market) -> when it was last alerted
@@ -3747,6 +3751,38 @@ def connect_telegram(response: Response, uid: str = Depends(signed_in)) -> dict[
     return {"link": f"https://t.me/{bot}?start={code}"}
 
 
+@app.post("/api/follow/telegram")
+def follow_on_telegram(req: Follow, response: Response) -> dict[str, Any]:
+    """Follow without an account: a one-time link to our bot that carries the trader (CODE_TTL_S). Start there
+    follows them from that chat with alerts on: on the chat's account if it has one, else a Telegram-only one."""
+    _private(response)
+    if not TG_TOKEN:
+        raise HTTPException(404, detail="Alerts aren't switched on here yet.")
+    w = req.wallet.lower()
+    if not _WALLET.fullmatch(w):
+        raise HTTPException(400, detail="That isn't a Polymarket wallet address.")
+    bot = _bot_name()
+    if not bot:
+        raise HTTPException(503, detail="Telegram isn't answering right now. Try again in a minute.")
+    now = time.time()
+    for c in [c for c, (_, at) in _follow_codes.items() if now - at > CODE_TTL_S]:
+        _follow_codes.pop(c, None)
+    for c in [c for c, at in _followed.items() if now - at > CODE_TTL_S]:
+        _followed.pop(c, None)
+    if len(_follow_codes) >= FOLLOW_CODES_MAX:
+        raise HTTPException(503, detail="Too many people are following right now. Try again in a minute.")
+    code = secrets.token_urlsafe(12)
+    _follow_codes[code] = (w, now)
+    return {"link": f"https://t.me/{bot}?start={code}", "code": code}
+
+
+@app.get("/api/follow/telegram/{code}")
+def followed_on_telegram(code: str, response: Response) -> dict[str, bool]:
+    """Whether Start has followed with this link yet (the page shows Following then)."""
+    _private(response)
+    return {"done": code in _followed}
+
+
 class TelegramError(RuntimeError):
     """A Telegram Bot API call that failed, in Telegram's own words (never the token). ``code``: its error code
     (None when it never got the request); ``retry_after``: how long it asked us to wait, if it did;
@@ -3947,20 +3983,33 @@ def _on_update(u: dict[str, Any]) -> None:
     cmd, arg = cmd.split("@")[0], arg.strip()
     if cmd == "/start":
         hit = _codes.pop(arg, None) if arg else None
+        fol = _follow_codes.pop(arg, None) if arg and not hit else None
         if hit and time.time() - hit[1] <= CODE_TTL_S:
             with _follow_lock:
                 d = _load_follows()
-                for x in d["users"].values():  # one chat belongs to one account
-                    if x.get("chat") == chat:
-                        x["chat"] = None
                 mine = _user(d, hit[0])
+                for k, x in list(d["users"].items()):  # one chat belongs to one account; a Telegram-only one joins it
+                    if x.get("chat") != chat or k == hit[0]:
+                        continue
+                    if k.startswith(TG_ONLY):
+                        for w in x.get("follows") or []:
+                            if w not in mine["follows"] and len(mine["follows"]) < MAX_FOLLOWS:
+                                mine["follows"].append(w)
+                        for w, c in (x.get("alert_for") or {}).items():
+                            if w in mine["follows"]:
+                                mine.setdefault("alert_for", {}).setdefault(w, c)
+                        del d["users"][k]
+                    else:
+                        x["chat"] = None
                 mine["chat"] = chat
                 _save_follows(d)
             count("telegram", uid=hit[0])
             names = ", ".join(_who(w) for w in mine["follows"]) or "nobody yet"
             _say(chat, CONNECTED.format(names=html.escape(names)))
+        elif fol and time.time() - fol[1] <= CODE_TTL_S:
+            _follow_from_chat(chat, arg, fol[0])
         elif arg:
-            _say(chat, f"That link has expired. Tap Connect Telegram on {SITE} again.")
+            _say(chat, f"That link has expired. Tap Follow or Connect Telegram on {SITE} again.")
         else:
             _say(chat, f"Follow traders on {SITE}, then tap Connect Telegram there to get an alert after they trade.")
     elif cmd == "/list":
@@ -3970,11 +4019,44 @@ def _on_update(u: dict[str, Any]) -> None:
     elif cmd == "/stop":
         with _follow_lock:
             d = _load_follows()
-            for x in d["users"].values():
+            for k, x in list(d["users"].items()):
                 if x.get("chat") == chat:
                     x["chat"] = None
+                    if k.startswith(TG_ONLY):  # no account to come back to: nothing kept
+                        del d["users"][k]
             _save_follows(d)
         _say(chat, f"Alerts are off. Tap Connect Telegram on {SITE} to turn them back on.")
+
+
+def _follow_from_chat(chat: str, code: str, w: str) -> None:
+    """Start on a "Follow on Telegram" link (``code``): follow ``w`` from this chat, alerts on, on the chat's account
+    if it has one, else a Telegram-only follower (TG_ONLY). Signing in and connecting this chat later keeps them."""
+    with _follow_lock:
+        d = _load_follows()
+        uid = next((k for k, x in d["users"].items() if x.get("chat") == chat), None)
+        joined = uid is None
+        uid = uid or TG_ONLY + secrets.token_hex(8)
+        mine = _user(d, uid)
+        new = w not in mine["follows"]
+        full = new and len(mine["follows"]) >= MAX_FOLLOWS
+        if not full:
+            mine["chat"] = chat
+            if new:
+                mine["follows"].append(w)
+            _save_follows(d)
+    if full:
+        _say(chat, f"You follow {MAX_FOLLOWS} traders already, the most there can be. Tap Stop alerts under an alert "
+                   "from one of them to make room, then tap Follow again.")  # fmt: skip
+        return
+    _followed[code] = time.time()
+    if joined:
+        count("telegram", uid=uid)
+    if new:
+        count("follow", uid=uid, trader=w)
+        _directory_note_later([Seen(w, "follow")])  # the wallet only: who follows them stays in follows.json
+        _pace_later(uid, w)  # how busy they are; a busy one gets a message with the choices
+    names = ", ".join(_who(x) for x in mine["follows"])
+    _say(chat, f"You're following {html.escape(_who(w))}.\n\n" + CONNECTED.format(names=html.escape(names)))
 
 
 def _bot_loop() -> None:
