@@ -21,9 +21,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from signals import watch
+
 MIN_USD = 10.0  # put in: less than this held (a stray fill, dust left after a sale) isn't holding a side
 AGREE_SHOWN = 30
 SPLIT_SHOWN = 15
+MOSTLY = 0.7  # one trader with this share of a side's money or more: it's mostly their money
+EVEN = 1.25  # the biggest no more than this many times the next: the money is shared evenly between them
 _APOSTROPHES = {ord(a): None for a in "'’"}  # Polymarket's trade rows drop them from outcome names
 
 
@@ -76,8 +80,9 @@ def view(
         top, rest = ranked[0], ranked[1:]
         others = sum(len(s["holders"]) for s in rest)
         if len(top["holders"]) >= 2 and len(top["holders"]) > others:
-            agree.append(_side(top) | {"condition": cond, "others": others,
-                                       "other_outcomes": [s["outcome"] for s in rest]})  # fmt: skip
+            side = _side(top)
+            agree.append(side | {"condition": cond, "others": others, "lead": _lead(side["holders"]),
+                                 "other_outcomes": [s["outcome"] for s in rest]})  # fmt: skip
         elif rest:
             split.append({"condition": cond, "title": top["title"], "sides": [_side(s) for s in ranked]})
     agree.sort(key=lambda r: (-r["count"], -r["worth"]))
@@ -95,6 +100,18 @@ def _side(s: dict[str, Any]) -> dict[str, Any]:
             "put_in": round(sum(h["put_in"] for h in holders), 2), "paid": paid, "worth": round(worth, 2),
             "holders": [{k: h[k] for k in keep} | {"share": round(h["worth"] / worth, 4) if worth else None}
                         for h in holders]}  # fmt: skip
+
+
+def _lead(holders: list[dict[str, Any]]) -> dict[str, Any]:
+    """Whose money a side is (``holders`` biggest worth first): ``kind`` "mostly" (one trader has MOSTLY of it or
+    more), "shared" (the biggest has no more than EVEN times the next: ``wallets``, everyone that close to the
+    biggest) or "led" (the biggest has the most, but not most of it). The page says it in words."""
+    top, nxt = holders[0], holders[1]
+    if (top["share"] or 0) >= MOSTLY:
+        return {"kind": "mostly", "wallets": [top["wallet"]]}
+    if top["worth"] <= EVEN * nxt["worth"]:
+        return {"kind": "shared", "wallets": [h["wallet"] for h in holders if top["worth"] <= EVEN * h["worth"]]}
+    return {"kind": "led", "wallets": [top["wallet"]]}
 
 
 def _rank(p: Any, positions: list[Any], more: bool) -> dict[str, Any]:
@@ -122,16 +139,25 @@ def add_history(out: dict[str, Any], history: dict[str, tuple[list[dict[str, Any
 
 
 def _story(rows: list[dict[str, Any]], complete: bool) -> dict[str, Any]:
-    """A holder's trades of one outcome, as facts: ``last``, their latest buy or sell of it (``action``, ``usd``,
-    ``at``), and, when ``complete`` (every trade of theirs in it was read), ``opened`` (their first trade in it) and
-    ``bought`` and ``sold`` (dollars, in all). Without every trade those totals would be guesses: they're None."""
+    """A holder's trades of one outcome, as facts: ``last``, their latest move in it (``action``; ``usd``, its
+    trades' dollars together; ``from`` and ``at``, its first and last trade), and, when ``complete`` (every trade of
+    theirs in it was read), ``opened`` (their first trade in it) and ``bought`` and ``sold`` (dollars, in all).
+    Without every trade those totals would be guesses: they're None. A move is their trades one way, each within
+    ``watch.MOVE_S`` of the one before, as a watch page groups them: an order filled in pieces reads as one."""
     rows = sorted(rows, key=lambda t: int(t.get("timestamp") or 0))
     usd = lambda t: float(t.get("usdcSize") or 0)  # noqa: E731
-    at = lambda t: datetime.fromtimestamp(int(t.get("timestamp") or 0), UTC).isoformat()  # noqa: E731
-    sells = [t for t in rows if str(t.get("side")).upper() == "SELL"]
-    last = rows[-1] if rows else None
+    ts = lambda t: int(t.get("timestamp") or 0)  # noqa: E731
+    at = lambda t: datetime.fromtimestamp(ts(t), UTC).isoformat()  # noqa: E731
+    sell = lambda t: str(t.get("side")).upper() == "SELL"  # noqa: E731
+    sells = [t for t in rows if sell(t)]
+    move = rows[-1:]
+    for t in reversed(rows[:-1]):
+        if sell(t) != sell(move[0]) or ts(move[0]) - ts(t) > watch.MOVE_S:
+            break
+        move.insert(0, t)
     return {
-        "last": None if last is None else {"action": "sell" if last in sells else "buy", "usd": round(usd(last), 2), "at": at(last)},
+        "last": None if not move else {"action": "sell" if sell(move[0]) else "buy", "usd": round(sum(map(usd, move)), 2),
+                                       "from": at(move[0]), "at": at(move[-1])},  # fmt: skip
         "opened": at(rows[0]) if complete and rows else None,
         "bought": round(sum(usd(t) for t in rows if t not in sells), 2) if complete else None,
         "sold": round(sum(usd(t) for t in sells), 2) if complete else None,
