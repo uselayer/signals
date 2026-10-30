@@ -175,11 +175,14 @@ behind Vercel (see README, "Hosting").
     `HELD_TTL_S` for everyone, `BASKET_READS` at a time so "Check now" keeps a turn; a trader whose read failed is
     left out and named. Holding a side means $10+ put in at a price still open (2¢–98¢). Counts and what they paid
     are facts, never a verdict or a promise; "Market price now", not a price you can buy at; buys keep "Check your
-    price". A market's "Each trader's position" (feedback, 29 Oct: "5 of 8 agree" hid who had sold most and who had
-    $100K against $100) shows per holder what it's worth now (exposure, never what they once put in), their share of
-    the side's worth, its rank among their own open positions, and what their trades did to it over the last 7 days,
-    walked back from what they hold now through the poller's kept trades (no new read). That change is "not known"
-    whenever the kept trades don't reach back 7 days or don't add up; never show it as "no trades" then.
+    price". The view is consumer-simple (owner, 29 Oct: "too much text"): one Agree / Disagree switch, a card per
+    market, a row per trader (a bar for their share of the side's money, what their position is worth now, never what
+    they once put in, and their last buy or sell of it with an arrow); tapping a row shows when they opened it, what
+    they paid, bought and sold, and its rank among their own open positions. No explainer paragraphs, no "latest
+    changes" list. The history is one more read per trader of their trades in just the markets they agree on (the
+    SDK's Polymarket reader, `BASKET_HISTORY_IDS` markets a read, kept like the positions), so a busy trader's is
+    whole. A fact that wasn't read (a failed read, or more trades than `BASKET_HISTORY_ROWS`) is left out, never
+    guessed or shown as "no trades".
   - Onboarding (first visit, once per browser) asks one question: which markets interest you (Politics, Sports,
     Crypto, Esports; Skip means all markets), with Sports already picked (owner, 29 Oct: niching to sports; people
     from X picked it first). The Leaderboard opens on the one market picked (`boardCatOf`: Sports before any

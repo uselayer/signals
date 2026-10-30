@@ -548,55 +548,47 @@
   .bk-chip.on { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
   .bk-chip.on .n { color: var(--bg); opacity: .7; }
   .bk-chip.add { border-style: dashed; color: var(--muted); }
-  .bk-head { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; margin-bottom: 16px; }
+  .bk-head { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 16px; }
   .bk-faces { display: flex; flex: none; }
-  .bk-faces > * { margin-right: -8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--card); }
-  .bk-head .grow { flex: 1 1 240px; min-width: 0; display: grid; gap: 2px; }
-  .bk-head .name { font-size: 17px; }
-  .bk-seen { display: flex; align-items: center; gap: 8px; font-size: 14px; }
-  .bk-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
-  .bk-main { flex: 999 1 540px; min-width: 0; }
-  .bk-side { flex: 1 1 320px; min-width: 0; display: grid; gap: 16px; }
-  .bk-list { padding: 0; overflow: hidden; }
-  .bk-list .bk-h { padding: 16px 18px 12px; }
-  .bk-list h2 { font-size: 17px; }
-  .bk-list .bk-h p, .bk-none { margin: 3px 0 0; font-size: 13.5px; color: var(--muted); }
-  .bk-none { padding: 4px 18px 18px; margin: 0; }
-  .bk-row { border-top: 1px solid var(--line); padding: 15px 18px; display: grid; gap: 10px; }
-  .bk-top { display: flex; align-items: flex-start; gap: 10px; }
-  .bk-top .wl-dot { margin-top: 8px; }
-  .bk-top .t { flex: 1; min-width: 0; font-weight: 600; font-size: 15.5px; overflow-wrap: anywhere; }
-  .bk-count { flex: none; display: flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
-  .bk-side-tag { display: inline-block; font-size: 13px; font-weight: 600; background: var(--raised); border-radius: 6px; padding: 1px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bk-who { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding-left: 17px; font-size: 13.5px; color: var(--muted); }
-  .bk-bars { display: flex; gap: 3px; }
-  .bk-bars span { width: 16px; height: 6px; border-radius: 3px; background: var(--line); }
-  .bk-bars span.on { background: var(--fg); }
-  .bk-bars span.alt { background: var(--faint); opacity: .55; }
-  .bk-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding-left: 17px; }
-  .bk-tiles div { background: var(--soft); border-radius: var(--r-sm); padding: 8px 10px; min-width: 0; }
-  .bk-tiles span { display: block; font-size: 12px; color: var(--muted); }
-  .bk-tiles b { font-weight: 600; }
-  .bk-last { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding-left: 17px; font-size: 13.5px; }
-  .bk-last .link { margin-left: auto; }
-  details.bk-more { margin: 0 0 0 17px; }
-  details.bk-more > summary { padding-top: 10px; }
-  .bk-holder { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
-  .bk-holder > :first-child { grid-row: span 2; }
-  .bk-holder .name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
-  .bk-holder .bk-amt { grid-column: 3; grid-row: 1 / span 2; }
-  .bk-subs { grid-column: 2; grid-row: 2; display: grid; gap: 2px; }
-  .bk-amt { flex: none; display: grid; justify-items: end; gap: 2px; font-size: 14px; }
-  .bk-amt span { font-size: 12.5px; color: var(--muted); white-space: nowrap; }
-  details.bk-more p { color: var(--muted); margin: 8px 0 0; }
-  .bk-split { border-top: 1px solid var(--line); padding: 12px 18px; display: grid; gap: 6px; }
-  .bk-split .t { font-weight: 500; overflow-wrap: anywhere; }
-  .bk-split .s { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: 13.5px; }
-  .bk-change { border-top: 1px solid var(--line); padding: 11px 18px; display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; gap: 10px; align-items: start; font-size: 14px; }
-  .bk-change:hover { background: var(--soft); }
-  .bk-change .wl-dot { margin-top: 7px; }
-  .bk-change .s { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
-  .bk-change .when { font-size: 12.5px; color: var(--faint); white-space: nowrap; }
+  .bk-faces > * { margin-right: -8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
+  .bk-head .grow { flex: 1 1 200px; min-width: 0; display: grid; gap: 2px; }
+  .bk-head .name { font-size: 20px; font-weight: 700; }
+  .bk-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: var(--r); background: var(--soft); flex: 0 1 280px; }
+  .bk-tab { min-height: 40px; border: 0; border-radius: 9px; background: none; color: var(--muted); font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer; }
+  .bk-tab .n { opacity: .6; margin-left: 4px; }
+  .bk-tab.on { background: var(--fg); color: var(--bg); }
+  .bk-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 14px; align-items: start; }
+  .bk-card { min-width: 0; padding: 16px 18px 4px; margin: 0; }
+  .bk-top { display: flex; align-items: flex-start; gap: 14px; }
+  .bk-top .t { flex: 1; min-width: 0; font-weight: 600; font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
+  .bk-now { flex: none; display: grid; justify-items: end; }
+  .bk-now b { font-size: 17px; }
+  .bk-now span { font-size: 11.5px; color: var(--muted); }
+  .bk-meta { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13.5px; color: var(--muted); }
+  .bk-side-tag { display: inline-block; font-size: 13px; font-weight: 600; color: var(--fg); background: var(--raised); border-radius: 6px; padding: 1px 8px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bk-holder { border-top: 1px solid var(--line); }
+  .bk-hold { display: grid; grid-template-columns: 28px minmax(80px, 150px) minmax(0, 1fr) 76px 132px; grid-template-areas: "av name bar worth move"; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 12px 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .bk-hold > :first-child { grid-area: av; }
+  .bk-hold .name { grid-area: name; font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bk-bar { grid-area: bar; height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; }
+  .bk-bar span { display: block; height: 100%; background: var(--fg); border-radius: 3px; }
+  .bk-worth { grid-area: worth; font-size: 15px; text-align: right; }
+  .bk-move { grid-area: move; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .bk-detail { margin: 0 0 12px 40px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--soft); display: grid; gap: 10px; }
+  .bk-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .bk-facts span { display: block; font-size: 12px; color: var(--muted); }
+  .bk-facts b { font-size: 14px; font-weight: 600; }
+  .bk-dfoot { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .bk-dfoot .grow { flex: 1; }
+  .bk-split-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; margin: 14px 0 10px; }
+  .bk-split-bar .s0 { background: var(--fg); }
+  .bk-split-bar .s1 { background: var(--faint); }
+  .bk-split-bar .s2 { background: var(--raised); }
+  .bk-ssides { display: flex; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; padding-bottom: 12px; }
+  .bk-sside { display: grid; gap: 4px; min-width: 0; justify-items: start; }
+  .bk-sside:last-child:not(:first-child) { justify-items: end; text-align: right; }
+  .bk-sside .who { font-weight: 600; font-size: 14px; }
+  .bk-none { color: var(--muted); font-size: 14px; margin: 8px 0; }
   .bk-note { font-size: 13.5px; color: var(--muted); margin: -6px 0 14px; }
   .bk-label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
   .bk-input { width: 100%; border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: var(--r-sm); padding: 11px 12px; font: inherit; }
@@ -609,7 +601,13 @@
   .bk-pick input { width: 18px; height: 18px; margin: 0; accent-color: var(--fg); flex: none; }
   .bk-pick .grow { flex: 1; min-width: 0; display: grid; }
   .bk-actions { display: grid; gap: 8px; margin-top: 16px; }
-  @media (max-width: 560px) { .bk-tiles { grid-template-columns: 1fr 1fr; } .bk-who, .bk-tiles, .bk-last { padding-left: 0; } details.bk-more { margin-left: 0; } .bk-holder .bk-amt { grid-row: 1; } .bk-subs { grid-column: 2 / -1; } }
+  @media (max-width: 560px) {
+    .bk-hold { grid-template-columns: 28px minmax(0, 1fr) auto; grid-template-areas: "av name worth" "av bar move"; row-gap: 8px; }
+    .bk-tabs { flex-basis: 100%; }
+    .bk-cards { grid-template-columns: minmax(0, 1fr); }
+    .bk-detail { margin-left: 0; }
+    .bk-facts { grid-template-columns: 1fr 1fr; }
+  }
   .wt-explain { position: sticky; top: 76px; }
   .wt-explain h3 { font-size: 17px; margin: 10px 0 0; overflow-wrap: anywhere; }
   .wt-why { font-size: 15px; font-weight: 600; margin: 14px 0 0; }
@@ -3153,14 +3151,14 @@ function wlCard(t, fresh) {
 }
 
 // Baskets: a name and 2 or more of the traders you follow (kept on your account, auth.me.baskets), shown as tabs over
-// the Watchlist after "Everyone you follow" (the cards above). A basket's view is where its traders agree and where
-// they split, from what each holds now (/api/me/baskets/<id>/view: one read per trader, kept a minute for everyone),
-// read again every minute while it's open, beside their latest changes. Counts are facts, never a verdict. The tab
-// picked is kept in this browser; "since you last looked" is when you last opened that basket here.
+// the Watchlist after "Everyone you follow" (the cards above). A basket's view (/api/me/baskets/<id>/view, read again
+// every minute while it's open) is two lists behind one switch. Agree: a card per market where most of them are on one
+// side, a row per trader on it: a bar for their share of the money on that side, what their position is worth now and
+// their last buy or sell of it; tapped, when they opened it, what they paid, bought and sold, and how big it is for
+// them. Disagree: each side's traders and money. Facts, never a verdict. The basket picked is kept in this browser.
 const BASKET_KEY = "signals.basket";
-const BASKET_MIN_USD = 10; // the engine's basket.MIN_USD
 let basketPick = null; // null: not picked this visit (the browser's kept one); "": everyone you follow
-const bk = { id: null, d: null, err: null, seen: null };
+const bk = { id: null, d: null, err: null, tab: "agree", open: new Set() };
 function pickedBasket() {
   let id = basketPick;
   if (id === null) { try { id = localStorage.getItem(BASKET_KEY); } catch { id = null; } }
@@ -3187,8 +3185,7 @@ function renderChips() {
 }
 async function loadBasket(id, my) {
   if (bk.id !== id) {
-    Object.assign(bk, { id, d: null, err: null, seen: seenAt(`basket:${id}`) });
-    markSeen(`basket:${id}`);
+    Object.assign(bk, { id, d: null, err: null, tab: "agree", open: new Set() });
     renderBasket();
   }
   try { bk.d = await api(`/api/me/baskets/${encodeURIComponent(id)}/view`); bk.err = null; } catch (e) { bk.err = e; }
@@ -3206,84 +3203,78 @@ function renderBasket() {
     return;
   }
   const names = (ws) => ws.map((w) => esc(displayName(d.traders.find((t) => t.wallet === w)?.name, w)));
-  const fresh = d.changes.filter((m) => isNew(m, bk.seen)).length;
-  const head = `<section class="card bk-head"><span class="bk-faces">${d.traders.slice(0, 8).map((t) => avatar(t.wallet, 34)).join("")}</span>
+  const tab = (key, label, n) => `<button type="button" class="bk-tab${bk.tab === key ? " on" : ""}" role="tab" aria-selected="${bk.tab === key}" data-bktab="${key}">${label}<span class="n">${n}</span></button>`;
+  const head = `<section class="bk-head"><span class="bk-faces">${d.traders.slice(0, 8).map((t) => avatar(t.wallet, 34)).join("")}</span>
     <span class="grow"><span class="name">${esc(d.name)}</span><span class="wl-sub">${names(d.traders.map((t) => t.wallet)).join(", ")}</span></span>
-    ${d.traders.length >= 2 ? `<span class="bk-seen">${fresh ? `<span class="wl-dot"></span><span><b>Since you last looked:</b> ${plural(fresh, "change")}</span>` : `<span class="wl-sub">No changes since you last looked</span>`}</span>` : ""}
+    ${d.traders.length >= 2 ? `<span class="bk-tabs" role="tablist" aria-label="Agree or disagree">${tab("agree", "Agree", d.agree_count)}${tab("split", "Disagree", d.split_count)}</span>` : ""}
     <button type="button" class="btn ghost" id="bkedit">Edit basket</button></section>`;
   if (d.traders.length < 2) {
     box.innerHTML = head + emptyState("Add another trader", "A basket shows where 2 or more of the traders in it agree. Traders you unfollow leave your baskets.");
     $("#bkedit").onclick = () => basketSheet(b);
     return;
   }
-  const unread = d.unread.length ? `<p class="bk-note">Couldn't read what ${names(d.unread).join(", ")} ${d.unread.length === 1 ? "holds" : "hold"} just now: left out until the next read.</p>` : "";
-  box.innerHTML = `${head}${unread}<div class="bk-grid">
-    <section class="card bk-list bk-main"><div class="bk-h"><h2>Where they agree</h2><p>Markets where 2 or more of this basket hold the same side, more than hold any other side. Most agreement first.</p></div>
-      ${d.agree.map((r) => agreeRow(r, d.read)).join("") || `<p class="bk-none">No market where 2 or more of them hold the same side right now.</p>`}</section>
-    <div class="bk-side">
-      <section class="card bk-list"><div class="bk-h"><h2>Where they split</h2><p>Traders in this basket on different sides of the same market.</p></div>
-        ${d.split.map(splitRow).join("") || `<p class="bk-none">No market they're split on right now.</p>`}</section>
-      <section class="card bk-list"><div class="bk-h"><h2>Latest changes</h2><p>Every change from this basket, newest first.</p></div>
-        ${d.changes.map(basketChange).join("") || `<p class="bk-none">No trades in the last ${wl.d?.days || 30} days yet.</p>`}</section>
-    </div></div>
-    <p class="foot-note">Counts are the traders in this basket who hold each side now, with at least $${BASKET_MIN_USD} in, in markets still open (above 2¢, below 98¢). What they hold is read about every minute. Past trades, not advice: Signals places no orders.</p>`;
+  const unread = d.unread.length ? `<p class="bk-note">Couldn't read ${names(d.unread).join(", ")} just now: left out until the next read.</p>` : "";
+  const cards = bk.tab === "agree"
+    ? d.agree.map((r) => agreeCard(r, d.read)).join("") || `<p class="bk-none">No market where most of them are on the same side right now.</p>`
+    : d.split.map(splitCard).join("") || `<p class="bk-none">They aren't on opposite sides of any market right now.</p>`;
+  box.innerHTML = `${head}${unread}<div class="bk-cards">${cards}</div><p class="foot-note">Past trades, not advice: Signals places no orders.</p>`;
+  $$("[data-bktab]", box).forEach((t) => (t.onclick = () => {
+    bk.tab = t.dataset.bktab;
+    track("basket tab", { tab: bk.tab });
+    renderBasket();
+  }));
+  $$("[data-hold]", box).forEach((h) => (h.onclick = () => {
+    const key = h.dataset.hold;
+    if (!bk.open.delete(key)) { bk.open.add(key); track("basket trader opened", {}); }
+    renderBasket();
+  }));
   $("#bkedit").onclick = () => basketSheet(b);
   bindActions(box);
 }
-function agreeRow(r, of) {
-  const m = r.latest, bars = Array.from({ length: of }, (_, i) => `<span class="${i < r.count ? "on" : i < r.count + r.others ? "alt" : ""}"></span>`).join("");
-  const other = r.others ? `${plural(r.others, "trader")} ${r.others === 1 ? "holds" : "hold"} ${esc(r.other_outcomes.join(" or "))}` : "No one in the basket holds another side";
-  return `<article class="bk-row"><div class="bk-top"><span class="wl-dot${m && isNew(m, bk.seen) ? "" : " off"}"></span><span class="t">${esc(r.title || r.market)}</span>
-      <span class="bk-count"><span class="bk-side-tag">${esc(r.outcome || "")}</span>${r.count} of ${of}</span></div>
-    <div class="bk-who"><span class="bk-bars" aria-hidden="true">${bars}</span><span class="bk-faces">${r.holders.map((h) => avatar(h.wallet, 24)).join("")}</span>
-      <span>${r.holders.map((h) => esc(displayName(h.name, h.wallet))).join(", ")} · ${other}</span></div>
-    <div class="bk-tiles"><div><span>They put in</span><b>${usd(r.put_in)}</b></div><div><span>They paid on average</span><b>${cents(r.paid)}</b></div><div><span>Market price now</span><b>${cents(r.now)}</b></div></div>
-    ${m ? `<div class="bk-last"><span class="wl-kind">${KIND[m.kind]}</span><span>${esc(displayName(m.name, m.wallet))} · ${usd(m.usd)} · ${ago(m.at)}</span>
-      ${m.action === "buy" ? `<a class="link" href="#/check/${esc(m.wallet)}/${encodeURIComponent(r.market)}">Check your price</a>` : ""}</div>` : ""}
-    ${r.holders[0]?.worth != null ? `<details class="qmore bk-more"><summary>Each trader's position</summary>
-      ${r.holders.map(holderRow).join("")}
-      <p>Worth now is what their contracts come to at the market price now. Changes are worked out from their trades over the last ${BASKET_DAYS} days.</p></details>` : ""}</article>`;
+function agreeCard(r, of) {
+  return `<article class="card bk-card"><div class="bk-top"><span class="t">${esc(r.title || r.market)}</span>
+      <span class="bk-now"><b>${cents(r.now)}</b><span>Market price now</span></span></div>
+    <div class="bk-meta"><span class="bk-side-tag">${esc(r.outcome || "")}</span><span>${r.count} of ${of} agree</span></div>
+    ${r.holders.map((h) => holderRow(r, h)).join("")}</article>`;
 }
-// A holder in "Each trader's position": what their position is worth now (what they have at stake, not what they once
-// put in), their share of the basket's worth on this side, where it ranks among their own open positions, and what
-// their trades did to it over the last BASKET_DAYS. That change is told only when the trades kept reach back that
-// far: otherwise it's "not known", never "no trades".
-const BASKET_DAYS = 7; // the engine's basket.RECENT_S
+// A trader on the side the basket agrees on: their share of the money on it (the bar), what their position is worth
+// now and their last buy or sell of it (from their trades in that market); tapped, the facts behind it. A fact the
+// engine couldn't read (story None, or totals of a trader with too many trades there) is left out, never guessed.
+const UP = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10V2M2.5 5.5 6 2l3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const DOWN = `<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2.5 6.5 6 10l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 const sharePct = (x) => x < 0.005 ? "under 1%" : `${Math.round(x * 100)}%`;
-function holderChange(c) {
-  const d = `${BASKET_DAYS} days`, known = `Last ${d} not known`;
-  if (!c) return "";
-  if (c.kind === "new") return `New in the last ${d}`;
-  if (c.kind === "none") return `No trades in it in the last ${d}`;
-  if (c.kind === "same") return `Traded it, holds the same as ${d} ago`;
-  if (c.kind === "added") return c.ratio >= 2 ? `Holds ${(Math.round(c.ratio * 10) / 10).toLocaleString()}× what they held ${d} ago` : `Holds ${sharePct(c.ratio - 1)} more than ${d} ago`;
-  if (c.kind === "reduced") return `Holds ${sharePct(1 - c.ratio)} less than ${d} ago`;
-  if (c.why === "short") {
-    const h = Math.max(1, Math.round((Date.now() - new Date(c.from)) / 3600000));
-    return `${known}: the trades we keep only cover the last ${h < 48 ? plural(h, "hour") : plural(Math.round(h / 24), "day")}`;
-  }
-  if (c.why === "unplaced") return `${known}: a trade in this market couldn't be matched to a side`;
-  if (c.why === "outside") return `${known}: what they hold changed outside trades`;
-  return `${known}: their trades weren't read just now`;
+function dayText(at) {
+  const t = new Date(at);
+  return t.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(t.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 }
+const lastText = (m) => `${m.action === "buy" ? "Bought" : "Sold"} ${Date.now() - new Date(m.at) < 30 * 86400000 ? ago(m.at) : dayText(m.at)}`;
 function holderRank(h) {
   if (!h.rank) return "";
-  if (h.rank === 1) return h.of === 1 && !h.of_more ? "Their only open position" : "Their biggest open position";
-  return `#${h.rank} of ${h.of.toLocaleString()}${h.of_more ? "+" : ""} open positions`;
+  const of = `${h.of.toLocaleString()}${h.of_more ? "+" : ""}`;
+  if (h.rank === 1) return h.of === 1 && !h.of_more ? "Their only open position" : `Their biggest of ${of} open positions`;
+  return `Their #${h.rank} biggest of ${of} open positions`;
 }
-function holderRow(h) {
-  const sub = [holderChange(h.recent), holderRank(h)].filter(Boolean).map((s) => `<span class="wl-sub">${s}</span>`).join("");
-  return `<div class="bk-holder">${avatar(h.wallet, 28)}<span class="name">${esc(displayName(h.name, h.wallet))}</span>
-    <span class="bk-amt"><b>${usd(h.worth)}</b>${h.share != null ? `<span>${sharePct(h.share)} of this side</span>` : ""}</span>${sub ? `<span class="bk-subs">${sub}</span>` : ""}</div>`;
+function holderRow(r, h) {
+  const key = `${r.market}|${h.wallet}`, open = bk.open.has(key), last = h.story?.last;
+  return `<div class="bk-holder"><button type="button" class="bk-hold" data-hold="${esc(key)}" aria-expanded="${open}">
+      ${avatar(h.wallet, 28)}<span class="name">${esc(displayName(h.name, h.wallet))}</span>
+      <span class="bk-bar" role="img" aria-label="${h.share != null ? `${sharePct(h.share)} of the money on this side` : ""}"><span style="width:${Math.max(2, Math.round((h.share || 0) * 100))}%"></span></span>
+      <b class="bk-worth">${usd(h.worth)}</b><span class="bk-move">${last ? `${last.action === "buy" ? UP : DOWN}${lastText(last)}` : ""}</span></button>
+    ${open ? holderDetail(r, h) : ""}</div>`;
 }
-function splitRow(r) {
-  return `<div class="bk-split"><span class="t">${esc(r.title || r.condition)}</span>
-    <span class="s">${r.sides.map((s) => `<span class="bk-side-tag">${esc(s.outcome || "")}</span><span>${s.count}</span>`).join(`<span class="muted">vs</span>`)}</span></div>`;
+function holderDetail(r, h) {
+  const s = h.story || {}, fact = (k, v) => v == null ? "" : `<div><span>${k}</span><b>${v}</b></div>`;
+  return `<div class="bk-detail"><div class="bk-facts">${fact("Opened", s.opened ? dayText(s.opened) : null)}${fact("Paid on average", h.paid != null ? cents(h.paid) : null)}${fact("Bought", s.bought != null ? usd(s.bought) : null)}${fact("Sold", s.sold != null ? usd(s.sold) : null)}</div>
+    <div class="bk-dfoot"><span>${holderRank(h)}</span><span class="grow"></span><a class="link" href="#/watch/${esc(h.wallet)}">Their trades</a>
+      ${s.last?.action === "buy" ? `<a class="link" href="#/check/${esc(h.wallet)}/${encodeURIComponent(r.market)}">Check your price</a>` : ""}</div></div>`;
 }
-function basketChange(m) {
-  return `<a class="bk-change" href="#/watch/${esc(m.wallet)}"><span class="wl-dot${isNew(m, bk.seen) ? "" : " off"}"></span>
-    <span><span><b>${esc(displayName(m.name, m.wallet))}</b> <span class="wl-kind">${KIND[m.kind]}</span> ${usd(m.usd)}</span>
-    <span class="s" style="display:block">${esc(m.title || m.market)}${m.outcome ? ` · ${esc(m.outcome)}` : ""}</span></span><span class="when">${ago(m.at)}</span></a>`;
+function splitCard(r) {
+  const total = r.sides.reduce((a, s) => a + (s.worth || 0), 0);
+  const bar = r.sides.map((s, i) => `<span class="s${Math.min(i, 2)}" style="flex:${Math.max(s.worth || 0, total * 0.02) || 1}"></span>`).join("");
+  const side = (s) => `<div class="bk-sside"><span class="bk-side-tag">${esc(s.outcome || "")}</span>
+    <span class="who">${s.holders.map((h) => esc(displayName(h.name, h.wallet))).join(", ")}</span><span class="wl-sub">${usd(s.worth)}</span></div>`;
+  return `<article class="card bk-card"><div class="bk-top"><span class="t">${esc(r.title || r.condition)}</span></div>
+    <div class="bk-split-bar" aria-hidden="true">${bar}</div><div class="bk-ssides">${r.sides.map(side).join("")}</div></article>`;
 }
 // New basket / Edit basket: a name and the traders you follow to put in it (2 or more).
 async function basketSheet(b) {

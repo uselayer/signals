@@ -5,14 +5,13 @@ from __future__ import annotations
 
 import base64
 import json
-import time
+import re
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from uselayer import VenueError, WhalePosition, WhaleTrade
+from uselayer import VenueError, WhalePosition
 
 from signals import app as engine
 from signals import basket
@@ -68,21 +67,24 @@ def test_more_agreement_comes_first_then_more_money() -> None:
     assert [r["title"] for r in basket.view(held, NAMES, settled=SETTLED)["agree"]] == ["Small", "Big"]
 
 
-# ---- each trader's position: worth now, share, rank among their own, and what their trades did to it ----
+# ---- each trader's position: worth now, share, rank among their own, and their trades in that market ----
 
 NOW = datetime(2026, 10, 29, 12, tzinfo=UTC)
-DAY = 86400
 
 
-def trade(market: str, action: str, size: float, days_ago: float, outcome: str | None = "Celtics", price: float = 0.5) -> WhaleTrade:
-    at = NOW - timedelta(days=days_ago)
-    return WhaleTrade("polymarket", None, None, market, "yes", action, price, size, size * price, at, f"{market}{action}{days_ago}",  # type: ignore[arg-type]
-                      "Celtics vs Knicks", outcome)  # fmt: skip
+def row(cond: str, idx: int | str, side: str, usd: float, days_ago: float, outcome: str | None = "Celtics") -> dict[str, Any]:
+    """One of Polymarket's activity rows, as the SDK's Polymarket reader hands it back."""
+    return {"conditionId": cond, "outcomeIndex": idx, "outcome": outcome, "side": side, "usdcSize": usd,
+            "timestamp": int((NOW - timedelta(days=days_ago)).timestamp())}  # fmt: skip
+
+
+def at(days_ago: float) -> str:
+    return (NOW - timedelta(days=days_ago)).isoformat()
 
 
 def holders(held: dict[str, list[WhalePosition]], **k: Any) -> dict[str, dict[str, Any]]:
-    [row] = basket.view(held, NAMES, settled=SETTLED, at=NOW.timestamp(), **k)["agree"]
-    return {h["wallet"]: h for h in row["holders"]}
+    [r] = basket.view(held, NAMES, settled=SETTLED, **k)["agree"]
+    return {h["wallet"]: h for h in r["holders"]}
 
 
 def test_a_position_is_its_worth_now_with_its_share_of_the_side_and_rank_among_their_own() -> None:
@@ -97,50 +99,56 @@ def test_a_position_is_its_worth_now_with_its_share_of_the_side_and_rank_among_t
     assert (hs[B]["rank"], hs[B]["of"], hs[B]["of_more"]) == (1, 6, True)  # biggest of the 6 read, and they hold more
 
 
-def test_a_recent_change_walks_back_from_what_they_hold_now() -> None:
-    held = {w: [pos("0xcel:0", "Celtics", 500, 0.5, 0.5)] for w in (A, B, C, D, E)}  # 1,000 contracts each now
-    kept = {
-        A: ([trade("0xcel:0", "buy", 1000, 2)], 0.0),  # all 1,000 bought this week: new
-        B: ([trade("0xcel:0", "buy", 500, 3), trade("0xcel:0", "buy", 9999, 10)], 0.0),  # 500 held before: doubled
-        C: ([trade("0xcel:0", "sell", 9000, 1)], 0.0),  # sold 9,000 of 10,000: holds 90% less
-        D: ([trade("0xcel:1", "buy", 400, 1, "Knicks"), trade("0xlak:0", "buy", 50, 1)], 0.0),  # traded, not this
-        E: ([trade("0xcel:0", "buy", 100, 1), trade("0xcel:0", "sell", 100, 1)], 0.0),  # in and out: holds the same
-    }
-    hs = holders(held, trades=kept)
-    assert hs[A]["recent"] == {"kind": "new"}
-    assert hs[B]["recent"] == {"kind": "added", "ratio": 2.0}
-    assert hs[C]["recent"] == {"kind": "reduced", "ratio": 0.1}
-    assert hs[D]["recent"] == {"kind": "none"}
-    assert hs[E]["recent"] == {"kind": "same", "ratio": 1.0}
+def test_each_holder_gets_their_story_in_the_market_from_their_trades_in_it() -> None:
+    held = {w: [pos("0xcel:0", "Celtics", 500, 0.5, 0.5)] for w in (A, B, C)}
+    out = basket.view(held, NAMES, settled=SETTLED)
+    history = {
+        A: ([row("0xcel", 0, "BUY", 900, 40), row("0xcel", 0, "BUY", 100, 3), row("0xcel", 0, "SELL", 250, 1),
+             row("0xcel", 1, "BUY", 50, 0.5, "Knicks"), row("0xoth", 0, "BUY", 7, 0)], True),  # other side, other market
+        B: ([row("0xcel", 0, "BUY", 500, 2)], False),  # too many trades there to read them all: no totals
+        # C: their read failed
+    }  # fmt: skip
+    basket.add_history(out, history)
+    s = {h["wallet"]: h["story"] for h in out["agree"][0]["holders"]}
+    assert s[A] == {"last": {"action": "sell", "usd": 250.0, "at": at(1)}, "opened": at(40), "bought": 1000.0, "sold": 250.0}
+    assert s[B] == {"last": {"action": "buy", "usd": 500.0, "at": at(2)}, "opened": None, "bought": None, "sold": None}
+    assert s[C] is None  # not "no trades": not read
 
 
-def test_a_recent_change_is_not_known_rather_than_guessed() -> None:
-    held = {w: [pos("0xcel:0", "Celtics", 500, 0.5, 0.5)] for w in (A, B, C, D, E)}
-    short_from = (NOW - timedelta(days=2)).timestamp()
-    kept = {
-        A: ([], short_from),  # no trade kept, but the trades kept reach back only 2 days: not "no trades"
-        B: ([trade("0xcel:999", "buy", 10, 1, None)], 0.0),  # a junk outcome index and no name: whose side?
-        C: ([trade("0xcel:0", "buy", 5000, 1)], 0.0),  # bought 5,000, holds 1,000: merged or converted, not a trade
-        # D: no trades kept for them
-        E: ([trade("0xcel:1", "buy", 10, 1, None)], 0.0),  # no name, but a real index: the other side
-    }
-    hs = holders(held, trades=kept)
-    assert hs[A]["recent"] == {"kind": "unknown", "why": "short", "from": "2026-10-27T12:00:00+00:00"}
-    assert hs[B]["recent"] == {"kind": "unknown", "why": "unplaced"}
-    assert hs[C]["recent"] == {"kind": "unknown", "why": "outside"}
-    assert hs[D]["recent"] == {"kind": "unknown", "why": "unread"}
-    assert hs[E]["recent"] == {"kind": "none"}
+def test_a_trade_is_placed_by_its_outcome_and_one_that_cant_be_placed_leaves_the_totals_unknown() -> None:
+    held = {w: [pos("0xlol:0", "Anyone's Legend", 500, 0.5, 0.5, "Anyone's Legend vs LGD")] for w in (A, B)}
+    out = basket.view(held, NAMES, settled=SETTLED)
+    basket.add_history(out, {
+        A: ([row("0xlol", 0, "BUY", 80, 2, "Anyones Legend")], True),  # the feed drops the apostrophe: still theirs
+        B: ([row("0xlol", 0, "BUY", 80, 2, None), row("0xlol", 999, "SELL", 40, 1, None)], True),  # a junk index
+    })  # fmt: skip
+    s = {h["wallet"]: h["story"] for h in out["agree"][0]["holders"]}
+    assert s[A]["bought"] == 80.0 and s[A]["last"]["action"] == "buy"
+    assert s[B]["last"] == {"action": "buy", "usd": 80.0, "at": at(2)} and s[B]["bought"] is None and s[B]["sold"] is None
 
 
 # ---- the engine ----
 
 
-class Reads:
-    """The checks' SDK client, as far as a basket reads it: each trader's open positions."""
+class Poly:
+    """The SDK's Polymarket reader, as far as a basket reads it: a trader's trades in some markets."""
 
-    def __init__(self, held: dict[str, list[WhalePosition]], failing: tuple[str, ...] = ()) -> None:
+    def __init__(self, rows: dict[str, list[dict[str, Any]]]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def trades_in(self, w: str, markets: list[str], limit: int = 500) -> list[dict[str, Any]]:
+        self.calls.append((w, tuple(markets)))
+        return [r for r in self.rows.get(w, []) if r["conditionId"] in markets][:limit]
+
+
+class Reads:
+    """The checks' SDK client, as far as a basket reads it: each trader's open positions, and its Polymarket reader."""
+
+    def __init__(self, held: dict[str, list[WhalePosition]], failing: tuple[str, ...] = (), rows: dict[str, Any] | None = None) -> None:
         self.held, self.failing = held, failing
         self.calls: list[str] = []
+        self._poly = Poly(rows or {})
 
     def positions(self, venue: str, w: str, **k: Any) -> list[WhalePosition]:
         self.calls.append(w)
@@ -215,66 +223,80 @@ def test_a_basket_reads_what_each_holds_once_for_everyone_and_names_who_couldnt_
     assert sorted(r.calls) == [A, B, C, D]
 
 
-def test_a_basket_takes_recent_changes_from_the_pollers_kept_trades_without_reading(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    held = {w: [pos("0xcel:0", "Celtics", 500, 0.5, 0.5)] for w in (A, B, C)}
-    r = Reads(held)
+def test_a_basket_reads_each_holders_trades_in_just_the_markets_they_agree_on(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(engine, "BASKET_HISTORY_IDS", 1)  # a read per market here, to see the reads split
+    monkeypatch.setattr(engine, "BASKET_HISTORY_ROWS", 3)  # a read that comes back full: their totals aren't known
+    held = {A: [pos("0xcel:0", "Celtics", 500, 0.5, 0.5), pos("0xlak:0", "Lakers", 500, 0.5, 0.5, "Lakers vs Warriors")],
+            B: [pos("0xcel:0", "Celtics", 500, 0.5, 0.5), pos("0xlak:0", "Lakers", 500, 0.5, 0.5, "Lakers vs Warriors")],
+            C: [pos("0xsol:0", "Yes", 500, 0.5, 0.5, "SOL up?")]}  # fmt: skip
+    rows = {A: [row("0xcel", 0, "BUY", 900, 3), row("0xcel", 0, "SELL", 300, 1), row("0xlak", 0, "BUY", 50, 2, "Lakers")],
+            B: [row("0xcel", 0, "BUY", 10, d) for d in (5, 4, 3)]}  # fmt: skip
+    r = Reads(held, rows=rows)
     monkeypatch.setattr(engine, "checker", lambda: r)
     follow(api, A, B, C)
     bid = api.post("/api/me/baskets", json={"name": "NBA", "wallets": [A, B, C]}, headers=auth()).json()["baskets"][0]["id"]
-    recent = datetime.now(UTC) - timedelta(days=1)
-    sold = [WhaleTrade("polymarket", A, None, "0xcel:0", "yes", "sell", 0.5, 1000, 500, recent, "t1", "Celtics vs Knicks", "Celtics")]
-    busy = [WhaleTrade("polymarket", B, None, "0xbtc:0", "yes", "buy", 0.5, 1, 0.5, recent, f"b{i}", "BTC", "Up")
-            for i in range(engine.LIVE_TRADES)]  # fmt: skip
-    mono = time.monotonic()
-    engine._cache[f"live:{A}"] = (mono, SimpleNamespace(trades=sold))
-    engine._cache[f"live:{B}"] = (mono, SimpleNamespace(trades=busy))  # 100 trades, all from yesterday
-    engine._cache[f"live:{C}"] = (mono - engine.BASKET_TRADES_S - 1, SimpleNamespace(trades=[]))  # kept too long ago
-    [row] = api.get(f"/api/me/baskets/{bid}/view", headers=auth()).json()["agree"]
-    hs = {h["wallet"]: h["recent"] for h in row["holders"]}
-    assert hs[A] == {"kind": "reduced", "ratio": 0.5}
-    assert hs[B]["kind"] == "unknown" and hs[B]["why"] == "short"  # no trade in it, but not "no trades": too few days
-    assert hs[C] == {"kind": "unknown", "why": "unread"}
-    assert sorted(r.calls) == [A, B, C]  # one positions read each, as before: the trades are the poller's
+    v = api.get(f"/api/me/baskets/{bid}/view", headers=auth()).json()
+    assert "changes" not in v and all("latest" not in a for a in v["agree"])  # the latest-changes list is gone
+    cel = next(a for a in v["agree"] if a["condition"] == "0xcel")
+    s = {h["wallet"]: h["story"] for h in cel["holders"]}
+    assert s[A]["last"]["action"] == "sell" and (s[A]["bought"], s[A]["sold"]) == (900.0, 300.0)
+    assert s[B]["last"]["action"] == "buy" and s[B]["bought"] is None  # their read came back full
+    assert sorted(r._poly.calls) == [(A, ("0xcel",)), (A, ("0xlak",)), (B, ("0xcel",)), (B, ("0xlak",))]  # never C
+    api.get(f"/api/me/baskets/{bid}/view", headers=auth())  # a minute's kept for everyone
+    assert len(r._poly.calls) == 4
 
 
 # ---- the page ----
 
-ROW = ("esc", "plural", "tenths", "cents", "usd", "ago", "ADDR", "SHORT_ADDR", "displayName", "hash32", "avatar", "KIND",
-       "isNew", "bk", "agreeRow", "splitRow", "BASKET_DAYS", "sharePct", "holderChange", "holderRank", "holderRow")  # fmt: skip
+ROW = ("esc", "plural", "tenths", "cents", "usd", "ago", "ADDR", "SHORT_ADDR", "displayName", "hash32", "avatar", "bk",
+       "agreeCard", "UP", "DOWN", "sharePct", "dayText", "lastText", "holderRank", "holderRow", "holderDetail", "splitCard")  # fmt: skip
 
 
-def test_an_agreement_row_says_who_holds_which_side_and_never_shows_a_wallet(run_js: Any) -> None:
-    r = {"market": "0xcel:0", "title": "Celtics vs Knicks", "outcome": "Celtics", "count": 3, "others": 1,
-         "other_outcomes": ["Knicks"], "put_in": 6000, "paid": 0.52, "now": 0.57,
-         "holders": [{"wallet": B, "name": "Velodrome"}, {"wallet": A, "name": "northpaw"}, {"wallet": E, "name": None}],
-         "latest": {"wallet": B, "name": "Velodrome", "kind": "added", "action": "buy", "usd": 3100, "at": "2026-10-28T12:00:00+00:00"}}  # fmt: skip
-    html = run_js(ROW, f"agreeRow({json.dumps(r)}, 5)")
-    for said in ("Celtics vs Knicks", "Celtics", "3 of 5", "Velodrome, northpaw, Trader 0xee…ee", "1 trader holds Knicks",
-                 "They put in", "$6K", "52¢", "Market price now", "57¢", "Bought more", "$3.1K", f"#/check/{B}/0xcel%3A0"):  # fmt: skip
+
+
+def card(run_js: Any, r: dict[str, Any], of: int, *opened: str) -> str:
+    adds = "".join(f"bk.open.add({json.dumps(k)}), " for k in opened)
+    return run_js(ROW, f"({adds}agreeCard({json.dumps(r)}, {of}))")  # type: ignore[no-any-return]
+
+
+def iso(days_ago: float) -> str:
+    return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+
+
+def test_an_agreement_card_is_a_row_per_trader_with_their_money_and_last_move_and_never_a_wallet(run_js: Any) -> None:
+    holder = {"put_in": 9000, "paid": 0.66, "rank": 5, "of": 52, "of_more": False}
+    r = {"market": "0xbop:0", "condition": "0xbop", "title": "2026 Balance of Power: D Senate, D House", "outcome": "Yes",
+         "count": 2, "others": 0, "now": 0.685, "holders": [
+             holder | {"wallet": B, "name": "BreakTheBank", "worth": 207481, "share": 0.858,
+                       "story": {"last": {"action": "sell", "usd": 17117, "at": iso(1)}, "opened": iso(27), "bought": 392046, "sold": 72529}},
+             holder | {"wallet": A, "name": "gopfan2", "worth": 34250, "share": 0.142, "rank": 1, "of": 62,
+                       "story": {"last": {"action": "buy", "usd": 7736, "at": iso(60)}, "opened": None, "bought": None, "sold": None}},
+             holder | {"wallet": E, "name": None, "worth": 120, "share": 0.0005, "story": None}]}  # fmt: skip
+    html = card(run_js, r, 3)
+    old = (datetime.now(UTC) - timedelta(days=60)).astimezone()  # the page writes the day in the viewer's time
+    for said in ("2026 Balance of Power: D Senate, D House", "69¢", "Market price now", "Yes", "2 of 3 agree",
+                 "BreakTheBank", "$207K", "Sold 1d ago", "gopfan2", "$34.3K", f"Bought {old:%b} {old.day}",
+                 "Trader 0xee…ee", "86% of the money on this side", "width:86%", "width:2%"):  # fmt: skip
         assert said in html, said
-    assert html.count('class="on"') == 3 and html.count('class="alt"') == 1  # the bars: this side, another side, none
-    assert "0x" + "e" * 40 not in html and "0x" + "a" * 40 not in html.replace(f"#/check/{B}", "")
-    lone = run_js(ROW, f"agreeRow({json.dumps(r | {'others': 0, 'other_outcomes': [], 'latest': None})}, 5)")
-    assert "No one in the basket holds another side" in lone and "Check your price" not in lone
-    split = run_js(ROW, f"splitRow({json.dumps({'condition': '0xlak', 'title': 'Lakers vs Warriors', 'sides': [{'outcome': 'Lakers', 'count': 2}, {'outcome': 'Warriors', 'count': 2}]})})")
-    assert "Lakers vs Warriors" in split and "vs</span>" in split
+    assert "0x" + "e" * 40 not in re.sub(r"<[^>]+>", "", html)  # never shown as text (it keys the row and its links)
+    assert "Check your price" not in html and "Opened" not in html  # all rows closed
+    assert html.count('viewBox="0 0 12 12"') == 2  # a move for the two whose trades were read; none for the third
+
+    sold = card(run_js, r, 3, f"0xbop:0|{B}")  # BreakTheBank's, tapped: the facts, and no price check after a sale
+    for said in ("Opened", "Paid on average", "66¢", "Bought", "$392K", "Sold", "$72.5K", "Their #5 biggest of 52 open positions",
+                 f"#/watch/{B}"):  # fmt: skip
+        assert said in sold, said
+    assert "Check your price" not in sold
+    bought = card(run_js, r, 3, f"0xbop:0|{A}")  # gopfan2's: too many trades to total, so no Opened, Bought or Sold
+    assert "Their biggest of 62 open positions" in bought and f"#/check/{A}/0xbop%3A0" in bought
+    assert "Opened" not in bought and "<span>Bought</span>" not in bought and "<span>Sold</span>" not in bought
 
 
-def test_each_traders_position_says_its_worth_share_rank_and_change_and_never_guesses_one(run_js: Any) -> None:
-    h = {"wallet": B, "name": "Velodrome", "put_in": 9000, "paid": 0.9}
-    r = {"market": "0xcel:0", "title": "Celtics vs Knicks", "outcome": "Celtics", "count": 4, "others": 0, "other_outcomes": [],
-         "put_in": 9300, "paid": 0.8, "now": 0.3, "latest": None, "holders": [
-             h | {"worth": 3400, "share": 0.58, "rank": 1, "of": 31, "of_more": False, "recent": {"kind": "reduced", "ratio": 0.1}},
-             h | {"wallet": A, "name": "northpaw", "worth": 2400, "share": 0.41, "rank": 6, "of": 500, "of_more": True, "recent": {"kind": "added", "ratio": 3.24}},
-             h | {"wallet": C, "name": "kestrel_88", "worth": 40, "share": 0.004, "rank": 1, "of": 1, "of_more": False, "recent": {"kind": "none"}},
-             h | {"wallet": D, "name": "ThinEdge", "worth": 30, "share": 0.003, "rank": 2, "of": 3, "of_more": False,
-                  "recent": {"kind": "unknown", "why": "short", "from": "2000-01-01T00:00:00+00:00"}}]}  # fmt: skip
-    html = run_js(ROW, f"agreeRow({json.dumps(r)}, 4)")
-    for said in ("Each trader's position", "$3.4K", "58% of this side", "Holds 90% less than 7 days ago", "Their biggest open position",
-                 "$2.4K", "Holds 3.2× what they held 7 days ago", "#6 of 500+ open positions",
-                 "under 1% of this side", "No trades in it in the last 7 days", "Their only open position",
-                 "Last 7 days not known: the trades we keep only cover the last", "#2 of 3 open positions"):  # fmt: skip
+def test_a_disagreement_card_is_each_sides_traders_and_money(run_js: Any) -> None:
+    s = {"condition": "0xak", "title": "Will Dan Sullivan win the Alaska Senate race in 2026?", "sides": [
+        {"outcome": "Yes", "worth": 30899, "holders": [{"wallet": B, "name": "BreakTheBank"}]},
+        {"outcome": "No", "worth": 16079, "holders": [{"wallet": A, "name": "gopfan2"}]}]}  # fmt: skip
+    html = run_js(ROW, f"splitCard({json.dumps(s)})")
+    for said in ("Will Dan Sullivan win the Alaska Senate race in 2026?", "Yes", "BreakTheBank", "$30.9K", "No", "gopfan2", "$16.1K",
+                 "flex:30899", "flex:16079"):  # fmt: skip
         assert said in html, said
-    assert html.count("No trades") == 1  # the trader whose kept trades are too few days is never "no trades"
-    old = run_js(ROW, f"agreeRow({json.dumps(r | {'holders': [h]})}, 4)")
-    assert "Each trader's position" not in old  # a view from before worth was sent: the row as it was

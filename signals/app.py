@@ -12,6 +12,7 @@ Signals places no orders: it shows what copying a trade would cost, and you buy 
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
 import json
 import os
@@ -3556,14 +3557,15 @@ def my_watchlist(response: Response, uid: str = Depends(signed_in)) -> dict[str,
 # "name", "wallets"}]), at most MAX_BASKETS; unfollowing a trader takes them out of your baskets. Its view reads what
 # each of them holds now: one positions read per trader on the checks' budget, kept HELD_TTL_S for everyone (a trader in
 # several people's baskets is read once), BASKET_READS at a time so "Check now" keeps a turn. A trader whose read failed
-# or waited too long is left out and named. Its latest changes read nothing: each trader's Watchlist card's. Nor does
-# each holder's change over the last week: it walks back from what they hold now through the trades the poller keeps.
+# or waited too long is left out and named. Then, where they agree, one read per trader of their trades in just those
+# markets (the SDK's Polymarket reader, as the links check uses it), kept the same way: a busy trader's whole history in
+# a market is there however much else they trade.
 MAX_BASKETS = 10
 BASKET_NAME_MAX = 40
 HELD_TTL_S = 60
 BASKET_READS = 2
-BASKET_CHANGES = 12
-BASKET_TRADES_S = LIVE_STALE_S  # the poller's kept trades are used for a holder's recent change while under this old
+BASKET_HISTORY_IDS = POSITIONS_PER_READ  # conditionIds a read: a longer query is refused by Polymarket's firewall
+BASKET_HISTORY_ROWS = 2000  # trades read per set of markets (500 a page): more means their totals there aren't known
 
 
 class BasketIn(BaseModel):
@@ -3646,47 +3648,58 @@ def _held_now(w: str) -> list[Any] | None:
         _checks.release()
 
 
-def _basket_trades(wallets: Any) -> dict[str, tuple[list[Any], float]]:
-    """Each trader's trades the poller keeps (it reads everyone followed every round; no read here), with the time from
-    which all their trades are there: all of them when the read held fewer than it asks for, else from the oldest. The
-    walk back starts from what they held when their positions were read, so a trade made after that is left out, and a
-    trader whose kept read is older than BASKET_TRADES_S is left out altogether (a trade since could be missing): their
-    recent change is then not known."""
-    out = {}
-    mono, now = time.monotonic(), time.time()
-    for w in wallets:
-        live, held = _live_kept(w), _cache.get(f"held:{w}")
-        if live is None or mono - live[0] > BASKET_TRADES_S:
-            continue
-        ts = live[1].trades
-        complete_from = 0.0 if len(ts) < LIVE_TRADES else min(t.at.timestamp() for t in ts)
-        held_at = now - (mono - held[0]) if held else now
-        out[w] = ([t for t in ts if t.at.timestamp() <= held_at], complete_from)
-    return out
+def _history_in(job: tuple[str, tuple[str, ...]]) -> tuple[list[dict[str, Any]], bool] | None:
+    """A trader's trades in these markets (conditionIds), BASKET_HISTORY_IDS a read (Polymarket's firewall refuses a
+    longer query), kept HELD_TTL_S for everyone, and whether that's all of them (no read came back full). None when it
+    couldn't be read in time: their rows then show only what they hold."""
+    w, conds = job
+    key = f"bhist:{w}:{hashlib.sha1(','.join(conds).encode()).hexdigest()[:16]}"
+    hit = _cache.get(key)
+    if hit and time.monotonic() - hit[0] < HELD_TTL_S:
+        return hit[1]  # type: ignore[no-any-return]
+    if not _checks.acquire(timeout=CHECK_WAIT_S):
+        return None
+
+    def read() -> tuple[list[dict[str, Any]], bool]:
+        rows, complete = [], True
+        for i in range(0, len(conds), BASKET_HISTORY_IDS):
+            got = checker()._poly.trades_in(w, list(conds[i : i + BASKET_HISTORY_IDS]), BASKET_HISTORY_ROWS)
+            rows += got
+            complete = complete and len(got) < BASKET_HISTORY_ROWS
+        return rows, complete
+
+    try:
+        return cached(key, HELD_TTL_S, read)  # type: ignore[no-any-return]
+    except VenueError as e:
+        print(f"basket: couldn't read {w}'s trades in {len(conds)} markets ({e.code}): {str(e)[:200]}", flush=True)
+        return None
+    finally:
+        _checks.release()
 
 
 @app.get("/api/me/baskets/{bid}/view")
 def basket_view(bid: str, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
     """One of your baskets (``basket.view``): where its traders agree and where they split, from what each holds now,
-    and their latest changes, newest first. ``unread``: traders whose holdings couldn't be read just now (left out)."""
+    and, where they agree, each holder's trades in that market (``basket.add_history``). ``unread``: traders whose
+    holdings couldn't be read just now (left out)."""
     _private(response)
     b = _basket_of(_load_follows()["users"].get(uid) or {}, bid)
     now = time.time()
-    cards = {w: _watch_card(w, now) for w in b["wallets"]}
-    names = {w: c["name"] for w, c in cards.items()}
+    names = {w: _watch_card(w, now)["name"] for w in b["wallets"]}
     with ThreadPoolExecutor(max_workers=BASKET_READS, thread_name_prefix="basket") as pool:
         got = dict(zip(b["wallets"], pool.map(_held_now, b["wallets"]), strict=True))
-    held = {w: p for w, p in got.items() if p is not None}
-    cut = frozenset(w for w, p in held.items() if len(p) >= POSITIONS_READ)
-    out = basket.view(held, names, settled=(SETTLED_LOW, SETTLED_HIGH), trades=_basket_trades(held), cut=cut, at=now)
-    changes = sorted(({**m, "wallet": w, "name": names[w]} for w, c in cards.items() for m in c["moves"]),
-                     key=lambda m: m["at"], reverse=True)  # fmt: skip
-    for r in out["agree"]:
-        who = {h["wallet"] for h in r["holders"]}
-        r["latest"] = next((m for m in changes if m["market"] == r["market"] and m["wallet"] in who), None)
+        held = {w: p for w, p in got.items() if p is not None}
+        cut = frozenset(w for w, p in held.items() if len(p) >= POSITIONS_READ)
+        out = basket.view(held, names, settled=(SETTLED_LOW, SETTLED_HIGH), cut=cut)
+        markets: dict[str, list[str]] = {}  # trader -> the conditions where they're on the side the basket agrees on
+        for r in out["agree"]:
+            for h in r["holders"]:
+                markets.setdefault(h["wallet"], []).append(r["condition"])
+        jobs = [(w, tuple(sorted(cs))) for w, cs in markets.items()]
+        history = {w: h for (w, _), h in zip(jobs, pool.map(_history_in, jobs), strict=True) if h is not None}
+    basket.add_history(out, history)
     return out | {"id": b["id"], "name": b["name"], "traders": [{"wallet": w, "name": names[w]} for w in b["wallets"]],
-                  "read": len(held), "unread": [w for w, p in got.items() if p is None], "read_at": now,
-                  "changes": changes[:BASKET_CHANGES]}  # fmt: skip
+                  "read": len(held), "unread": [w for w, p in got.items() if p is None], "read_at": now}  # fmt: skip
 
 
 # What "Follow a trader" takes: a wallet, a Polymarket profile link (polymarket.com/profile/0x…, which names the wallet)
