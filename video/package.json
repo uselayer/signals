@@ -8,6 +8,7 @@
     "render": "remotion render TraderStory out/trader-story.mp4",
     "still": "remotion still TraderStory out/frame.png",
     "render:hl": "remotion render SameGame out/same-game.mp4",
+    "render:schema": "remotion render OneSchema out/layer-one-schema.mp4 && remotion render OneSchema out/layer-one-schema-silent.mp4 --props='{\"music\":false}'",
     "render:every": "remotion render EveryVenue out/layer-every-venue.mp4 && remotion render EveryVenue out/layer-every-venue-silent.mp4 --props='{\"music\":false}'",
     "record:watchlist": "node scripts/record-watchlist.mjs",
     "render:watchlist": "remotion render Watchlist out/signals-watchlist.mp4"

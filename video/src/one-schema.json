@@ -1,0 +1,127 @@
+{
+ "readAt": "Nov 3, 2026",
+ "formats": [
+  {
+   "venue": "kalshi",
+   "id": "KXUCLGAME-26NOV04RBLMCI-MCI",
+   "name": "Manchester City wins"
+  },
+  {
+   "venue": "polymarket",
+   "id": "0xa4c2fac1…3bc49",
+   "name": "Will Manchester City FC win on 2026-11-04?"
+  },
+  {
+   "venue": "hyperliquid",
+   "id": "#222460",
+   "name": "outcome 22246 · side 0"
+  },
+  {
+   "venue": "novig",
+   "id": "01a178fd-7e0e-…-a4c6d8a9d663",
+   "name": "MONEYLINE_3_WAY_WIN · Yes"
+  }
+ ],
+ "beats": [
+  {
+   "category": "sports",
+   "title": "Manchester City to beat RB Leipzig",
+   "sub": "Champions League · Nov 4",
+   "kalshi": {
+    "market_id": "KXUCLGAME-26NOV04RBLMCI-MCI",
+    "url": "kalshi.com/markets/kxuclgame/x/kxuclga…"
+   },
+   "legs": [
+    {
+     "venue": "polymarket",
+     "market_id": "0xa4c2…bc49",
+     "url": "polymarket.com/market/ucl-rbl-mnc-2026…",
+     "basis": "identical",
+     "confidence": 0.95,
+     "caveats": []
+    },
+    {
+     "venue": "hyperliquid",
+     "market_id": "#222460",
+     "url": "app.hyperliquid.xyz/outcomes",
+     "basis": "identical",
+     "confidence": 0.95,
+     "caveats": []
+    },
+    {
+     "venue": "novig",
+     "market_id": "01a178fd-…:01a178fd-…d663",
+     "url": "novig.com/events/01a178fd-7e0e-7d21-…",
+     "basis": "equivalent_with_caveats",
+     "confidence": 0.92,
+     "caveats": [
+      "definition_differs"
+     ]
+    }
+   ]
+  },
+  {
+   "category": "crypto",
+   "title": "Bitcoin at $70,000 or above",
+   "sub": "Nov 6, 5 PM ET",
+   "kalshi": {
+    "market_id": "KXBTCD-26NOV0617-T69999.99",
+    "url": "kalshi.com/markets/kxbtcd/x/kxbtcd-26no…"
+   },
+   "legs": [
+    {
+     "venue": "polymarket",
+     "market_id": "cpc-btc-above-wk-2026-11-06-70000",
+     "url": "polymarket.us/event/btc-above-wk-2026-1…",
+     "basis": "equivalent_with_caveats",
+     "confidence": 1,
+     "caveats": [
+      "rounding_differs"
+     ]
+    }
+   ]
+  },
+  {
+   "category": "economics",
+   "title": "Fed cuts 25 bps in December",
+   "sub": "FOMC · Dec 9",
+   "kalshi": {
+    "market_id": "KXFEDDECISION-26DEC-C25",
+    "url": "kalshi.com/markets/kxfeddecision/x/kxfe…"
+   },
+   "legs": [
+    {
+     "venue": "polymarket",
+     "market_id": "0xf17a…d0b8",
+     "url": "polymarket.com/market/will-the-fed-decr…",
+     "basis": "equivalent_with_caveats",
+     "confidence": 0.85,
+     "caveats": [
+      "rounding_differs"
+     ]
+    }
+   ]
+  },
+  {
+   "category": "politics",
+   "title": "Iowa Senate race: Ashley Hinson",
+   "sub": "2026 election",
+   "kalshi": {
+    "market_id": "KXIASENATE-26-AHIN",
+    "url": "kalshi.com/markets/kxiasenate/x/kxiasen…"
+   },
+   "legs": [
+    {
+     "venue": "polymarket",
+     "market_id": "0x38a1…01a2",
+     "url": "polymarket.com/market/will-the-republic…",
+     "basis": "equivalent_with_caveats",
+     "confidence": 0.9,
+     "caveats": [
+      "source_differs"
+     ]
+    }
+   ]
+  }
+ ]
+}
