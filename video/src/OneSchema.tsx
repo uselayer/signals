@@ -238,30 +238,18 @@ const Footer = () => (
   </div>
 );
 
-// Same sound as SameGame: tick and ping over public/layer-music.mp3 ("Cold Concrete", kept out of git) from its drop.
-const MUSIC = "layer-music.mp3", MUSIC_FROM = 27.43;
+// Music: "Wavy Bounce" (owner's pick, 11-03), public/layer-music-wavy-bounce.wav, kept out of git. It starts 12.40 s in,
+// on the 808 that opens the track's loudest section (momentary loudness jumps from about -19.5 to -11 LUFS there), so
+// the beat is under the opening title from frame 0. No ticks or ping: the beat is syncopated (~95 BPM), so they would
+// land off it. GAIN sets the mix level; it fades out over the last second.
+const MUSIC = "layer-music-wavy-bounce.wav", MUSIC_FROM = 12.4, GAIN = 1;
 const hasMusic = getStaticFiles().some((f) => f.name === MUSIC);
-const TICKS: [number, number][] = [
-  ...[0, 1, 2, 3].map((i) => [HUB + 8 + i * 6, 0.4] as [number, number]),
-  [HUB + 74, 0.55],
-  ...[0, 1, 2].map((i) => [BEATS + i * LEG, 0.45] as [number, number]),
-  ...[1, 2, 3].map((i) => [BEATS + BEAT_STARTS[i], 0.5] as [number, number]),
-  [END + 26, 0.5],
-];
 const Sound = ({ music }: { music: boolean }) => {
   const { fps } = useVideoConfig();
-  if (!music) return null;
+  if (!music || !hasMusic) return null;
   return (
-    <>
-      {hasMusic && (
-        <Audio src={staticFile(MUSIC)} trimBefore={Math.round(MUSIC_FROM * fps)}
-          volume={(f) => interpolate(f, [0, 3, ONE_SCHEMA_DURATION - 30, ONE_SCHEMA_DURATION], [0, 0.55, 0.55, 0], clamp)} />
-      )}
-      {TICKS.map(([at, vol]) => (
-        <Sequence key={at} from={at} durationInFrames={6}><Audio src={staticFile("tick.wav")} volume={vol} /></Sequence>
-      ))}
-      <Sequence from={END + 8} durationInFrames={30}><Audio src={staticFile("ping.wav")} volume={1} /></Sequence>
-    </>
+    <Audio src={staticFile(MUSIC)} trimBefore={Math.round(MUSIC_FROM * fps)}
+      volume={(f) => interpolate(f, [0, ONE_SCHEMA_DURATION - 30, ONE_SCHEMA_DURATION], [GAIN, GAIN, 0], clamp)} />
   );
 };
 
