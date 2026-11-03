@@ -1,0 +1,104 @@
+{
+ "asOf": "Nov 3, 1:02 PM CT",
+ "game": "RB Leipzig v Manchester City",
+ "league": "Champions League",
+ "kickoff": "Nov 4",
+ "rows": [
+  {
+   "venue": "kalshi",
+   "event": "Leipzig vs Manchester City — RBL vs MCI (Nov 4)",
+   "outcome": "Manchester City wins",
+   "dp": 0
+  },
+  {
+   "venue": "polymarket",
+   "event": "RB Leipzig vs. Manchester City FC",
+   "outcome": "Will Manchester City FC win on 2026-11-04?",
+   "dp": 0
+  },
+  {
+   "venue": "polymarket_us",
+   "event": "RB Leipzig vs. Manchester City FC",
+   "outcome": "Manchester City FC (Reg. Time)",
+   "dp": 0
+  },
+  {
+   "venue": "hyperliquid",
+   "event": "UEFA Champions League Matchday 4: RB Leipzig v Manchester City",
+   "outcome": "Manchester City",
+   "dp": 2
+  },
+  {
+   "venue": "novig",
+   "event": "Manchester City FC @ RasenBallsport Leipzig",
+   "outcome": "Man City MONEYLINE_3_WAY_WIN · Yes",
+   "dp": 1
+  }
+ ],
+ "prices": {
+  "kalshi": [
+   62.0,
+   63.0
+  ],
+  "polymarket": [
+   63.0,
+   64.0
+  ],
+  "polymarket_us": [
+   62.0,
+   63.0
+  ],
+  "hyperliquid": [
+   63.31,
+   63.35
+  ],
+  "novig": [
+   63.5,
+   64.0
+  ]
+ },
+ "pairs": [
+  {
+   "venue": "polymarket",
+   "basis": "identical",
+   "confidence": 0.95
+  },
+  {
+   "venue": "polymarket_us",
+   "basis": "identical",
+   "confidence": 0.95
+  },
+  {
+   "venue": "hyperliquid",
+   "basis": "identical",
+   "confidence": 0.95
+  },
+  {
+   "venue": "novig",
+   "basis": "equivalent_with_caveats",
+   "confidence": 0.92
+  }
+ ],
+ "code": [
+  "curl -G https://uselayer.sh/v0/matches \\",
+  "  -H \"Authorization: Bearer $LAYER_API_KEY\" \\",
+  "  -d venue=novig -d q=leipzig+manchester"
+ ],
+ "response": [
+  "{ \"kalshi\": { \"market_id\": \"KXUCLGAME-26NOV04RBLMCI-MCI\",",
+  "              \"question\": \"Manchester City wins\" },",
+  "  \"novig\": { \"url\": \"https://novig.com/events/01a178fd-…\" },",
+  "  \"confidence\": 0.92, \"basis\": \"equivalent_with_caveats\",",
+  "  \"caveats\": [\"definition_differs\"] }"
+ ],
+ "highlight": [
+  "\"novig\"",
+  "\"basis\""
+ ],
+ "categories": [
+  "sports",
+  "crypto",
+  "politics",
+  "economics"
+ ]
+}
