@@ -141,6 +141,8 @@ All optional.
 | `SIGNALS_WHY_DAILY` | At most this many AI calls a day. Default `3000` (about $0.15). |
 | `SIGNALS_POSTHOG_KEY` | Turns on PostHog analytics (hosted only). |
 | `SIGNALS_METRICS_KEY` | Opens the owner's counts to whoever sends it (hosted). |
+| `SIGNALS_OWNER_USER` | Your Clerk user id: Signals messages the Telegram chat connected on that account when it breaks. |
+| `SIGNALS_OWNER_CHAT` | A Telegram chat id for those messages instead (wins over `SIGNALS_OWNER_USER`). |
 | `SIGNALS_HOSTED` | `1` on the hosted engine. Set by the `Dockerfile`. |
 
 `SIGNALS_SKILL_TEST=1` brings back the old skill test and its Recommended list in place of the Leaderboard. The
@@ -170,6 +172,22 @@ usesignals.app is the same engine with `SIGNALS_HOSTED=1`:
 
 Follows are kept in `/data/follows.json` by Clerk user id; alerts and counts in `/data/alerts.db`; wallets and
 track records in `/data/directory.db`.
+
+### When something breaks (owner)
+
+Set `SIGNALS_OWNER_USER` to your Clerk user id (Clerk's dashboard → Users → you), with Telegram connected on your
+Signals account, and Signals messages you there within a minute or so when:
+
+- the disk under `/data` is 85% full, or 85% of its file slots are used (at 100% the Traders page stops working);
+- any page answers with a server error (500), counted over 10 minutes;
+- trader scoring fails every round for 30 minutes.
+
+Each problem is told once, again every 6 hours while it lasts, and once more when it's fixed. The messages go
+straight to Telegram, never through the disk, so they still go when the disk is what broke. To check they reach you:
+
+```sh
+curl -X POST -H "Authorization: Bearer $SIGNALS_METRICS_KEY" https://usesignals.app/api/owner-alerts/test
+```
 
 ### Counting
 

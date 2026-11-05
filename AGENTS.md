@@ -148,6 +148,11 @@ behind Vercel (see README, "Hosting").
   from it ("Traded 14:02 UTC, 6 min before this alert."). The engine checks Clerk's session token itself (public keys,
   no Clerk secret). Never let one account see or change another's follows, and never let an answer about a
   signed-in person be cached.
+- The owner's alerts (`signals/owner_alerts.py`, README "When something breaks"): a Telegram message to the owner
+  (`SIGNALS_OWNER_USER`'s connected chat, or `SIGNALS_OWNER_CHAT`) when the disk is 85% full, a page answers 500, or
+  trader scoring fails for 30 min (2026-11-02→04: a full volume broke Traders for ~50 hours and nobody knew). Sent
+  straight through `tg`, never through alerts.db or anything on the disk, and kept in memory only: they must work when
+  the disk is what broke. Told once, every 6 hours while it lasts, and "fixed".
 - Deploys and changes to the hosting (Railway, Vercel, the domain) only when the owner asks.
 - Never say a link *is* someone: show the tier ("likely" / "possible") and the evidence.
 - The page is a consumer app, not an analyst's spreadsheet. It helps people find traders worth following and
