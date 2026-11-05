@@ -54,6 +54,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import struct
 import threading
 import time
 import zlib
@@ -67,7 +68,7 @@ from typing import Any
 
 from uselayer.whale_scores import ACTIVE_DAYS, RECOMMENDED, RISING_BETS
 
-from signals.records import PositionHistory
+from signals.records import PositionHistory, key
 
 SOURCES = ("leaderboard", "market", "feed", "search", "follow", "check")
 STATUSES = ("found", "scored", "checked", "failed")
@@ -155,7 +156,35 @@ CREATE INDEX IF NOT EXISTS records_by_last_buy ON records (last_buy);
 CREATE TABLE IF NOT EXISTS positions_kept (wallet TEXT NOT NULL, market TEXT NOT NULL, at REAL NOT NULL,
   won INTEGER NOT NULL, PRIMARY KEY (wallet, market)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS positions_covered (wallet TEXT PRIMARY KEY, since REAL NOT NULL, read_at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS positions_packed (wallet TEXT PRIMARY KEY, since REAL NOT NULL, read_at REAL NOT NULL,
+  n INTEGER NOT NULL, rows BLOB NOT NULL);
 """
+
+# A wallet's kept positions (records.PositionHistory) are one row of positions_packed: each position's key (8 bytes of
+# its market's hash, records.key), when it closed and whether it made money, packed and compressed. positions_kept held
+# one row per position with the wallet and market as text: 25.1M rows, ~3 of the volume's 4.6 GB on 2026-11-04 (the
+# volume filled up and Traders answered 500 for ~50 hours). The same positions packed take about a tenth. An older
+# directory.db's positions_kept rows are packed a few wallets at a time (``pack_old_positions``), and read until then.
+_PACK_WHOLE = 1  # times in whole seconds (Polymarket's are): 4 bytes each
+_PACK_EXACT = 2  # any other time: 8 bytes each
+
+
+def _pack(rows: dict[Any, tuple[float, bool]]) -> bytes:
+    items = sorted(((key(m), t, won) for m, (t, won) in rows.items()), key=lambda x: x[1])  # by time: packs smaller
+    n = len(items)
+    keys = struct.pack(f"<{n}q", *(k for k, _, _ in items))
+    won = bytes(1 if w else 0 for _, _, w in items)
+    whole = all(t == int(t) and 0 <= t < 2**32 for _, t, _ in items)
+    times = struct.pack(f"<{n}I", *(int(t) for _, t, _ in items)) if whole else struct.pack(f"<{n}d", *(t for _, t, _ in items))
+    return bytes([_PACK_WHOLE if whole else _PACK_EXACT]) + zlib.compress(keys + times + won)
+
+
+def _unpack(blob: bytes, n: int) -> dict[Any, tuple[float, bool]]:
+    raw = zlib.decompress(blob[1:])
+    keys = struct.unpack_from(f"<{n}q", raw, 0)
+    times = struct.unpack_from(f"<{n}I" if blob[0] == _PACK_WHOLE else f"<{n}d", raw, 8 * n)
+    won = raw[8 * n + (4 if blob[0] == _PACK_WHOLE else 8) * n:]
+    return {k: (float(t), bool(w)) for k, t, w in zip(keys, times, won, strict=True)}
 # A phase 1 directory.db has wallets without these: added when it's first opened, empty (status "found").
 _PHASE_2_COLUMNS = (("last_active", "REAL"), ("status", "TEXT NOT NULL DEFAULT 'found'"), ("scored_at", "REAL"),
                     ("tried_at", "REAL"), ("score_error", "TEXT"), ("segment", "TEXT"), ("category", "TEXT"))  # fmt: skip
@@ -1235,11 +1264,31 @@ class Directory:
         """A wallet's positions kept from its earlier record reads (``records.merge``), None if none are."""
         w = wallet.lower()
         with self._db() as con:
+            got = con.execute("SELECT since, read_at, n, rows FROM positions_packed WHERE wallet = ?", (w,)).fetchone()
+            if got is not None:
+                return PositionHistory(got[0], got[1], _unpack(got[3], got[2]))
             cov = con.execute("SELECT since, read_at FROM positions_covered WHERE wallet = ?", (w,)).fetchone()
-            if cov is None:
+            if cov is None:  # not packed yet (``pack_old_positions``): as an older directory.db kept them
                 return None
             rows = con.execute("SELECT market, at, won FROM positions_kept WHERE wallet = ?", (w,)).fetchall()
         return PositionHistory(cov[0], cov[1], {m: (t, bool(won)) for m, t, won in rows})
+
+    def pack_old_positions(self, wallets: int = 100) -> int:
+        """Packs up to ``wallets`` wallets' positions kept the old way (one row each) into positions_packed, deleting
+        the old rows in the same write, so the store never needs room for both; how many it packed (0: none left).
+        A wallet already packed (kept since by a newer read) keeps that, and only loses its old rows."""
+        with self._db() as con:
+            covered = con.execute("SELECT wallet, since, read_at FROM positions_covered LIMIT ?", (wallets,)).fetchall()
+            for w, since, read_at in covered:
+                rows = con.execute("SELECT market, at, won FROM positions_kept WHERE wallet = ?", (w,)).fetchall()
+                kept = {m: (t, bool(won)) for m, t, won in rows}
+                con.execute("INSERT OR IGNORE INTO positions_packed VALUES (?, ?, ?, ?, ?)",
+                            (w, since, read_at, len(kept), _pack(kept)))  # fmt: skip
+                con.execute("DELETE FROM positions_kept WHERE wallet = ?", (w,))
+                con.execute("DELETE FROM positions_covered WHERE wallet = ?", (w,))
+            if not covered:  # rows of a wallet with no coverage were never read (kept_positions): gone too
+                con.execute("DELETE FROM positions_kept")
+        return len(covered)
 
     def keep_record(self, wallet: str, rec: dict[str, Any], via: str = "read", at: float | None = None,
                     positions: PositionHistory | None = None) -> None:  # fmt: skip
@@ -1258,14 +1307,10 @@ class Directory:
             if not self._has(con, w):
                 self._add(con, [Seen(w, "search")], now)
             if positions is not None:
-                con.execute("DELETE FROM positions_kept WHERE wallet = ?", (w,))
-                con.executemany(
-                    "INSERT INTO positions_kept VALUES (?, ?, ?, ?)",
-                    [(w, m, t, int(won)) for m, (t, won) in positions.rows.items()],
-                )
-                con.execute(
-                    "INSERT OR REPLACE INTO positions_covered VALUES (?, ?, ?)", (w, positions.since, positions.read_at)
-                )
+                con.execute("INSERT OR REPLACE INTO positions_packed VALUES (?, ?, ?, ?, ?)",
+                            (w, positions.since, positions.read_at, len(positions.rows), _pack(positions.rows)))  # fmt: skip
+                con.execute("DELETE FROM positions_kept WHERE wallet = ?", (w,))  # kept the old way: replaced
+                con.execute("DELETE FROM positions_covered WHERE wallet = ?", (w,))
             con.execute(
                 "INSERT OR REPLACE INTO records VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (w, rec.get("read_at") or now, via, rec.get("last_buy"),

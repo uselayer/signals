@@ -19,6 +19,7 @@ Reads, about 5 to 8 a wallet where a full score takes about 50:
 
 from __future__ import annotations
 
+import hashlib
 import math
 import statistics
 from dataclasses import dataclass
@@ -95,7 +96,7 @@ def _done(positions: list[Any]) -> dict[str, tuple[float, bool]]:
     }  # fmt: skip
 
 
-def _count(done: dict[str, tuple[float, bool]], since: float, now: float) -> dict[int, tuple[int, int] | None]:
+def _count(done: dict[Any, tuple[float, bool]], since: float, now: float) -> dict[int, tuple[int, int] | None]:
     """(won, closed) in each of PERIODS from positions read in full back to ``since``; None for a period before it."""
     out: dict[int, tuple[int, int] | None] = {}
     for d in PERIODS:
@@ -108,16 +109,25 @@ def _count(done: dict[str, tuple[float, bool]], since: float, now: float) -> dic
     return out
 
 
+def key(market: str | int) -> int:
+    """A market outcome's key as kept (directory.db's ``positions_packed``): 8 bytes of its hash, not its ~70
+    characters. Only ever compared within one wallet's few thousand positions, where two colliding is about one in
+    a billion billion. A key is its own key."""
+    if isinstance(market, int):
+        return market
+    return int.from_bytes(hashlib.blake2b(market.encode(), digest_size=8).digest(), "big", signed=True)
+
+
 @dataclass
 class PositionHistory:
-    """A wallet's positions kept between reads (directory.db's ``positions_kept``): every position closed or
-    settled from ``since`` up to ``read_at`` is in ``rows`` (by market outcome: when, and whether it made money),
-    none older than KEEP_DAYS. A read that reaches back to the last one's ``read_at`` extends it; one that doesn't
-    starts it again from what it read."""
+    """A wallet's positions kept between reads (directory.db's ``positions_packed``): every position closed or
+    settled from ``since`` up to ``read_at`` is in ``rows`` (by market outcome, or its ``key`` once kept: when, and
+    whether it made money), none older than KEEP_DAYS. A read that reaches back to the last one's ``read_at``
+    extends it; one that doesn't starts it again from what it read."""
 
     since: float
     read_at: float
-    rows: dict[str, tuple[float, bool]]
+    rows: dict[str | int, tuple[float, bool]]
 
 
 def merge(kept: PositionHistory | None, positions: list[Any], complete: bool, pages: int,
@@ -127,9 +137,11 @@ def merge(kept: PositionHistory | None, positions: list[Any], complete: bool, pa
     since = _covered_since(positions, complete, pages)
     if since is None:
         return None
-    rows = _done(positions)
+    rows: dict[str | int, tuple[float, bool]] = dict(_done(positions))
     if kept is not None and since <= kept.read_at:  # nothing closed between the two reads was missed
-        rows = kept.rows | rows  # a position read again (one since redeemed) is the new read's
+        # a position read again (one since redeemed) is the new read's: matched by key, as kept ones are
+        fresh = {key(m) for m in rows}
+        rows = {m: r for m, r in kept.rows.items() if key(m) not in fresh} | rows
         since = min(since, kept.since)
     start = now - KEEP_DAYS * DAY
     return PositionHistory(max(since, start), now, {m: r for m, r in rows.items() if r[0] >= start})
