@@ -108,6 +108,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         threading.Thread(target=_evaluate_loop, daemon=True).start()
     if not SKILL_TEST:  # the Leaderboard: kept scores' profit history copied into records, once (no reads)
         threading.Thread(target=_seed_records, daemon=True).start()
+    threading.Thread(target=_pack_positions_loop, daemon=True).start()  # an older store's kept positions, once
     if TG_TOKEN:  # alerts: the bot's messages (connecting a chat, /list, /stop), and new buys of followed traders
         threading.Thread(target=_bot_loop, daemon=True).start()
         threading.Thread(target=_alert_loop, daemon=True).start()
@@ -884,6 +885,31 @@ def _record_trades(got: list[Any]) -> list[tuple[Any, ...]]:
     """Trades as the quick check reads them (time, bought, market, dollars), with each one's price and outcome after
     for the record's average price paid (``records._paid``)."""
     return [(t.at.timestamp(), t.action == "buy", t.market.partition(":")[0], t.usd, t.price, t.market) for t in got]
+
+
+PACK_PAUSE_S = 0.2  # between batches of ``_pack_positions_loop``, so pages and the background get the store too
+
+
+def _pack_positions_loop() -> None:
+    """Packs the positions an older directory.db kept one row each (``Directory.pack_old_positions``), a batch of
+    wallets at a time with a pause between, until none are left; then stops. Win rates read the old rows until then."""
+    done, started, said = 0, time.time(), 0
+    while not _directory_stop.is_set():
+        try:
+            n = directory().pack_old_positions()
+        except (sqlite3.Error, OSError) as e:  # the store is busy or full: later
+            print(f"positions: packing paused: {type(e).__name__}: {e}", flush=True)
+            _directory_stop.wait(300)
+            continue
+        if not n:
+            break
+        done += n
+        if done - said >= 10_000:
+            said = done
+            print(f"positions: {done} wallets' kept positions packed so far", flush=True)
+        _directory_stop.wait(PACK_PAUSE_S)
+    if done:
+        print(f"positions: {done} wallets' kept positions packed in {(time.time() - started) / 60:.0f} min", flush=True)
 
 
 def _seed_records() -> None:

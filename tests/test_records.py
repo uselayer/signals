@@ -4,6 +4,7 @@ ranked by what they did, never by a verdict (no network: the SDK's reads are sta
 
 from __future__ import annotations
 
+import sqlite3
 import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -210,11 +211,81 @@ def test_the_next_read_takes_enough_pages_to_reach_back_to_the_last() -> None:
 def test_the_directory_keeps_a_wallets_positions_with_its_record(d: Directory) -> None:
     kept = records.PositionHistory(NOW - 20 * DAY, NOW, {"m1": (NOW - DAY, True), "m2": (NOW - 3 * DAY, False)})
     d.keep_record(AMY, rec(100.0), at=NOW, positions=kept)
-    assert d.kept_positions(AMY) == kept and d.kept_positions(BEN) is None
+    assert d.kept_positions(AMY) == by_key(kept) and d.kept_positions(BEN) is None
     d.keep_record(AMY, rec(100.0), at=NOW, positions=records.PositionHistory(NOW - DAY, NOW, {"m3": (NOW, True)}))
-    assert set(d.kept_positions(AMY).rows) == {"m3"}  # type: ignore[union-attr]
+    assert set(d.kept_positions(AMY).rows) == {records.key("m3")}  # type: ignore[union-attr]
     d.keep_record(AMY, rec(100.0), at=NOW)  # a read with nothing new to keep leaves them as they were
-    assert set(d.kept_positions(AMY).rows) == {"m3"}  # type: ignore[union-attr]
+    assert set(d.kept_positions(AMY).rows) == {records.key("m3")}  # type: ignore[union-attr]
+
+
+def by_key(kept: records.PositionHistory) -> records.PositionHistory:
+    """``kept`` as the directory gives it back: each market by its key."""
+    return records.PositionHistory(kept.since, kept.read_at, {records.key(m): r for m, r in kept.rows.items()})
+
+
+def busy_history(n: int, seed: int = 7) -> records.PositionHistory:
+    """``n`` positions over 95 days, a market ID each as Polymarket's are (a 66-character condition id and an outcome)."""
+    import random
+
+    rnd = random.Random(seed)
+    rows = {f"0x{rnd.getrandbits(256):064x}:{rnd.randint(0, 1)}": (float(int(NOW - rnd.uniform(0, 95) * DAY)), rnd.random() < 0.55)
+            for _ in range(n)}  # fmt: skip
+    return records.PositionHistory(NOW - 95 * DAY, NOW, rows)
+
+
+def test_packed_positions_come_back_exactly_and_give_the_same_win_rates(d: Directory) -> None:
+    kept = busy_history(3000)
+    d.keep_record(AMY, rec(100.0), at=NOW, positions=kept)
+    back = d.kept_positions(AMY)
+    assert back == by_key(kept)
+    assert records._count(back.rows, back.since, NOW) == records._count(kept.rows, kept.since, NOW)  # type: ignore[union-attr]
+    odd = records.PositionHistory(NOW - DAY, NOW, {"a": (NOW - 0.25, True), "b": (-5.5, False)})  # not whole seconds
+    d.keep_record(BEN, rec(1.0), at=NOW, positions=odd)
+    assert d.kept_positions(BEN) == by_key(odd)
+
+
+def test_packed_positions_take_a_fraction_of_a_row_each(d: Directory) -> None:
+    d.keep_record(AMY, rec(100.0), at=NOW, positions=busy_history(3000))
+    with sqlite3.connect(d.path) as con:
+        (size,) = con.execute("SELECT length(rows) FROM positions_packed WHERE wallet = ?", (AMY.lower(),)).fetchone()
+    assert size < 3000 * 14  # 8-byte key, 4-byte time, won: ~13 bytes, where a row held ~130
+
+
+def test_a_position_read_again_after_it_was_kept_is_counted_once(d: Directory) -> None:
+    """Kept positions come back by key; the next read has markets: the same position is one, the new read's."""
+    first = records.PositionHistory(NOW - 30 * DAY, NOW - DAY, {"x": (NOW - 5 * DAY, False), "y": (NOW - 6 * DAY, True)})
+    d.keep_record(AMY, rec(100.0), at=NOW - DAY, positions=first)
+    rows = [kept_position("x", 2, 0.5)] + [kept_position(f"m{i}", 1, 0.5 + 2 * i / 200) for i in range(199)]
+    got = records.merge(d.kept_positions(AMY), rows, False, records.CLOSED_PAGES, NOW)
+    assert got is not None and len(got.rows) == 201  # x once (now a win), y kept, 199 new
+    assert got.rows["x"] == (pytest.approx(NOW - 0.5 * DAY), True) and got.rows[records.key("y")] == (NOW - 6 * DAY, True)
+
+
+def test_positions_kept_the_old_way_are_read_then_packed(d: Directory) -> None:
+    old = busy_history(500)
+    d.keep_record(AMY, rec(100.0), at=NOW)  # a wallet with a record
+    with d._db() as con:  # as an older directory.db kept them: a row per position
+        con.executemany("INSERT INTO positions_kept VALUES (?, ?, ?, ?)",
+                        [(AMY.lower(), m, t, int(w)) for m, (t, w) in old.rows.items()])  # fmt: skip
+        con.execute("INSERT INTO positions_covered VALUES (?, ?, ?)", (AMY.lower(), old.since, old.read_at))
+        con.execute("INSERT INTO positions_kept VALUES (?, ?, ?, ?)", ("0xorphan", "m", NOW, 1))  # never covered
+    assert d.kept_positions(AMY) == old  # read the old way until packed
+    assert d.pack_old_positions(wallets=10) == 1
+    assert d.pack_old_positions(wallets=10) == 0
+    assert d.kept_positions(AMY) == by_key(old)
+    with d._db() as con:
+        assert con.execute("SELECT count(*) FROM positions_kept").fetchone() == (0,)
+        assert con.execute("SELECT count(*) FROM positions_covered").fetchone() == (0,)
+
+
+def test_packing_never_overwrites_what_a_newer_read_kept(d: Directory) -> None:
+    with d._db() as con:
+        con.execute("INSERT INTO positions_kept VALUES (?, ?, ?, ?)", (AMY.lower(), "stale", NOW - 9 * DAY, 0))
+        con.execute("INSERT INTO positions_covered VALUES (?, ?, ?)", (AMY.lower(), NOW - 9 * DAY, NOW - 8 * DAY))
+    fresh = records.PositionHistory(NOW - DAY, NOW, {"new": (NOW, True)})
+    d.keep_record(AMY, rec(100.0), at=NOW, positions=fresh)  # writes packed and clears the old rows
+    assert d.pack_old_positions() == 0
+    assert d.kept_positions(AMY) == by_key(fresh)
 
 
 # ---- the directory ----
