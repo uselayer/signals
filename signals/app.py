@@ -54,7 +54,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import basket, monitoring, records, us_match, watch, why
+from signals import basket, monitoring, owner_alerts, records, us_match, watch, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -130,6 +130,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Signals", lifespan=lifespan)
 app.add_middleware(monitoring.CountBytesOut)  # the bytes served: monitoring's egress
+app.add_middleware(owner_alerts.ServerErrors)  # every 500, for the owner's alerts
 reads = Client(store=":memory:")  # leaderboards, traders, links, cost previews: reads only
 monitoring.watch(reads._http._client)  # every request the SDK sends, whoever asked: monitoring's ``api``
 LAYER_KEY = os.environ.get("LAYER_API_KEY", "")
@@ -742,7 +743,8 @@ RECORD_READS = 6  # a track record's reads after the quick check, about (measure
 NEW_SHARE = 0.5
 SCORE_READS = 50  # a full score's reads, about (measured 49 over a random 80, 2026-10-14)
 READS_DECAY = 0.98  # each round, older reads count a little less, so the share follows what's due lately
-_evaluate_state: dict[str, Any] = {"running": False, "error": None, "paused_until": None, "leaderboards": None,
+_evaluate_state: dict[str, Any] = {"running": False, "error": None, "error_since": None, "paused_until": None,
+                                   "leaderboards": None,
                                    "since_launch": dict.fromkeys(OUTCOMES, 0), "reads": {"new": 0.0, "other": 0.0}}  # fmt: skip
 
 
@@ -952,7 +954,7 @@ def _evaluate_loop() -> None:
         try:
             r = evaluate_round(_directory_stop)
             hour = {k: hour[k] + r["done"][k] for k in OUTCOMES}
-            _evaluate_state["error"] = None
+            _evaluate_state["error"] = _evaluate_state["error_since"] = None
             if r["failed_in_a_row"] >= EVALUATE_FAILS_IN_A_ROW:
                 pause = EVALUATE_PAUSE_S
                 print(f"directory evaluation: {r['failed_in_a_row']} failed in a row, waiting "
@@ -961,6 +963,7 @@ def _evaluate_loop() -> None:
                 pause = EVALUATE_IDLE_S
         except Exception as e:  # the directory couldn't be read or written: try again later
             _evaluate_state["error"] = f"{type(e).__name__}: {e}"
+            _evaluate_state["error_since"] = _evaluate_state["error_since"] or time.time()  # the owner's alerts
             print(f"directory evaluation error: {_evaluate_state['error']}", flush=True)
             pause = EVALUATE_PAUSE_S
         if time.time() - logged >= EVALUATE_LOG_S:
@@ -1325,6 +1328,10 @@ def _monitor_loop() -> None:
         except OSError:
             pass
         _monitor_flush()
+        try:
+            owner_check()
+        except Exception as e:  # never the monitor's end: the next minute tries again
+            print(f"owner alerts: the check failed: {type(e).__name__}: {e}", flush=True)
         if time.monotonic() - logged >= MONITOR_LOG_S:
             logged = time.monotonic()
             try:
@@ -1567,6 +1574,67 @@ def monitoring_report(days: int = 14) -> dict[str, Any]:
         return {"discovery_funnel": _discovery_funnel(r), "health": r.pop("health"), "data": r.pop("data")} | r
 
     return cached(f"monitoring:{days}", MONITOR_TTL_S, build)  # type: ignore[no-any-return]
+
+
+# The owner's alerts (signals/owner_alerts.py): a Telegram message to the owner when the disk fills up, pages answer
+# 500 or trader scoring keeps failing, so an outage isn't found days later. Sent to SIGNALS_OWNER_CHAT, else to the chat
+# connected on the owner's Signals account (SIGNALS_OWNER_USER, a Clerk user id); off without either, or without
+# TELEGRAM_BOT_TOKEN. Sent straight to Telegram, never through alerts.db: it has to work when the disk is full.
+OWNER_CHAT = os.environ.get("SIGNALS_OWNER_CHAT", "")
+OWNER_USER = os.environ.get("SIGNALS_OWNER_USER", "")
+
+
+def _owner_chat() -> str | None:
+    if OWNER_CHAT:
+        return OWNER_CHAT
+    if OWNER_USER:
+        chat = (_load_follows()["users"].get(OWNER_USER) or {}).get("chat")
+        return str(chat) if chat else None
+    return None
+
+
+def _owner_send(text: str) -> bool:
+    """One message to the owner; whether it went (a failure is logged, never with the token, and tried next minute)."""
+    chat = _owner_chat()
+    if not (TG_TOKEN and chat):
+        return False
+    try:
+        tg("sendMessage", chat_id=chat, text=text, disable_web_page_preview=True)
+    except TelegramError as e:
+        print(f"owner alerts: not sent: {e}", flush=True)
+        return False
+    return True
+
+
+_owner_watch = owner_alerts.Watch(_owner_send)
+
+
+def owner_check(now: float | None = None) -> None:
+    """The three checks, told to the owner as ``owner_alerts.Watch`` says (``_monitor_loop``, each minute)."""
+    if not (TG_TOKEN and (OWNER_CHAT or OWNER_USER)):
+        return
+    now = time.time() if now is None else now
+    _owner_watch.update("disk", owner_alerts.disk_problem(STORE_DIR), now)
+    _owner_watch.update("errors", owner_alerts.errors_problem(owner_alerts.errors.recent(now)), now)
+    scoring = (owner_alerts.scoring_problem(_evaluate_state["error"], _evaluate_state["error_since"], now)
+               if EVALUATE_ON else None)  # fmt: skip
+    _owner_watch.update("scoring", scoring, now)
+
+
+@app.post("/api/owner-alerts/test")
+def owner_alerts_test(request: Request, response: Response) -> dict[str, Any]:
+    """Sends the owner one message, to check their alerts reach them; what's wrong now, if anything. The owner's, as
+    /api/monitoring is."""
+    _owner(request)
+    response.headers["Cache-Control"] = "private, no-store"
+    if not TG_TOKEN:
+        return {"sent": False, "why": "TELEGRAM_BOT_TOKEN isn't set."}
+    if not _owner_chat():
+        return {"sent": False, "why": "No chat to send to: set SIGNALS_OWNER_USER to your Clerk user id (with Telegram "
+                                      "connected on Signals), or SIGNALS_OWNER_CHAT."}  # fmt: skip
+    sent = _owner_send("Signals: your alerts are on. You'll get a message here when the disk passes "
+                       f"{owner_alerts.DISK_WARN:.0%}, a page fails with a server error, or trader scoring keeps failing.")  # fmt: skip
+    return {"sent": sent, "problems_now": {k: p.text for k, p in _owner_watch.problems.items()}}
 
 
 @app.get("/api/monitoring")
