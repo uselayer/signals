@@ -1915,14 +1915,15 @@ def worth_refresh_route() -> dict[str, Any]:
 
 
 @app.get("/api/worth/{wallet}")
-def worth_wallet(wallet: str, request: Request, score: int = 1) -> dict[str, Any]:
+def worth_wallet(wallet: str, request: Request, score: int = 1, wait: int = 0, retry: int = 0) -> dict[str, Any]:
     """One wallet's score with its checked bets: from the last refresh, else (Explore on) a fresh one kept in the
     directory, else scored now (5–30 s, ``check_now``). With ``score=0`` (opened from Explore) a wallet without a
     fresh score isn't scored: its page shows what's known and a "Check now" button instead. With Explore on, the
-    wallet's directory row comes too (``directory``: the evidence, where it was found)."""
+    wallet's directory row comes too (``directory``: the evidence, where it was found). With the skill test off,
+    ``wait`` and ``retry`` are a refreshing record's (``record_page``)."""
     w = wallet.lower()
     if not SKILL_TEST:  # the Leaderboard: their track record, never a score
-        return record_page(w, request)
+        return record_page(w, request, wait=bool(wait), retry=bool(retry))
     data = _worth_load()
     s = next((x for x in (data or {}).get("scores", []) if x["wallet"] == w), None)
     row = _explore_row(w) if EXPLORE_ON and _WALLET.fullmatch(w) else None
@@ -2374,8 +2375,11 @@ def _win_of(rec: dict[str, Any], period: str) -> dict[str, Any] | None:
 # A trader's page with the skill test off: their track record, the Leaderboard's facts and a little more (the profit
 # line, the worst drop, the weeks), never a tier or verdict. A record read within RECORD_PAGE_FRESH_S is shown as it
 # is; an older one, one copied from a score (no win rate) or none is read now (about 6 to 8 reads, ``records``) on the
-# checks' budget, as "Check now" scores, and kept for the Leaderboard. If that read can't be made (busy, or Polymarket
-# failed) an older record is shown, with when it was read; with none, the page says why.
+# checks' budget, as "Check now" scores, and kept for the Leaderboard. With an older record kept, the page gets it at
+# once, said to be refreshing (5 Nov: 97% of the Leaderboard's top 1,000 were over 6 hours old, so nearly every page
+# waited 6-20 s on a read), and the read runs behind it: the page asks with ``wait=1`` for what it got (the new
+# record, still refreshing, or why it couldn't: busy or failed), and ``retry=1`` ("Try again") starts another. With
+# none, the page waits on the read, and says why when it can't be made.
 RECORD_PAGE_FRESH_S = 6 * 3600
 _record_one: dict[str, dict[str, Any]] = {}  # records read for a page, kept here too: the writer keeps them later
 # A trader's page waits this long for a record read now. A busy trader's first read can take minutes (5 Nov:
@@ -2385,6 +2389,10 @@ _record_one: dict[str, dict[str, Any]] = {}  # records read for a page, kept her
 RECORD_WAIT_S = 20
 _record_reads: dict[str, Future[dict[str, Any]]] = {}  # wallet → its record read in flight, one per wallet
 _record_reads_lock = threading.Lock()
+# wallet → (when, "busy" or "failed"): its last refresh that couldn't be made, said to a page asking after it (``wait``)
+# for this long, so asking again never starts a read the page didn't ask for; "Try again" (``retry``) does.
+_record_failed: dict[str, tuple[float, str]] = {}
+RECORD_FAILED_KEEP_S = 60
 
 
 def _directory_name(wallet: str) -> str | None:
@@ -2437,7 +2445,11 @@ def _record_read(w: str, request: Request | None) -> Future[dict[str, Any]]:
     def run() -> None:
         try:
             f.set_result(record_now(w, request))
+            _record_failed.pop(w, None)
         except BaseException as e:  # noqa: BLE001 - handed to whoever waits on it
+            if len(_record_failed) > 5000:
+                _record_failed.clear()
+            _record_failed[w] = (time.time(), _refresh_failure(e))
             f.set_exception(e)
         finally:
             with _record_reads_lock:
@@ -2448,42 +2460,65 @@ def _record_read(w: str, request: Request | None) -> Future[dict[str, Any]]:
     return f
 
 
-def record_page(w: str, request: Request | None = None) -> dict[str, Any]:
-    """``/api/worth/{wallet}`` with the skill test off: the wallet's record as a trader's page shows it."""
+def _refresh_failure(e: BaseException) -> str:
+    """Why a record read couldn't be made, as the page says it: "busy" (a 429: the checks' limits), else "failed"."""
+    return "busy" if isinstance(e, HTTPException) and e.status_code == 429 else "failed"
+
+
+def _refresh(w: str, request: Request | None, kept: dict[str, Any], wait: bool, retry: bool) -> dict[str, Any]:
+    """An older ``kept`` record while its refresh runs: started (or joined) here and not waited on, or with ``wait``
+    waited on up to RECORD_WAIT_S. The new record when it's in, else ``kept`` with ``refreshing`` or ``refresh_failed``
+    ("busy" or "failed"). A wait after a refresh that just failed says so rather than reading again, unless ``retry``."""
+    with _record_reads_lock:
+        inflight = _record_reads.get(w)
+    failed = _record_failed.get(w)
+    if inflight is None and wait and not retry and failed and time.time() - failed[0] < RECORD_FAILED_KEEP_S:
+        return kept | {"refresh_failed": failed[1]}
+    f = _record_read(w, request)
+    if not wait and not f.done():
+        return kept | {"refreshing": True}
+    try:
+        return f.result(timeout=RECORD_WAIT_S if wait else 0)
+    except FutureTimeout:
+        return kept | {"refreshing": True}
+    except Exception as e:  # noqa: BLE001 - the page shows the older record and why it wasn't refreshed
+        return kept | {"refresh_failed": _refresh_failure(e)}
+
+
+def record_page(w: str, request: Request | None = None, wait: bool = False, retry: bool = False) -> dict[str, Any]:
+    """``/api/worth/{wallet}`` with the skill test off: the wallet's record as a trader's page shows it, an older one at
+    once while it's refreshed (``_refresh``: ``wait`` for that refresh, ``retry`` to start another after one failed)."""
     if not _WALLET.fullmatch(w):
         raise HTTPException(400, detail="That isn't a Polymarket wallet address.")
     now = time.time()
     rec = _fresh_record(_record_one.get(w), now)
+    flags: dict[str, Any] = {}
     if rec is None:
         try:
             kept = directory().record(w)
         except (sqlite3.Error, OSError):
             kept = None
         rec = _fresh_record(kept, now)
-        if rec is None:
+        if rec is None and kept is not None:  # an older one: shown now, refreshed behind it
+            got = _refresh(w, request, kept, wait, retry)
+            flags = {k: got[k] for k in ("refreshing", "refresh_failed") if k in got}
+            rec = {k: v for k, v in got.items() if k not in flags}
+        if rec is None:  # none kept: the page waits on the read (asking again while it runs), or says why it can't
             try:
                 rec = _record_read(w, request).result(timeout=RECORD_WAIT_S)
-            except FutureTimeout:  # still reading: an older record, said to be older, else the page asks again
-                if kept is None:
-                    return {"wallet": w, "reading": True, "name": _directory_name(w)}
-                rec = kept
-            except HTTPException:  # busy: an older record, said to be older, if there is one
-                if kept is None:
-                    raise
-                rec = kept
+            except FutureTimeout:
+                return {"wallet": w, "reading": True, "name": _directory_name(w)}
             except VenueError as e:
-                if kept is None:
-                    if e.code == "not_found":
-                        count("no_profile", target="trader")
-                    raise venue_error(e) from e
-                rec = kept
+                if e.code == "not_found":
+                    count("no_profile", target="trader")
+                raise venue_error(e) from e
     try:
         row = directory().wallet(w)
     except (sqlite3.Error, OSError):
         row = None
     if row is None:
         _directory_note_later([Seen(w, "search")])
-    return record_profile(w, rec, row or {})
+    return record_profile(w, rec, row or {}) | flags
 
 
 def record_profile(w: str, rec: dict[str, Any], row: dict[str, Any]) -> dict[str, Any]:

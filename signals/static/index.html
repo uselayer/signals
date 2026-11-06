@@ -409,6 +409,15 @@
   .pf-head h1 { font-size: 28px; letter-spacing: -0.02em; margin: 0; overflow-wrap: anywhere; }
   .pf-tag { color: var(--muted); margin-top: 2px; font-size: 15px; }
   .pf-tag .ext { font-size: inherit; }
+  /* a saved record shown while a new one is read: a quiet note in the header, then the figures that changed glow once */
+  .pf-refresh { white-space: nowrap; }
+  .pf-refresh .link { font-size: inherit; font-weight: 400; color: var(--muted); }
+  .pf-spin { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 50%;
+    border: 1.5px solid var(--line); border-top-color: var(--muted); animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .pf-changed { animation: glow 1.6s ease-out; border-radius: 4px; }
+  @keyframes glow { from { background: color-mix(in srgb, var(--fg) 14%, transparent); } to { background: transparent; } }
+  @media (prefers-reduced-motion: reduce) { .pf-spin { animation: none; } .pf-changed { animation: none; } }
   .pf-cta { display: grid; gap: 6px; justify-items: end; text-align: right; }
   .pf-cta small { color: var(--muted); font-size: 13px; max-width: 280px; }
   .pf-cta .btn[disabled] { background: var(--soft); color: var(--faint); cursor: default; }
@@ -2649,17 +2658,87 @@ async function worthTraderPage(wallet) {
     await new Promise((ok) => setTimeout(ok, 1000));
   }
   if (s.unchecked) return renderUnchecked(s, wallet);
-  Object.assign(pf, { s, detail: null, account: null, cats: null, tab: "positions", period: s.periods ? pf.period : "30d" });
+  clearTimeout(pf.retryTimer);
+  const visit = {}; // this opening of the page: what arrives after leaving it, or opening another, is dropped
+  Object.assign(pf, { s, visit, refresh: null, retries: 0, detail: null, account: null, cats: null, tab: "positions", period: s.periods ? pf.period : "30d" });
   renderProfile();
-  loadProfileExtras(wallet, s);
+  loadProfileExtras(wallet, visit);
+  if (s.refreshing || s.refresh_failed) followRefresh(wallet, visit, s);
 }
-async function loadProfileExtras(wallet, s) {
-  const redraw = () => { if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile(); };
+const onVisit = (wallet, visit) => location.hash === `#/worth/${wallet}` && pf.visit === visit;
+async function loadProfileExtras(wallet, visit) {
+  const redraw = () => { if (onVisit(wallet, visit)) renderProfile(); };
   api(`/api/account/${wallet}`).then((a) => { pf.account = a; }, () => { pf.account = { error: true }; }).then(redraw); // their account now
   // realized profit by category: its own read, kept
   api(`/api/categories/${wallet}`).then((c) => { pf.cats = c; }, (e) => { pf.cats = readFailed(e); }).then(redraw);
   try { pf.detail = await api(`/api/trader/polymarket/${wallet}`); } catch (e) { pf.detail = { error: e.message }; }
-  if (location.hash === `#/worth/${wallet}` && pf.s === s) renderProfile();
+  redraw();
+}
+
+// A saved record is shown at once while the engine reads a new one (record_page): the header says "Refreshing…", the
+// new figures replace the old where they sit (the ones that changed glow once), and nothing else moves. A refresh
+// that can't be made says why ("busy" or "failed"), tries again by itself after 30 s and 2 min, then stops, so a tab
+// left open doesn't keep reading; "Try again" is there throughout.
+const REFRESH_RETRIES = [30e3, 120e3];
+const REFRESH_MAX_ASKS = 30; // each ask waits up to 20 s for the read: about 10 minutes, the longest a busy history takes
+async function followRefresh(wallet, visit, got, retry = false) {
+  clearTimeout(pf.retryTimer);
+  for (let asks = 0; got.refreshing || got.reading || retry; asks++) {
+    if (asks >= REFRESH_MAX_ASKS) { got = { refresh_failed: "failed" }; break; }
+    pf.refresh = asks >= 2 ? "slow" : "running";
+    drawRefresh();
+    try { got = await api(`/api/worth/${wallet}?wait=1${retry ? "&retry=1" : ""}`); }
+    catch (e) { got = { refresh_failed: e.status === 429 ? "busy" : "failed" }; }
+    retry = false;
+    if (!onVisit(wallet, visit)) return;
+  }
+  if (got.refresh_failed) {
+    const next = REFRESH_RETRIES[pf.retries];
+    pf.refresh = got.refresh_failed + (next != null ? "-retrying" : "");
+    drawRefresh();
+    if (next != null) {
+      pf.retries++;
+      pf.retryTimer = setTimeout(() => { if (onVisit(wallet, visit)) followRefresh(wallet, visit, {}, true); }, next);
+    }
+    return;
+  }
+  pf.refresh = null;
+  swapRecord(got);
+}
+// The header's note on the refresh (pf.refresh), beside "updated …"; "" when there's nothing to say.
+function refreshNote() {
+  const again = `<button type="button" class="link" id="pfretry">Try again</button>`;
+  return {
+    running: `<span class="pf-spin" aria-hidden="true"></span>Refreshing…`,
+    slow: `<span class="pf-spin" aria-hidden="true"></span>Still refreshing, they have a long history`,
+    "busy-retrying": `Busy right now, trying again shortly · ${again}`,
+    busy: `Busy right now · ${again}`,
+    "failed-retrying": `Couldn't refresh, trying again shortly · ${again}`,
+    failed: `Couldn't refresh · ${again}`,
+  }[pf.refresh] || "";
+}
+function drawRefresh() {
+  const el = $("#pfrefresh");
+  if (!el) return;
+  const note = refreshNote();
+  el.innerHTML = note ? ` · ${note}` : "";
+  bindRefresh();
+}
+function bindRefresh() {
+  const b = $("#pfretry"), wallet = pf.s?.wallet, visit = pf.visit;
+  if (b) b.onclick = () => followRefresh(wallet, visit, {}, true);
+}
+// The new record in place of the saved one: the same page redrawn, each figure that changed glowing once.
+function swapRecord(s) {
+  const app = $("#app"), figures = () => new Map($$(".pf-hero, .pf-rows > div", app).map((el) =>
+    [el.querySelector("span, dt")?.firstChild?.textContent || "", el]));
+  const before = new Map([...figures()].map(([k, el]) => [k, el.querySelector("b, dd")?.textContent]));
+  pf.s = s;
+  renderProfile();
+  for (const [k, el] of figures()) {
+    const v = el.querySelector("b, dd");
+    if (v && before.has(k) && before.get(k) !== v.textContent) v.classList.add("pf-changed");
+  }
 }
 
 function pfChart(s, n) {
@@ -2938,9 +3017,10 @@ function renderProfile() {
       : `<p class="pf-empty">${trades ? "No trades yet." : "No buys in the last 30 days."}</p>`);
   }
 
+  const foldOpen = $("details.fold", app)?.open; // a redraw keeps "How we measure this" as it was
   app.innerHTML = `${pf.from === "explore" ? `<a class="back" href="#/traders/explore">← Explore</a>` : `<a class="back" href="#/traders">← Traders</a>`}
     <div class="pf-head">${avatar(s.wallet, 64)}
-      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "record read" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
+      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "updated" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}<span id="pfrefresh" class="pf-refresh">${refreshNote() ? ` · ${refreshNote()}` : ""}</span>${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div>
         <a class="link" href="#/watch/${esc(s.wallet)}" style="font-size:14px">What they hold and every change they make →</a></div></div>
     <div class="pf-grid">
@@ -2975,6 +3055,8 @@ function renderProfile() {
   $$("[data-pftab]", app).forEach((b) => (b.onclick = () => { pf.tab = b.dataset.pftab; renderProfile(); }));
   const act = $("#pfactivity", app);
   if (act) act.onclick = () => { pf.tab = "activity"; renderProfile(); $(".pf-tabs", app)?.scrollIntoView({ block: "start", behavior: "smooth" }); };
+  if (foldOpen) $("details.fold", app).open = true;
+  bindRefresh();
   bindActions(app);
   redrawFollow();
 }

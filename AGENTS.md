@@ -23,8 +23,10 @@ behind Vercel (see README, "Hosting").
   `_stored_score` give nothing, and the once-a-day check doesn't run): the Feed's second part is **Top traders**
   (`#/recommended`, `/api/live` with `pool` "top": the Leaderboard's first `FEED_TOP` by trading profit over 30 days,
   neutral cards, copying offered for nobody); a trader's page is their record (`record_page`: one read within 6
-  hours as kept, else read now on the checks' budget, under "Check now"'s limits; no tier, "Why they're here" or
-  checks); alerts name traders from the directory. A win rate always shows the average price they paid over 30
+  hours as kept, else read now on the checks' budget, under "Check now"'s limits: an older one is shown at once,
+  "Refreshing…", and the page waits on the read behind it (`wait=1`), swaps the new figures in place, and after a
+  failed read says why, tries twice more by itself and offers "Try again" (`retry=1`); only a wallet with no record
+  kept waits on its first read; no tier, "Why they're here" or checks); alerts name traders from the directory. A win rate always shows the average price they paid over 30
   days beside it (`paid_30d`, from the trades the quick check reads, each outcome once): a price is the market's
   chance, so paying 97¢ wins about 97% of the time by buying alone.
 - Signals is Polymarket-only for now; the SDK stays multi-venue. `SIGNALS_VENUES` (`VENUES` in `app.py`, default
