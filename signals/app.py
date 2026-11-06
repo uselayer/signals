@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import html
 import json
 import os
@@ -3402,6 +3403,15 @@ CLERK_KEY = os.environ.get("CLERK_PUBLISHABLE_KEY", "")
 POSTHOG_KEY = os.environ.get("SIGNALS_POSTHOG_KEY", "")
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 SITE = os.environ.get("SIGNALS_SITE", "https://usesignals.app")
+# Signed in from an alert (owner, 5 Nov: Telegram opens links in its own browser, signed out, so following from an
+# alert meant signing in again). An alert's "Check current price" is also a Telegram login button: Telegram tells
+# /tg/in who tapped it, signed with our bot token, and the account that chat is connected to is signed in there with a
+# one-time Clerk sign-in pass. Who tapped, never who it was sent to, so a forwarded alert signs no one into another's
+# account. Off unless SIGNALS_TG_LOGIN=1 (set it only once @BotFather → /setdomain links the bot to the site: until
+# then Telegram refuses every message with the button) and CLERK_SECRET_KEY is set (the one place a Clerk secret is
+# used: making those passes).
+CLERK_SECRET = os.environ.get("CLERK_SECRET_KEY", "")
+TG_LOGIN = os.environ.get("SIGNALS_TG_LOGIN", "") == "1"
 MAX_FOLLOWS = 20
 CODE_TTL_S = 15 * 60  # a "Connect Telegram" link works this long, once
 ALERT_EVERY_S = 30
@@ -4322,10 +4332,14 @@ def _sent_today(uid: str, kinds: tuple[str, ...] = COUNTED, trader: str | None =
         return int(con.execute(q, (uid, _today(), *kinds)).fetchone()[0])
 
 
-def _keyboard(alert_id: str, stop: str | None = None) -> dict[str, Any]:
+def _keyboard(alert_id: str, stop: str | None = None, text: str = "") -> dict[str, Any]:
     """Under every alert: Useful / Not useful, and when it's about one trader you follow, "Stop alerts from <name>"
-    and "Fewer alerts" (the choices for them: _on_choice)."""
-    rows = [[{"text": "Useful", "callback_data": f"v:{alert_id}:1"}, {"text": "Not useful", "callback_data": f"v:{alert_id}:0"}]]
+    and "Fewer alerts" (the choices for them: _on_choice). With signing in from alerts on (TG_LOGIN) and a "Check
+    current price" link in the alert's ``text``, that link as a login button first (``/tg/in``)."""
+    rows: list[list[dict[str, Any]]] = [[{"text": "Useful", "callback_data": f"v:{alert_id}:1"},
+                                         {"text": "Not useful", "callback_data": f"v:{alert_id}:0"}]]  # fmt: skip
+    if _tg_login_on() and f"/go/{alert_id}/check?" in text:
+        rows.insert(0, [{"text": "Check current price on Signals", "login_url": {"url": f"{SITE}/tg/in/{alert_id}"}}])
     if stop:
         rows.append([{"text": f"Stop alerts from {_who(stop)}", "callback_data": f"unf:{stop}"},
                      {"text": "Fewer alerts", "callback_data": f"few:{stop}"}])  # fmt: skip
@@ -4366,7 +4380,8 @@ def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, tra
         return None
     now = time.time()
     aid = secrets.token_urlsafe(6)  # 8 characters: fits Telegram's 64-byte button data with room to spare
-    body = json.dumps({"text": text_for(aid), "markup": _keyboard(aid, stop)})
+    text = text_for(aid)
+    body = json.dumps({"text": text, "markup": _keyboard(aid, stop, text)})
     with _db() as con:
         if on_queue is not None:
             on_queue(con)
@@ -4897,9 +4912,10 @@ def _deliver(uid: str, chat: str, b: NewBuy, category: str | None) -> int:
     first = sorted(members.values(), key=lambda m: m[2])
     if group:
         if group[2] is not None:
+            text = _group_text(first, b.t, b.now, b.seen, group[0])
             try:
-                tg("editMessageText", chat_id=group[1], message_id=group[2], text=_group_text(first, b.t, b.now, b.seen, group[0]),
-                   parse_mode="HTML", disable_web_page_preview=True, reply_markup=_keyboard(group[0]))  # fmt: skip
+                tg("editMessageText", chat_id=group[1], message_id=group[2], text=text,
+                   parse_mode="HTML", disable_web_page_preview=True, reply_markup=_keyboard(group[0], text=text))  # fmt: skip
             except RuntimeError:
                 pass  # deleted, or Telegram is down: nothing new to ping about either way
         return 0
@@ -5290,6 +5306,94 @@ def go(alert_id: str, target: str, to: str = "") -> RedirectResponse:
     if _ALERT_ID.fullmatch(alert_id) and target in set(LINK_TARGETS.values()) and _alert_known(alert_id):
         count("tap", alert_id=alert_id, target=target)
     return RedirectResponse(dest, status_code=302, headers={"Cache-Control": "no-store"})
+
+
+# ---- signed in from an alert: Telegram's login button (TG_LOGIN) ----
+TG_LOGIN_MAX_AGE_S = 600  # Telegram dates its data when the button is tapped: older data is never taken
+SIGN_IN_PASS_S = 300  # the one-time Clerk pass the tap makes works this long
+_tg_logins_used: dict[str, float] = {}  # each tap's data signs in once (hash → when): a copied link can't again
+_tg_logins_lock = threading.Lock()
+
+
+def _tg_login_on() -> bool:
+    return TG_LOGIN and bool(CLERK_SECRET and TG_TOKEN)
+
+
+def _tg_tapper(q: dict[str, str], now: float) -> str | None:
+    """Who tapped a login button (their Telegram id), when Telegram's data checks out: signed with our bot token
+    (HMAC-SHA-256 of the fields, sorted, one ``key=value`` a line, keyed by SHA-256 of the token), dated within
+    TG_LOGIN_MAX_AGE_S and not used before. Else None (declined, made up, old or used): the page opens signed out."""
+    got = q.get("hash", "")
+    fields = {k: v for k, v in q.items() if k != "hash"}
+    if not (got and TG_TOKEN and fields.get("id", "").isdigit() and fields.get("auth_date", "").isdigit()):
+        return None
+    check = "\n".join(f"{k}={fields[k]}" for k in sorted(fields))
+    want = hmac.new(hashlib.sha256(TG_TOKEN.encode()).digest(), check.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(want, got) or not -60 <= now - int(fields["auth_date"]) <= TG_LOGIN_MAX_AGE_S:
+        return None
+    with _tg_logins_lock:
+        for h in [h for h, t in _tg_logins_used.items() if now - t > TG_LOGIN_MAX_AGE_S + 60]:
+            del _tg_logins_used[h]
+        if got in _tg_logins_used:
+            return None
+        _tg_logins_used[got] = now
+    return fields["id"]
+
+
+def _account_of_chat(chat: str) -> str | None:
+    """The Signals account a Telegram chat is connected to (a private chat's id is its person's Telegram id); None
+    for a Telegram-only follower, who has no account to sign in to."""
+    for uid, u in _load_follows()["users"].items():
+        if str(u.get("chat") or "") == chat and not uid.startswith(TG_ONLY):
+            return uid
+    return None
+
+
+def _sign_in_pass(uid: str) -> str | None:
+    """A one-time Clerk sign-in pass for this account (Backend API sign_in_tokens), or None when Clerk can't make
+    one: the page then opens signed out, as before."""
+    req = urllib.request.Request(
+        "https://api.clerk.com/v1/sign_in_tokens", method="POST",
+        data=json.dumps({"user_id": uid, "expires_in_seconds": SIGN_IN_PASS_S}).encode(),
+        headers={"Authorization": f"Bearer {CLERK_SECRET}", "Content-Type": "application/json", "User-Agent": "signals"},
+    )  # fmt: skip
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            token = json.loads(r.read()).get("token")
+    except (OSError, ValueError) as e:
+        print(f"signals: no sign-in pass from Clerk: {e}", file=sys.stderr, flush=True)
+        return None
+    return token if isinstance(token, str) and token else None
+
+
+def _alert_check_link(alert_id: str) -> str | None:
+    """Where an alert's "Check current price" goes (its trade's page on Signals), from the alert as it was sent."""
+    try:
+        with _db() as con:
+            row = con.execute("SELECT body FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+        text = json.loads(row[0])["text"] if row and row[0] else ""
+    except (sqlite3.Error, ValueError, KeyError, TypeError):
+        return None
+    m = re.search(rf'/go/{re.escape(alert_id)}/check\?to=([^"]+)', text)
+    to = urllib.parse.unquote(html.unescape(m.group(1))) if m else ""
+    return to if to.startswith(f"{SITE}/#/check/") else None
+
+
+@app.get("/tg/in/{alert_id}")
+def tg_in(alert_id: str, request: Request) -> RedirectResponse:
+    """A tap on an alert's "Check current price" login button: counted like ``/go``, then on to the trade's page,
+    signed in as the tapper's account when Telegram's data checks out and the chat is connected to one (``signin``,
+    a one-time pass the page uses at once and drops from the address). Anything short of that opens it signed out."""
+    to = _alert_check_link(alert_id) if _ALERT_ID.fullmatch(alert_id) else None
+    if to is None:
+        return RedirectResponse(SITE, status_code=302, headers={"Cache-Control": "no-store"})
+    count("tap", alert_id=alert_id, target="check")
+    who = _tg_tapper(dict(request.query_params), time.time()) if _tg_login_on() else None
+    uid = _account_of_chat(who) if who else None
+    ticket = _sign_in_pass(uid) if uid else None
+    if ticket:
+        to = to.replace("/#/", f"/?{urllib.parse.urlencode({'signin': ticket})}#/", 1)
+    return RedirectResponse(to, status_code=302, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
 
 
 @app.post("/api/count/picked")

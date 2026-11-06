@@ -136,6 +136,8 @@ All optional.
 | `CLERK_PUBLISHABLE_KEY` | Turns on signing in (Clerk). No secret key needed. |
 | `SIGNALS_SITE` | The site sign-ins must come from. Default `https://usesignals.app`. |
 | `TELEGRAM_BOT_TOKEN` | Turns on Telegram alerts. |
+| `SIGNALS_TG_LOGIN` | `1` makes an alert's "Check current price" a Telegram login button that opens it signed in. Off by default. |
+| `CLERK_SECRET_KEY` | Needed for that button: it makes the one-time sign-in. Nothing else uses it. |
 | `OPENROUTER_API_KEY` | Turns on the AI sentence on watch pages. |
 | `SIGNALS_WHY_MODEL` | The model for it. Default `anthropic/claude-haiku-5.5`. |
 | `SIGNALS_WHY_DAILY` | At most this many AI calls a day. Default `3000` (about $0.15). |
@@ -169,6 +171,9 @@ usesignals.app is the same engine with `SIGNALS_HOSTED=1`:
 3. **Domain**: a Clerk production instance asks for DNS records on usesignals.app (such as
    `clerk.usesignals.app`); add them where the domain's DNS is managed.
 4. **Railway**: set `CLERK_PUBLISHABLE_KEY` (pk_live_…).
+5. **Signed in from alerts** (optional): in Telegram, @BotFather → `/setdomain` → your bot → `usesignals.app`. Only
+   then set `CLERK_SECRET_KEY` (sk_live_…, Clerk's dashboard → API keys) and `SIGNALS_TG_LOGIN=1` in Railway: until the
+   domain is linked, Telegram refuses every alert that has the button.
 
 Follows are kept in `/data/follows.json` by Clerk user id; alerts and counts in `/data/alerts.db`; wallets and
 track records in `/data/directory.db`.
