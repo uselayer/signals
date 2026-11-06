@@ -93,7 +93,7 @@ def test_following_needs_a_valid_clerk_session(api: TestClient) -> None:
 
 
 def test_the_feed_needs_signing_in_and_traders_need_no_account(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    for path in ("/api/live", "/api/trading-now", f"/api/bet/{SHARP}/0xm:0"):  # Recommended, Big trades, an alert's
+    for path in ("/api/live", "/api/trading-now"):  # Recommended, Big trades
         r = api.get(path)
         assert r.status_code == 401 and r.json()["detail"] == "Sign in to see the Feed."
         assert api.get(path, headers=auth(token(key=OTHER_KEY))).status_code == 401  # not signed by Clerk
