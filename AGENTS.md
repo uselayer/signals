@@ -96,7 +96,12 @@ behind Vercel (see README, "Hosting").
   quote that always succeeds.
 - Traders (the leaderboard, Top profit), trader pages and an alert's "Check your price" (`#/check`, `/api/bet`)
   need no account: Telegram opens alert links in its own browser, signed out, and people who follow from Telegram
-  may have no account (5 Nov: Zach had to sign in again on two alert taps). Everything else in the Feed (Following,
+  may have no account (5 Nov: Zach had to sign in again on two alert taps). With `SIGNALS_TG_LOGIN=1` (and
+  `CLERK_SECRET_KEY`, the one Clerk secret Signals holds, used only for this) an alert's "Check current price" is
+  also a Telegram login button: `/tg/in` checks Telegram's signed data (our bot token, under 10 minutes old, used
+  once) and signs in the account the tapper's chat is connected to, with a one-time Clerk pass the page uses and
+  drops from the address. The tapper, never the alert's recipient, so a forwarded alert opens no one else's account;
+  anything short of that opens the trade signed out. Everything else in the Feed (Following,
   Top traders, Big trades) is behind signing in (Clerk: Google, or Telegram as a custom OpenID Connect provider).
   Signed out, a Feed page is the sign-in page ("Sign in to see the Feed", Sign in, Browse traders), and the engine
   refuses its reads (`feed_reader`: `/api/live`, `/api/trading-now`) without a valid session. Without Clerk's key (running locally) nothing is gated. On a trader's page the Follow

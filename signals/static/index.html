@@ -787,6 +787,10 @@ const post = (path, body) => api(path, { method: "POST", headers: { "content-typ
 // Frontend API the key names; without one (running locally) nothing is gated. `wanted`: the key names a Frontend
 // API, so the Feed waits for signing in. `me` is who you follow and whether Telegram alerts are connected.
 const auth = { wanted: false, on: false, alerts: false, ready: false, loading: false, failed: false, me: null, meErr: null, uid: null, then: null };
+// An alert's "Check current price" tapped in Telegram (/tg/in): a one-time Clerk sign-in pass for the tapper's
+// account. Taken off the address at once (never kept in history, analytics or a shared link), used once Clerk loads.
+const SIGNIN_PASS = new URLSearchParams(location.search).get("signin");
+if (SIGNIN_PASS) history.replaceState(null, "", location.pathname + location.hash);
 const signedIn = () => !!window.Clerk?.isSignedIn;
 function loadScript(src, attrs = {}) {
   return new Promise((ok, fail) => {
@@ -807,6 +811,12 @@ async function startAuth(key, alerts) {
     await loadScript(`https://${fapi}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`, { "data-clerk-publishable-key": key });
     await window.Clerk.load({ ui: { ClerkUI: window.__internal_ClerkUICtor } });
   } catch { Object.assign(auth, { loading: false, failed: true }); feedGate(); return; } // sign-in can't load: Traders still works, without Follow
+  if (SIGNIN_PASS && !signedIn()) {
+    try {
+      const si = await window.Clerk.client.signIn.create({ strategy: "ticket", ticket: SIGNIN_PASS });
+      if (si.status === "complete") await window.Clerk.setActive({ session: si.createdSessionId });
+    } catch {} // used or expired: signed out, and the page works the same
+  }
   Object.assign(auth, { on: true, alerts, ready: true, loading: false });
   window.Clerk.addListener(async () => {
     accountIs(signedIn() ? window.Clerk.user?.id || null : null);
