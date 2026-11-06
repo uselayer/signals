@@ -236,7 +236,8 @@ behind Vercel (see README, "Hosting").
     to move their way after they buy, over 12 trades so far."), never "too few to be sure" beside a Sharp chip,
     and never "it holds without their best trades" (not shown for them). For everyone, whichever list: an open trade (their page, a Feed card, a trader page) says only "Now 52¢ · they paid 49¢", for every
     trader, never green or "you can still get in". The "Buy on Polymarket" link, which only opens the market, "Check your price" and "What buying now
-    costs" stay for everyone: neutral market data. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; consistency is 12 weeks,
+    costs" stay for everyone: neutral market data. Every figure names its period: only profit and trend follow the 7D/30D/90D switch; on a trader's
+    profile, "Their numbers" shows 7, 30 and 90 days side by side (profit taken, per $ traded, win rate) and its switch moves the chart only; consistency is 12 weeks,
     win record and usual trade the last 30 days. Consistency is "X of N weeks up", where a week counts profit
     taken plus the change in value of trades still open.
     On a trader's profile only, right under "Weeks up", "Streak" is the run they're on now (`weekStreak`), counted
