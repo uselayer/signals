@@ -439,6 +439,16 @@
   .pf-hero > span { display: block; font-size: 13px; color: var(--muted); }
   .pf-hero b { display: block; font-size: 34px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; margin-top: 2px; }
   .pf-hero small { font-size: 13px; color: var(--muted); }
+  /* Their numbers over 7, 30 and 90 days side by side: no switching to compare a trader's week with their quarter */
+  .pf-per { width: 100%; border-collapse: collapse; margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
+  .pf-per th, .pf-per td { padding: 9px 0 9px 8px; text-align: right; white-space: nowrap; vertical-align: top; }
+  .pf-per thead th { font-size: 13px; font-weight: 500; color: var(--muted); padding-top: 2px; }
+  .pf-per tbody tr { border-top: 1px solid var(--line); }
+  .pf-per tbody th { text-align: left; padding-left: 0; font-size: 13px; font-weight: 400; color: var(--muted); white-space: normal; }
+  .pf-per td b { font-weight: 500; font-size: 15px; }
+  .pf-per tr.pf-per-lead td b { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .pf-per td small { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .pf-per-note { display: block; font-size: 13px; color: var(--muted); margin: 2px 0 6px; }
   .pf-det h3, .fold h3.pf-more { font-size: 13px; font-weight: 600; margin: 20px 0 0; }
   .pf-rows { margin: 0; font-size: 14px; }
   .pf-rows div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 9px 0; border-bottom: 1px solid var(--line); }
@@ -2730,8 +2740,8 @@ function bindRefresh() {
 }
 // The new record in place of the saved one: the same page redrawn, each figure that changed glowing once.
 function swapRecord(s) {
-  const app = $("#app"), figures = () => new Map($$(".pf-hero, .pf-rows > div", app).map((el) =>
-    [el.querySelector("span, dt")?.firstChild?.textContent || "", el]));
+  const app = $("#app"), figures = () => new Map($$(".pf-hero, .pf-rows > div, .pf-per td[data-fig]", app).map((el) =>
+    [el.dataset.fig || el.querySelector("span, dt")?.firstChild?.textContent || "", el]));
   const before = new Map([...figures()].map(([k, el]) => [k, el.querySelector("b, dd")?.textContent]));
   pf.s = s;
   renderProfile();
@@ -2778,7 +2788,8 @@ const WARN_ICON = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" st
 // trader profile audit's ("Trader profile layout and definitions"); the layout draws whatever comes back.
 // A row is { k: its label, v: the value (html; null: no row, never 0), sub: what it's based on and its period,
 // weeks: their weekly results for the bars }. `summary` sits at the top (on a phone, before the chart), `groups`
-// below it, `fold` in "How we measure this". Only the hero (realized P&L) and the chart follow 7D/30D/90D.
+// below it, `fold` in "How we measure this". `periods` is the 7/30/90-day table that leads the card when the score
+// has periods (else the hero, realized P&L for the period picked); the chart follows 7D/30D/90D.
 // The worst drop from a high is the score's (uselayer 0.14's worst_drop, from every hourly point, so the hour the
 // score was made doesn't set it); a score kept before 0.14 has none and no row.
 // Left out: the last closed positions' won/lost/sold record, the share held until the market settles, and "Made money
@@ -2849,6 +2860,10 @@ function profileNumbers(s, d, acct, n) {
     hero: { k: `Realized P&L, ${P}`, v: money(realized),
       sub: `${started ? `taken since their first trade, ${ago(started)}` : `taken in the last ${P}`}${
         allRealized != null ? ` · ${usd(allRealized, true)} all time` : loading ? " · all time …" : ""} · after fees` },
+    periods: periodRows(s),
+    // under the 7/30/90 table: after fees, all time, and when a period reaches back before their first trade
+    periodsNote: `After fees${allRealized != null ? ` · ${usd(allRealized, true)} taken all time` : loading ? " · all time …" : ""}${
+      s.pnl_since && Date.now() - new Date(s.pnl_since) < PERIOD_DAYS["90d"] * 864e5 ? ` · first trade ${ago(s.pnl_since)}` : ""}`,
     summary: [
       { k: "Open P&L", v: loading ? "…" : openPnl != null ? money(openPnl) ?? usd(0) : null,
         sub: loading ? "reading their positions" : !held ? "their positions couldn't be read just now"
@@ -2893,18 +2908,44 @@ function profileNumbers(s, d, acct, n) {
     ],
   };
 }
+// Their numbers over 7, 30 and 90 days side by side (5 Nov: a user switched 7D/30D/90D ~34 times to compare a
+// trader's week with their month and quarter). Each row is { k, cells: one per period, html or null }; a row with
+// nothing in any period isn't drawn. A cell that wasn't read says so faintly, never 0. Win rate needs WIN_MIN closed
+// positions in that period, else "too few".
+const hasPeriods = (s) => !!s.periods && Object.keys(PF_PERIOD).some((n) => s.periods[n]);
+function periodRows(s) {
+  if (!hasPeriods(s)) return null;
+  const P = Object.keys(PF_PERIOD), at = (n) => s.periods[n] || {};
+  const money = (x) => x == null ? null : pl(x, usd(x, true));
+  const realized = (n) => at(n).realized ?? (n === "30d" ? s.realized_window : null) ?? null;
+  const win = (n) => { const w = s.win?.[n]; return !w || !w.closed ? null : w.closed < WIN_MIN ? `<span class="lb-none">too few</span><small>${w.closed} closed</small>`
+    : `${Math.round((100 * w.won) / w.closed)}%<small>${w.won} of ${w.closed}</small>`; };
+  return [
+    { k: "Profit taken", lead: true, cells: P.map((n) => money(realized(n))) },
+    { k: "Per $ traded", cells: P.map((n) => at(n).return_per_dollar != null ? pl(at(n).return_per_dollar, lbPct(at(n).return_per_dollar)) : null) },
+    { k: WIN_LABEL, cells: P.map(win) },
+  ].filter((r) => r.cells.some((c) => c != null));
+}
+function periodTable(nums) {
+  const P = Object.keys(PF_PERIOD);
+  return `<table class="pf-per"><thead><tr><td></td>${P.map((n) => `<th scope="col">${PF_PERIOD[n]}</th>`).join("")}</tr></thead><tbody>
+    ${nums.periods.map((r) => `<tr${r.lead ? ' class="pf-per-lead"' : ""}><th scope="row">${esc(r.k)}</th>${r.cells.map((c, i) =>
+      `<td data-fig="${esc(r.k)} ${P[i]}"><b>${c ?? '<span class="lb-none">not read</span>'}</b></td>`).join("")}</tr>`).join("")}
+  </tbody></table><small class="pf-per-note">${esc(nums.periodsNote)}</small>`;
+}
 // A track record's own rows (the Leaderboard's facts, s.record: the skill test off): win rate over the longest period
 // read in full up to 90 days, with the average price they paid beside it, and what they traded over 90 days. None
-// that wasn't read: no row, never 0.
+// that wasn't read: no row, never 0. With the 7/30/90 table above (periodRows), win rate and profit per $ traded are
+// there for every period, so they aren't repeated here.
 function recordRows(s) {
-  const w = s.win?.["90d"], p = s.periods?.["90d"] || {};
+  const w = s.win?.["90d"], p = s.periods?.["90d"] || {}, inTable = hasPeriods(s);
   const win = w && w.closed >= WIN_MIN ? `${Math.round((100 * w.won) / w.closed)}%` : null;
   return [
-    { k: WIN_LABEL, v: win, sub: w ? `${w.won} of ${w.closed} positions closed in profit (sold or settled), last ${w.days} days` : "" },
+    ...(inTable ? [] : [{ k: WIN_LABEL, v: win, sub: w ? `${w.won} of ${w.closed} positions closed in profit (sold or settled), last ${w.days} days` : "" }]),
     { k: "Average price paid", v: s.paid_30d != null ? cents(s.paid_30d) : null,
       sub: "last 30 days · the market's chance for what they bought, so about the win rate buying alone would give" },
     { k: "Traded", v: p.volume != null ? usd(p.volume) : null, sub: "last 90 days, bought and sold" },
-    { k: "Profit per $ traded", v: p.return_per_dollar != null ? pl(p.return_per_dollar, lbPct(p.return_per_dollar)) : null, sub: "last 90 days · trading profit over dollars traded" },
+    ...(inTable ? [] : [{ k: "Profit per $ traded", v: p.return_per_dollar != null ? pl(p.return_per_dollar, lbPct(p.return_per_dollar)) : null, sub: "last 90 days · trading profit over dollars traded" }]),
   ];
 }
 // "How we measure this" for a track record: what each figure is and where it comes from, no checks or tests.
@@ -3025,16 +3066,18 @@ function renderProfile() {
         <a class="link" href="#/watch/${esc(s.wallet)}" style="font-size:14px">What they hold and every change they make →</a></div></div>
     <div class="pf-grid">
       <section class="pf-card pf-sum" aria-label="Their numbers">
-        <div class="pf-card-head"><h2>Their numbers</h2>${period}</div>
-        <div class="pf-hero"><span>${esc(nums.hero.k)}</span><b>${nums.hero.v ?? "—"}</b><small>${esc(nums.hero.sub)}</small></div>
+        ${nums.periods ? `<div class="pf-card-head"><h2>Their numbers</h2></div>${periodTable(nums)}`
+          : `<div class="pf-card-head"><h2>Their numbers</h2>${period}</div>
+        <div class="pf-hero"><span>${esc(nums.hero.k)}</span><b>${nums.hero.v ?? "—"}</b><small>${esc(nums.hero.sub)}</small></div>`}
         <dl class="pf-rows">${numberRows(nums.summary)}</dl>
       </section>
-      <section class="pf-card pf-chart"><div class="pf-card-head"><h2>Trading profit, ${PF_PERIOD[n]}</h2></div>
+      <section class="pf-card pf-chart"><div class="pf-card-head"><h2>Trading profit, ${PF_PERIOD[n]}</h2>${nums.periods ? period : ""}</div>
         ${chart ? `${chart.svg}<div class="pf-legend"><span><i></i>Below their previous high</span>${worstDrop(s, n) ? `<span>Worst drop: ${worstDrop(s, n)}</span>` : ""}<span>Profit taken plus positions still open</span></div>`
           : `<p class="pf-empty">Their profit history isn't available yet.</p>`}</section>
       <section class="pf-card pf-det" aria-label="More of their numbers">
         ${nums.groups.map((g) => numberRows(g.rows)).map((h, i) => h ? `<h3>${esc(nums.groups[i].title)}</h3><dl class="pf-rows">${h}</dl>` : "").join("")}
-        ${s.periods ? `<p class="pf-statnote">Only realized P&L and the chart follow ${Object.keys(PF_PERIOD).map((p) => p.toUpperCase()).join("/")}. Every other figure names its own period.</p>` : ""}
+        ${nums.periods ? `<p class="pf-statnote">The table above shows 7, 30 and 90 days side by side; the chart follows ${Object.keys(PF_PERIOD).map((p) => p.toUpperCase()).join("/")}. Every other figure names its own period.</p>`
+          : s.periods ? `<p class="pf-statnote">Only realized P&L and the chart follow ${Object.keys(PF_PERIOD).map((p) => p.toUpperCase()).join("/")}. Every other figure names its own period.</p>` : ""}
       </section>
       <div class="pf-rest">
         ${s.record && !lastAt ? "" : `<section class="pf-card"><h2>${s.record ? "Lately" : "Why they're here"}</h2>

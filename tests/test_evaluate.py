@@ -164,7 +164,30 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
 
 
 NUMBERS = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "lbPct", "readDays", "readPeriod", "weeksUp",
-           "weeksOf", "weekStreak", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")  # fmt: skip
+           "weeksOf", "weekStreak", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "worstDrop", "WIN_LABEL", "WIN_MIN", "hasPeriods", "periodRows", "profileNumbers")  # fmt: skip
+
+
+def test_their_numbers_show_7_30_and_90_days_side_by_side(run_js: Any) -> None:
+    """5 Nov: a user switched 7D/30D/90D ~34 times to compare a trader's week with their month and quarter, so the
+    card shows all three at once: profit taken, profit per $ traded and win rate. Win rate needs WIN_MIN closed
+    positions in that period ("too few" below it); a period not read is null (drawn faintly, never 0); a row with
+    nothing in any period isn't drawn; a score without periods keeps the old single figure (no table)."""
+    s = {"periods": {"7d": {"realized": -1902517.75, "return_per_dollar": -0.26334},
+                     "30d": {"realized": 4379438.42, "return_per_dollar": 0.05648},
+                     "90d": {"realized": 1750919.01, "return_per_dollar": 0.00665}},
+         "win": {"7d": {"won": 72, "closed": 257, "days": 7}, "30d": {"won": 4, "closed": 6, "days": 30}}}  # fmt: skip
+    rows = run_js(NUMBERS, f"periodRows({json.dumps(s)})")
+    assert [r["k"] for r in rows] == ["Profit taken", "Per $ traded", "Win rate"]
+    taken, per, win = (r["cells"] for r in rows)
+    assert "loss" in taken[0] and "1.9M" in taken[0] and "gain" in taken[1] and "4.4M" in taken[1] and "1.8M" in taken[2]
+    assert "loss" in per[0] and "gain" in per[1]
+    assert win[0].startswith("28%") and "72 of 257" in win[0]
+    assert "too few" in win[1] and "6 closed" in win[1]  # 6 < WIN_MIN: no percentage
+    assert win[2] is None  # 90 days not read: no cell value, never 0%
+    only_profit = run_js(NUMBERS, "periodRows({periods: {'30d': {realized: 5}}})")
+    assert [r["k"] for r in only_profit] == ["Profit taken"]  # nothing in any period: no row
+    assert run_js(NUMBERS, "periodRows({})") is None
+    assert run_js(NUMBERS, "(() => { pf.account = {}; return profileNumbers({}, null, {}, '30d').periods; })()") is None
 
 
 def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_slot(run_js: Any) -> None:
@@ -428,7 +451,8 @@ def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: 
 
 
 PROFILE = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "readDays", "readPeriod", "weeksUp", "weeksOf",
-           "weekStreak", "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "worstDrop", "profileNumbers")
+           "weekStreak", "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "worstDrop", "lbPct",
+           "WIN_LABEL", "WIN_MIN", "hasPeriods", "periodRows", "profileNumbers")
 
 
 def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_own(run_js: Any) -> None:
