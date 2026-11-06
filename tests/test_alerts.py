@@ -41,7 +41,7 @@ class Telegram:
         if method == "sendMessage":
             self.sent.append(params)
             return {"message_id": len(self.sent)}
-        if method == "editMessageText":
+        if method in ("editMessageText", "editMessageReplyMarkup"):
             self.edits.append(params)
         if method == "answerCallbackQuery":
             self.answers.append(params)
@@ -1482,7 +1482,7 @@ def test_following_a_busy_trader_says_so_with_an_estimate_not_a_promise(api: Tes
     assert "That's an estimate from last week, not a promise of how many alerts you'll get." in m["text"]
     assert "At most 200 alerts a day in all." in m["text"]
     keys = [[(b["text"], b["callback_data"]) for b in row] for row in m["reply_markup"]["inline_keyboard"]]
-    assert keys == [[("Every trade", f"am:{SAM}:a"), ("Only trades over $2,000", f"am:{SAM}:o")],
+    assert keys == [[("✓ Every trade", f"am:{SAM}:a"), ("Only trades over $2,000", f"am:{SAM}:o")],
                     [("A summary every 6 hours", f"am:{SAM}:s")]]  # fmt: skip
 
 
@@ -1518,11 +1518,21 @@ def test_fewer_alerts_under_an_alert_offers_the_choices_and_a_tap_saves_one(api:
     _tap(f"few:{SAM}")
     text = engine.tg.sent[-1]["text"]
     assert text.startswith("From <b>Sam</b> you get every trade.") and "about 103 alerts a day" in text and "not a promise" in text
+
+    def ticked() -> list[str]:  # the buttons the last tap left on the message it was tapped on
+        edit = engine.tg.edits[-1]
+        assert (edit["chat_id"], edit["message_id"]) == ("555", 1)
+        return [b["text"] for row in edit["reply_markup"]["inline_keyboard"] for b in row]
+
     _tap(f"am:{SAM}:o")
     assert engine.tg.sent[-1]["text"] == "Done: from <b>Sam</b> you'll get only trades of $2,000 or more."
     assert engine._choice(engine._load_follows()["users"]["user_1"], SAM) == ("over", 2000.0)
+    assert ticked() == ["Every trade", "✓ Only trades over $2,000", "A summary every 6 hours"]  # the others aren't picked
     _tap(f"am:{SAM}:s")
     assert engine._choice(engine._load_follows()["users"]["user_1"], SAM) == ("summary", None)
+    assert ticked() == ["Every trade", "Only trades over $2,000", "✓ A summary every 6 hours"]
+    _tap(f"few:{SAM}")  # asked again: the choices show what they have now
+    assert [b["text"] for b in engine.tg.sent[-1]["reply_markup"]["inline_keyboard"][1]] == ["✓ A summary every 6 hours"]
     _tap(f"am:{SAM}:a")
     assert engine._choice(engine._load_follows()["users"]["user_1"], SAM) == ("all", None)
     n = len(engine.tg.sent)
