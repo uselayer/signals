@@ -1,0 +1,54 @@
+{
+  "sample": false,
+  "asOf": "Oct 22, 7:41 AM PT",
+  "league": "Europa League",
+  "kickoff": "Oct 22",
+  "venues": ["kalshi", "polymarket", "polymarket_us", "hyperliquid"],
+  "titles": {
+    "kalshi": "Bournemouth vs Milan — BOU vs ACM (Oct 22)",
+    "polymarket": "Will AFC Bournemouth win on 2026-10-22?",
+    "polymarket_us": "AFC Bournemouth vs. AC Milan",
+    "hyperliquid": "UEFA Europa League Matchday 3: Bournemouth AFC v AC Milan"
+  },
+  "kalshi": {
+    "rule": "…after 90 minutes plus stoppage time (does not include extra time or penalties)",
+    "mark": "90 minutes plus stoppage time"
+  },
+  "hyperliquid": {
+    "rule": "The Counted Play is regulation time, 90 minutes plus stoppage time.",
+    "mark": "90 minutes plus stoppage time"
+  },
+  "outcomes": [
+    { "kalshi": ["Bournemouth", 50, 51], "polymarket": ["AFC Bournemouth", 50, 51],
+      "polymarket_us": ["AFC Bournemouth (Reg. Time)", 50, 51], "hyperliquid": ["Bournemouth AFC", 50.07, 50.75] },
+    { "kalshi": ["Tie", 24, 25], "polymarket": ["Draw", 25, 26],
+      "polymarket_us": ["Tie (Reg. Time)", 24, 25], "hyperliquid": ["Draw", 24.91, 25.45] },
+    { "kalshi": ["Milan", 24, 25], "polymarket": ["AC Milan", 24, 25],
+      "polymarket_us": ["AC Milan (Reg. Time)", 24, 25], "hyperliquid": ["AC Milan", 24.14, 24.74] }
+  ],
+  "verdict": "same game on all four · identical · joined through Kalshi",
+  "code": [
+    "for venue in polymarket polymarket_us hyperliquid; do",
+    "  curl -G https://uselayer.sh/v0/matches \\",
+    "    -H \"Authorization: Bearer $LAYER_API_KEY\" \\",
+    "    -d venue=$venue -d q=bournemouth",
+    "done"
+  ],
+  "response": [
+    "// venue=polymarket",
+    "{ \"kalshi\": { \"market_id\": \"KXUELGAME-26OCT22BOUACM-TIE\" },",
+    "  \"polymarket\": { \"slug\": \"uel-bou-mil1-2026-10-22-draw\" },",
+    "  \"basis\": \"identical\", \"confidence\": 0.95, \"caveats\": [] }",
+    "// venue=polymarket_us",
+    "{ \"kalshi\": { \"market_id\": \"KXUELGAME-26OCT22BOUACM-TIE\" },",
+    "  \"polymarket_us\": {",
+    "    \"market_id\": \"atc-uel-bou-amc-2026-10-22-draw\" },",
+    "  \"basis\": \"identical\", \"confidence\": 0.97, \"caveats\": [] }",
+    "// venue=hyperliquid",
+    "{ \"kalshi\": { \"market_id\": \"KXUELGAME-26OCT22BOUACM-TIE\" },",
+    "  \"hyperliquid\": { \"market_id\": \"#141840\" },",
+    "  \"basis\": \"identical\", \"confidence\": 0.92, \"caveats\": [] }"
+  ],
+  "highlight": ["\"basis\""],
+  "leagues": ["NBA", "NFL", "Premier League", "La Liga", "Serie A", "Champions League", "Europa League", "LoL esports"]
+}
