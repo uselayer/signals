@@ -139,7 +139,11 @@ All optional.
 | `SIGNALS_SITE` | The site sign-ins must come from. Default `https://usesignals.app`. |
 | `TELEGRAM_BOT_TOKEN` | Turns on Telegram alerts. |
 | `SIGNALS_TG_LOGIN` | `1` makes an alert's "Check current price" a Telegram login button that opens it signed in. Off by default. |
-| `CLERK_SECRET_KEY` | Needed for that button: it makes the one-time sign-in. Nothing else uses it. |
+| `CLERK_SECRET_KEY` | Needed for that button (it makes the one-time sign-in) and for new sign-ups (it reads Clerk's newest users). |
+| `RESEND_API_KEY` | A send-only Resend key: the welcome note and the sign-up alert (`signals/welcome.py`). Nothing is emailed without it. |
+| `SIGNALS_WELCOME_FROM` | Turns on David's plain-text note to each new sign-up, an hour after they sign up, e.g. `David from Signals <david@uselayer.sh>`. |
+| `SIGNALS_ALERT_FROM` | Turns on the email to the owner about each new sign-up, e.g. `Signals alerts <alerts@uselayer.sh>`. |
+| `SIGNALS_SIGNUP_ALERT_TO` | Who gets that email. Default `pemakenemi56@gmail.com`. `SIGNALS_WELCOME_REPLY` is where replies to the note go (default `david@uselayer.sh`); `SIGNALS_OWNER_EMAILS` lists sign-ups never emailed (default the owner's). |
 | `OPENROUTER_API_KEY` | Turns on the AI sentence on watch pages. |
 | `SIGNALS_WHY_MODEL` | The model for it. Default `anthropic/claude-haiku-5.5`. |
 | `SIGNALS_WHY_DAILY` | At most this many AI calls a day. Default `3000` (about $0.15). |

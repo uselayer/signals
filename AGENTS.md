@@ -104,7 +104,7 @@ behind Vercel (see README, "Hosting").
 - Traders (the leaderboard, Top profit), trader pages and an alert's "Check your price" (`#/check`, `/api/bet`)
   need no account: Telegram opens alert links in its own browser, signed out, and people who follow from Telegram
   may have no account (5 Nov: Zach had to sign in again on two alert taps). With `SIGNALS_TG_LOGIN=1` (and
-  `CLERK_SECRET_KEY`, the one Clerk secret Signals holds, used only for this) an alert's "Check current price" is
+  `CLERK_SECRET_KEY`, the one Clerk secret Signals holds, also used to read new sign-ups for `signals/welcome.py`) an alert's "Check current price" is
   also a Telegram login button: `/tg/in` checks Telegram's signed data (our bot token, under 10 minutes old, used
   once) and signs in the account the tapper's chat is connected to, with a one-time Clerk pass the page uses and
   drops from the address. The tapper, never the alert's recipient, so a forwarded alert opens no one else's account;

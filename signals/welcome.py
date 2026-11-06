@@ -279,11 +279,29 @@ def _note_status(s: SignUp, note: str | None, note_from: str) -> str:
     return f"Note: goes out automatically around {pt(s.created_at + NOTE_AFTER_S)}, an hour after sign-up."
 
 
-def preview(to: str, *, follows: int = 0, telegram: bool = False, site: str = "https://usesignals.app",
-            env: dict[str, str] | None = None) -> bool:
-    """One note to ``to`` exactly as a new user would get it (as 'Sam'), nothing recorded: for checking how it lands."""
+def preview(to: str, key: str, *, follows: int = 0, telegram: bool = False, site: str = "https://usesignals.app",
+            env: dict[str, str] | None = None) -> dict[str, bool]:
+    """One note and one sign-up alert to ``to``, exactly as they'd go for a new user 'Sam Lee' who picked Sports and
+    Crypto; nothing recorded. For checking how they land (python -m signals.welcome you@x.com)."""
     env = dict(os.environ) if env is None else env
-    key, note_from = env.get("RESEND_API_KEY", ""), env.get("SIGNALS_WELCOME_FROM", "David from Signals <david@uselayer.sh>")
-    payload = {"from": note_from, "to": [to], "reply_to": env.get("SIGNALS_WELCOME_REPLY", REPLY_DEFAULT),
-               "subject": SUBJECT, "text": note_text("Sam", follows, telegram, site)}  # fmt: skip
-    return resend_send(key)(payload, f"signals-note-preview-{datetime.now().timestamp()}") is True
+    send, stamp = resend_send(key), datetime.now().timestamp()
+    note_from = env.get("SIGNALS_WELCOME_FROM", "David from Signals <david@uselayer.sh>")
+    note = {"from": note_from, "to": [to], "reply_to": env.get("SIGNALS_WELCOME_REPLY", REPLY_DEFAULT),
+            "subject": SUBJECT, "text": note_text("Sam", follows, telegram, site)}  # fmt: skip
+    s = SignUp("user_preview", stamp - 120, "sam@example.com", "Sam", "Lee")
+    subject, text = alert_text(s, {"interests": ["Sports", "Crypto"], "follows": [], "chat": None}, _note_status(s, None, note_from))
+    alert = {"from": env.get("SIGNALS_ALERT_FROM", "Signals alerts <alerts@uselayer.sh>"), "to": [to],
+             "subject": f"(preview) {subject}", "text": text}  # fmt: skip
+    return {"note": send(note, f"signals-note-preview-{stamp}") is True,
+            "alert": send(alert, f"signals-alert-preview-{stamp}") is True}  # fmt: skip
+
+
+if __name__ == "__main__":  # python -m signals.welcome you@x.com  (RESEND_API_KEY, else the Keychain's resend_api_key)
+    import subprocess
+    import sys
+
+    key = os.environ.get("RESEND_API_KEY") or subprocess.run(
+        ["security", "find-generic-password", "-a", os.environ.get("USER", ""), "-s", "resend_api_key", "-w"],
+        capture_output=True, text=True,
+    ).stdout.strip()  # fmt: skip
+    print(preview(sys.argv[1], key))
