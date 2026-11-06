@@ -29,6 +29,7 @@ CAL = "0x" + "c3" * 20
 def board(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> Any:
     engine._cache.clear()
     engine._record_one.clear()
+    engine._record_failed.clear()
     monkeypatch.setattr(engine, "STORE_DIR", tmp_path)
     monkeypatch.setattr(engine, "SKILL_TEST", False)
     return engine.directory()
@@ -119,9 +120,74 @@ def test_a_record_read_before_it_kept_the_price_paid_is_read_again_on_a_traders_
     del old["paid_30d"]  # read by #166's code: no price paid, no profit taken by period, no worst drop
     board.keep_record(AMY, old)
     read: list[str] = []
-    monkeypatch.setattr(engine, "record_now", lambda w, request=None: read.append(w) or rec(600.0) | {"via": "read"})
-    got = TestClient(engine.app).get(f"/api/worth/{AMY}").json()
+
+    def now(w: str, request: Any = None) -> dict[str, Any]:
+        read.append(w)
+        engine._record_one[w] = rec(600.0) | {"via": "read"}  # as record_now keeps it
+        return engine._record_one[w]
+
+    monkeypatch.setattr(engine, "record_now", now)
+    api = TestClient(engine.app)
+    api.get(f"/api/worth/{AMY}")  # the older one at once, read again behind it
+    got = api.get(f"/api/worth/{AMY}", params={"wait": 1}).json()
     assert read == [AMY] and got["periods"]["30d"]["trading_pnl"] == 600 and got["paid_30d"] == 0.62
+    assert not {"refreshing", "refresh_failed"} & got.keys()
+
+
+def test_an_older_record_is_shown_at_once_and_the_page_waits_for_the_new_one_behind_it(board: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 5 Nov: 97% of the Leaderboard's top 1,000 were over 6 hours old, so nearly every trader page waited 6-20 s
+    old = time.time() - 3 * DAY
+    board.keep_record(AMY, rec(500.0, read_at=old), at=old)
+    gate, reads = threading.Event(), []
+
+    def slow(w: str, request: Any = None) -> dict[str, Any]:
+        reads.append(w)
+        gate.wait(5)
+        engine._record_one[w] = rec(700.0) | {"via": "read"}
+        return engine._record_one[w]
+
+    monkeypatch.setattr(engine, "record_now", slow)
+    monkeypatch.setattr(engine, "RECORD_WAIT_S", 0.05)
+    api = TestClient(engine.app)
+    t = time.monotonic()
+    got = api.get(f"/api/worth/{AMY}").json()
+    assert time.monotonic() - t < 1 and got["refreshing"] is True and got["stored_at"] == pytest.approx(old)
+    assert got["periods"]["30d"]["trading_pnl"] == 500  # the saved figures, said to be refreshing
+    still = api.get(f"/api/worth/{AMY}", params={"wait": 1}).json()
+    assert still["refreshing"] is True and reads == [AMY]  # waiting joins the read in flight, never starts another
+    inflight = engine._record_reads[AMY]
+    gate.set()
+    inflight.result(timeout=5)
+    new = api.get(f"/api/worth/{AMY}", params={"wait": 1}).json()
+    assert new["periods"]["30d"]["trading_pnl"] == 700 and "refreshing" not in new and reads == [AMY]
+
+
+def test_a_refresh_that_fails_says_why_and_only_try_again_reads_again(board: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    old = time.time() - 3 * DAY
+    board.keep_record(AMY, rec(500.0, read_at=old), at=old)
+    reads: list[str] = []
+    outcome: list[BaseException] = [HTTPException(429, detail="Lots of traders are being checked right now.")]
+
+    def now(w: str, request: Any = None) -> dict[str, Any]:
+        reads.append(w)
+        if outcome:
+            raise outcome[0]
+        engine._record_one[w] = rec(800.0) | {"via": "read"}
+        return engine._record_one[w]
+
+    monkeypatch.setattr(engine, "record_now", now)
+    api = TestClient(engine.app)
+    api.get(f"/api/worth/{AMY}")
+    busy = api.get(f"/api/worth/{AMY}", params={"wait": 1}).json()
+    assert busy["refresh_failed"] == "busy" and busy["periods"]["30d"]["trading_pnl"] == 500  # the saved one, never blank
+    assert api.get(f"/api/worth/{AMY}", params={"wait": 1}).json()["refresh_failed"] == "busy"
+    assert reads == [AMY]  # asking after a failure doesn't read again by itself
+    outcome[0] = RuntimeError("Polymarket answered 500")
+    assert api.get(f"/api/worth/{AMY}", params={"wait": 1, "retry": 1}).json()["refresh_failed"] == "failed"
+    outcome.clear()
+    got = api.get(f"/api/worth/{AMY}", params={"wait": 1, "retry": 1}).json()  # "Try again"
+    assert got["periods"]["30d"]["trading_pnl"] == 800 and not {"refreshing", "refresh_failed"} & got.keys()
+    assert reads == [AMY, AMY, AMY] and AMY not in engine._record_failed
 
 
 def test_when_a_record_cant_be_read_now_an_older_one_is_shown_with_when_it_was_read(board: Any, monkeypatch: pytest.MonkeyPatch) -> None:

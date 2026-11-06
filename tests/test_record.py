@@ -387,3 +387,65 @@ def test_the_profile_tabs_are_positions_and_recent_trades() -> None:
     assert '[["positions", "Positions"], ["activity", "Recent trades"]]' in page and '"Activity"]' not in page
     assert "See recent trades" in page and "See activity" not in page and " · profit after fees" in page
     assert "REALIZED_CATS.map((c) => [c, catLabel(c)])" in page  # the picker reads "Other markets" too
+
+
+# ---- a saved record shown at once while a new one is read (record_page's refresh) ----
+REFRESH = ("followRefresh", "REFRESH_RETRIES", "REFRESH_MAX_ASKS", "onVisit", "refreshNote")
+# The page's own: an `api` that answers in turn, timers kept rather than run, and what the header said each time.
+REFRESH_WORLD = """
+globalThis.location = { hash: "#/worth/0xa" };
+const visit = {};
+globalThis.pf = { visit, retries: 0, refresh: null };
+const asked = [], said = [], timers = [], swapped = [];
+let answers = [];
+globalThis.api = async (path) => { asked.push(path); const a = answers.shift(); if (a instanceof Error) throw a; return a; };
+globalThis.drawRefresh = () => said.push(pf.refresh);
+globalThis.swapRecord = (s) => swapped.push(s);
+globalThis.setTimeout = (fn, ms) => { timers.push([fn, ms]); return timers.length; };
+globalThis.clearTimeout = () => {};
+"""
+
+
+def test_a_refreshing_record_is_followed_until_the_new_one_replaces_it(run_js: Any) -> None:
+    got = run_js(REFRESH, f"""(async () => {{ {REFRESH_WORLD}
+      answers = [{{ refreshing: true }}, {{ refreshing: true }}, {{ refreshing: true }}, {{ wallet: "0xa", periods: {{}} }}];
+      await followRefresh("0xa", visit, {{ refreshing: true }});
+      return {{ asked, said, swapped, refresh: pf.refresh, timers: timers.length }};
+    }})()""")
+    assert got["asked"] == ["/api/worth/0xa?wait=1"] * 4  # waits on the read in flight; never asks for another
+    assert got["said"] == ["running", "running", "slow", "slow"]  # "Still refreshing" once it's taking a while
+    assert got["swapped"] == [{"wallet": "0xa", "periods": {}}] and got["refresh"] is None and got["timers"] == 0
+
+
+def test_a_failed_refresh_says_why_tries_twice_more_by_itself_then_stops(run_js: Any) -> None:
+    got = run_js(REFRESH, f"""(async () => {{ {REFRESH_WORLD}
+      const states = [];
+      answers = [{{ refresh_failed: "busy" }}];
+      await followRefresh("0xa", visit, {{ refreshing: true }});
+      states.push([pf.refresh, timers.map((t) => t[1])]);
+      answers = [{{ refresh_failed: "failed" }}];
+      await timers[0][0]();  // 30 s later
+      states.push([pf.refresh, timers.map((t) => t[1])]);
+      answers = [Object.assign(new Error("Request failed (502)"), {{ status: 502 }})];
+      await timers[1][0]();  // 2 minutes after that
+      states.push([pf.refresh, timers.map((t) => t[1])]);
+      const note = refreshNote();
+      answers = [{{ wallet: "0xa" }}];
+      await followRefresh("0xa", visit, {{}}, true);  // "Try again"
+      return {{ states, asked, note, swapped }};
+    }})()""")
+    assert got["states"] == [["busy-retrying", [30000]], ["failed-retrying", [30000, 120000]], ["failed", [30000, 120000]]]
+    assert got["asked"] == ["/api/worth/0xa?wait=1", "/api/worth/0xa?wait=1&retry=1", "/api/worth/0xa?wait=1&retry=1",
+                            "/api/worth/0xa?wait=1&retry=1"]  # fmt: skip
+    assert "Couldn't refresh" in got["note"] and "Try again" in got["note"] and got["swapped"] == [{"wallet": "0xa"}]
+
+
+def test_a_refresh_that_lands_after_leaving_the_page_changes_nothing(run_js: Any) -> None:
+    got = run_js(REFRESH, f"""(async () => {{ {REFRESH_WORLD}
+      answers = [{{ wallet: "0xa" }}];
+      const p = followRefresh("0xa", visit, {{ refreshing: true }});
+      location.hash = "#/traders";
+      await p;
+      return {{ swapped, refresh: pf.refresh }};
+    }})()""")
+    assert got == {"swapped": [], "refresh": "running"}
