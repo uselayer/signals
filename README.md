@@ -54,7 +54,7 @@ market (each trader's main category). Accounts with under 4 weeks of history are
 new accounts**. Search by name or wallet; a wallet that isn't listed still opens its own page.
 
 Records come from Polymarket's profit history, their positions closed and their latest trades, read again every 2
-days. **Top profit** (linked at the foot) is Polymarket's own leaderboard.
+days; the top 300 by 30-day profit, each market's top 100 and everyone followed, every 4 hours. **Top profit** (linked at the foot) is Polymarket's own leaderboard.
 
 ### A trader's profile
 
@@ -130,6 +130,8 @@ All optional.
 | `SIGNALS_STORE_DIR` | Where data is kept. Default `~/.uselayer/signals`. |
 | `SIGNALS_EVALUATE` | `1` reads each found wallet's track record for the leaderboard. Off by default. |
 | `SIGNALS_DIRECTORY` | `0` stops the daily search for new wallets. On by default. |
+| `SIGNALS_BOARD_FRESH_TOP` | How many of the leaderboard's top traders (by 30-day profit, plus each market's top 100 and everyone followed) get their record read again ahead of everyone else, so their pages open on a fresh one. Default `300`; `0` turns it off. |
+| `SIGNALS_BOARD_FRESH_HOURS` | How old their records get before that. Default `4`. |
 | `SIGNALS_BACKGROUND_RATE` | Polymarket reads a second for the background work above. Default `4`. |
 | `SIGNALS_CHECK_RATE` | Polymarket reads a second for reading a trader on the spot. Default `3`. |
 | `SIGNALS_VENUES` | `polymarket,kalshi` adds Kalshi traders. Default `polymarket`. |

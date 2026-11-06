@@ -95,9 +95,10 @@ REASON_LABELS = {
 # once "too_few" or "no_edge".
 # what kept a score: the Worth following check, a trader page, the import, the background evaluation
 VIA = ("check", "page", "import", "background")
-# what ``due`` hands out, in that order: a recommended trader people are shown (``presented``), any other
-# recommended trader, a wallet never looked at, the rest (``new_first`` puts new ones before other recommended)
-KINDS = ("presented", "recommended", "new", "recheck", "board")
+# what ``due`` hands out (``due`` says in what order): a recommended trader people are shown (``presented``), any
+# other recommended trader, a wallet never looked at, the rest, a copied record the Leaderboard waits on (``board``),
+# and the top of the Leaderboard or a followed trader whose record is getting old (``top``)
+KINDS = ("presented", "recommended", "new", "recheck", "board", "top")
 SAMPLE_KEEP = 30  # checked bets kept with a score, as the Worth following check keeps them
 
 SCORE_DAYS = 30  # the window a score reads, as the Worth following check and a trader page score
@@ -221,13 +222,25 @@ _RECOMMENDED_SQL = ", ".join(f"'{s}'" for s in RECOMMENDED)
 # (``_complete``), so these come right after the traders people are shown, the most profit over 30 days first.
 _BOARD_UNREAD = """listed = 1 AND EXISTS (SELECT 1 FROM records r WHERE r.wallet = wallets.wallet AND r.via = 'score'
   AND r.last_buy >= :board_after)"""
+# ``top``: one of the wallets the Leaderboard shows first or someone follows (``due``'s ``top``, :top), due again
+# once it was last looked at TOP_FRESH_S ago (:top_before), so the record its page opens on is a few hours old at most.
+# Bounded (a few hundred), so it comes before everything but the traders people are shown.
+_TOP = "SELECT value FROM json_each(:top)"
 _KIND = f"""CASE WHEN status IN ('scored', 'failed') AND wallet IN (SELECT wallet FROM temp.presented_now) THEN 0
+  WHEN wallet IN ({_TOP}) THEN 5
   WHEN {_BOARD_UNREAD} THEN 4
   WHEN segment IN ({_RECOMMENDED_SQL}) AND status IN ('scored', 'failed') THEN 1
   WHEN status = 'found' THEN 2 ELSE 3 END"""
-# A trader people are shown is due once its score is PRESENTED_RESCORE_S old, whatever next_check says.
+# A trader people are shown is due once its score is PRESENTED_RESCORE_S old, and one of ``top`` once it was last
+# looked at (its record read, or a quick check or a failed try) before :top_before, whatever next_check says.
 _DUE = f"""(next_check <= :now OR (status = 'scored' AND scored_at <= :now - {PRESENTED_RESCORE_S}
-  AND wallet IN (SELECT wallet FROM temp.presented_now)))"""
+  AND wallet IN (SELECT wallet FROM temp.presented_now))
+  OR (COALESCE(tried_at, 0) <= :top_before AND wallet IN ({_TOP})))"""
+
+
+def _top_args(top: Iterable[str], now: float, fresh_s: float) -> dict[str, Any]:
+    """``_KIND``'s and ``_DUE``'s :top (``due``'s ``top``, in lower case) and :top_before."""
+    return {"top": json.dumps(sorted({w.lower() for w in top})), "top_before": now - fresh_s}
 
 
 def fresh_for(presented: bool) -> float:
@@ -362,6 +375,11 @@ def quick_look(trades: list[tuple[Any, ...]], now: float, read_all: bool,
 # The Leaderboard (``Directory.leaderboard``): every public wallet with a track record, active lately, ranked by what
 # they did. Facts only: no tier, no verdict, nothing about whether they'll make money next.
 RECORD_REFRESH_S = 2 * 86400  # a wallet's record is read again this often (a quick check first: inactive ones drop out)
+# ...but the wallets the Leaderboard shows first, and followed ones (``due``'s ``top``), this often: a trader's page
+# shows a record read within 6 hours as it is (app.RECORD_PAGE_FRESH_S), and reads one now otherwise (seconds to
+# minutes). With the whole directory on one budget, a wallet due every 2 days waited about a week (5 Nov: 97% of the
+# top 1,000 by 30-day profit over 6 hours old, 40% over a week), so nearly every profile opened read one now.
+TOP_FRESH_S = 4 * 3600
 BOARD_PERIODS = ("7d", "30d", "90d", "all")
 BOARD_SORTS = ("profit", "return", "win", "volume", "weeks")
 BOARD_ACTIVE_DAYS = 30  # listed with a buy in the last 30 days
@@ -831,33 +849,35 @@ class Directory:
         con.execute("DELETE FROM temp.presented_now")
         con.executemany("INSERT OR IGNORE INTO temp.presented_now VALUES (?)", [(w.lower(),) for w in presented])
 
-    def due(self, limit: int, now: float | None = None, *, presented: Iterable[str] = (),
-            new_first: bool = False) -> list[dict[str, Any]]:  # fmt: skip
+    def due(self, limit: int, now: float | None = None, *, presented: Iterable[str] = (), new_first: bool = False,
+            top: Iterable[str] = (), top_fresh_s: float = TOP_FRESH_S) -> list[dict[str, Any]]:  # fmt: skip
         """Up to ``limit`` wallets due a look, in the order to take them: recommended traders people are shown
-        (``presented``: due once their score is PRESENTED_RESCORE_S old), wallets the Leaderboard waits on to read
-        (``board``: the most profit over 30 days first), any other recommended trader (once a day), wallets never
-        looked at (newest found first), then the rest (as each comes due); most overdue first.
+        (``presented``: due once their score is PRESENTED_RESCORE_S old), the wallets the Leaderboard shows first and
+        followed ones (``top``, from ``board_top``: due once last looked at ``top_fresh_s`` ago, the most profit over
+        30 days first), wallets the Leaderboard waits on to read (``board``: the most profit over 30 days first), any
+        other recommended trader (once a day), wallets never looked at (newest found first), then the rest (as each
+        comes due); most overdue first.
         ``new_first``: wallets never looked at before other recommended traders (the evaluation's reserve, so the
         rest of the directory keeps being checked). Within each, the categories take turns (a wallet's from its
         score, else where it was first seen), so no category waits behind a bigger one. Each with its ``kind`` (one
         of KINDS), ``status``, ``scored_at``, ``category``, ``name``, and ``on_leaderboard`` as the Worth following
         check would pass it."""
         now = time.time() if now is None else now
-        # presented, board, then recommended and new (new first with ``new_first``), then recheck
-        rank = ("CASE kind WHEN 0 THEN 0 WHEN 4 THEN 1 WHEN 2 THEN 2 WHEN 1 THEN 3 ELSE 4 END" if new_first
-                else "CASE kind WHEN 0 THEN 0 WHEN 4 THEN 1 WHEN 1 THEN 2 WHEN 2 THEN 3 ELSE 4 END")  # fmt: skip
+        # presented, top, board, then recommended and new (new first with ``new_first``), then recheck
+        rank = ("CASE kind WHEN 0 THEN 0 WHEN 5 THEN 1 WHEN 4 THEN 2 WHEN 2 THEN 3 WHEN 1 THEN 4 ELSE 5 END" if new_first
+                else "CASE kind WHEN 0 THEN 0 WHEN 5 THEN 1 WHEN 4 THEN 2 WHEN 1 THEN 3 WHEN 2 THEN 4 ELSE 5 END")  # fmt: skip
         with self._db() as con:
             self._presented(con, presented)
             rows = con.execute(
                 f"""SELECT wallet, kind, cat, status, scored_at, name, {_LISTED.replace("?", ":listed_after")} FROM (
                   SELECT *, ROW_NUMBER() OVER (PARTITION BY kind, cat ORDER BY CASE WHEN kind = 2 THEN -first_seen
-                    WHEN kind = 4 THEN -COALESCE(pnl_30d, 0) ELSE next_check END, wallet) AS turn
+                    WHEN kind IN (4, 5) THEN -COALESCE(pnl_30d, 0) ELSE next_check END, wallet) AS turn
                   FROM (SELECT wallet, status, scored_at, name, first_seen, next_check, {_KIND} AS kind,
                     (SELECT r.pnl_30d FROM records r WHERE r.wallet = wallets.wallet) AS pnl_30d,
                     COALESCE(category, seen_category, 'Other') AS cat FROM wallets WHERE {_DUE})) q
                 ORDER BY {rank}, turn, cat LIMIT :limit""",
                 {"listed_after": now - LISTED_FRESH_S, "now": now, "limit": limit,
-                 "board_after": now - BOARD_ACTIVE_DAYS * 86400},
+                 "board_after": now - BOARD_ACTIVE_DAYS * 86400, **_top_args(top, now, top_fresh_s)},
             ).fetchall()
         return [{"wallet": w, "kind": KINDS[k], "category": c, "status": st, "scored_at": at, "name": n,
                  "on_leaderboard": bool(b)} for w, k, c, st, at, n, b in rows]  # fmt: skip
@@ -869,13 +889,15 @@ class Directory:
                 "SELECT MAX(last_seen) FROM sightings WHERE source = 'leaderboard' AND place = 'PNL MONTH OVERALL'"
             ).fetchone()[0]
 
-    def due_counts(self, now: float | None = None, presented: Iterable[str] = ()) -> dict[str, int]:
+    def due_counts(self, now: float | None = None, presented: Iterable[str] = (), top: Iterable[str] = (),
+                   top_fresh_s: float = TOP_FRESH_S) -> dict[str, int]:  # fmt: skip
         """How many wallets are due a look now, by kind."""
         now = time.time() if now is None else now
         with self._db() as con:
             self._presented(con, presented)
             got = dict(con.execute(f"SELECT {_KIND}, COUNT(*) FROM wallets WHERE {_DUE} GROUP BY 1",
-                                   {"now": now, "board_after": now - BOARD_ACTIVE_DAYS * 86400}))  # fmt: skip
+                                   {"now": now, "board_after": now - BOARD_ACTIVE_DAYS * 86400,
+                                    **_top_args(top, now, top_fresh_s)}))  # fmt: skip
         return {k: got.get(i, 0) for i, k in enumerate(KINDS)}
 
     @staticmethod
@@ -1363,6 +1385,28 @@ class Directory:
                 {"now": now, "board_after": now - BOARD_ACTIVE_DAYS * 86400},
             ).rowcount
 
+    def board_top(self, n: int, per_category: int = 0, categories: Iterable[str] = (),
+                  now: float | None = None) -> list[str]:  # fmt: skip
+        """The wallets the Leaderboard lists first by profit over 30 days (its default order, ranked and filtered as
+        ``leaderboard`` does, new accounts left out): its first ``n``, and the first ``per_category`` of each of
+        ``categories`` (the page's market chips). For ``due``'s ``top``. Reads directory.db only."""
+        now = time.time() if now is None else now
+        cat = "COALESCE(w.category, w.seen_category)"
+        order = "r.pnl_30d DESC NULLS LAST, r.wallet"
+        with self._read() as con:
+            rows = con.execute(
+                f"""SELECT wallet FROM (SELECT r.wallet, {cat} AS cat, ROW_NUMBER() OVER (ORDER BY {order}) AS overall,
+                  ROW_NUMBER() OVER (PARTITION BY {cat} ORDER BY {order}) AS in_cat
+                  FROM records r JOIN wallets w ON w.wallet = r.wallet WHERE {_PUBLIC} AND r.last_buy >= :active
+                  AND (r.closed_90d IS NULL OR r.closed_90d >= {BOARD_MIN_CLOSED}) AND NOT {_NEW_ACCOUNT}
+                  AND {_complete("30d")})
+                WHERE overall <= :n OR (in_cat <= :per AND cat IN (SELECT value FROM json_each(:cats)))
+                ORDER BY overall""",
+                {"active": now - BOARD_ACTIVE_DAYS * 86400, "n": n, "per": per_category,
+                 "cats": json.dumps(list(categories))},
+            ).fetchall()  # fmt: skip
+        return [w for (w,) in rows]
+
     def record(self, wallet: str) -> dict[str, Any] | None:
         """A wallet's latest track record as kept, with ``via``; None if it has none."""
         with self._db() as con:
@@ -1461,7 +1505,8 @@ class Directory:
         finally:
             con.close()
 
-    def monitoring(self, presented: Iterable[str] = (), days: int = 14, now: float | None = None) -> dict[str, Any]:
+    def monitoring(self, presented: Iterable[str] = (), days: int = 14, now: float | None = None,
+                   top: Iterable[str] = (), top_fresh_s: float = TOP_FRESH_S) -> dict[str, Any]:  # fmt: skip
         """Everything the directory can say about how discovery is going, over the last ``days`` UTC days (today
         included): the funnel (FUNNEL) overall, by category, by where wallets were found (and first found, and
         found only there; by leaderboard and best rank); each day's new wallets, scores and ``daily`` tallies; how
@@ -1472,7 +1517,7 @@ class Directory:
         shown = {w.lower() for w in presented}
         args = {"fresh": now - PASSED_FRESH_S, "now": now, "first_day": first_day, "presented": json.dumps(sorted(shown)),
                 "since": datetime.fromisoformat(first_day + "T00:00:00+00:00").timestamp(),
-                "board_after": now - BOARD_ACTIVE_DAYS * 86400}  # fmt: skip
+                "board_after": now - BOARD_ACTIVE_DAYS * 86400, **_top_args(top, now, top_fresh_s)}  # fmt: skip
         kind = _KIND.replace("SELECT wallet FROM temp.presented_now", "SELECT value FROM json_each(:presented)")
         due = _DUE.replace("SELECT wallet FROM temp.presented_now", "SELECT value FROM json_each(:presented)")
         with self._read() as con:
