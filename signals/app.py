@@ -56,7 +56,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import basket, monitoring, owner_alerts, records, us_match, watch, why
+from signals import basket, monitoring, owner_alerts, records, us_match, watch, welcome, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -1388,6 +1388,10 @@ def _monitor_loop() -> None:
             owner_check()
         except Exception as e:  # never the monitor's end: the next minute tries again
             print(f"owner alerts: the check failed: {type(e).__name__}: {e}", flush=True)
+        try:
+            welcome_check()
+        except Exception as e:  # never the monitor's end: the next minute tries again
+            print(f"welcome: the check failed: {type(e).__name__}", flush=True)
         if time.monotonic() - logged >= MONITOR_LOG_S:
             logged = time.monotonic()
             try:
@@ -1675,6 +1679,15 @@ def owner_check(now: float | None = None) -> None:
     scoring = (owner_alerts.scoring_problem(_evaluate_state["error"], _evaluate_state["error_since"], now)
                if EVALUATE_ON else None)  # fmt: skip
     _owner_watch.update("scoring", scoring, now)
+
+
+def welcome_check(now: float | None = None) -> dict[str, Any]:
+    """New sign-ups (signals/welcome.py): David's alert about each, and his note to each an hour after they sign up
+    (``_monitor_loop``, each minute; Clerk is asked every welcome.POLL_S). Off without CLERK_SECRET_KEY."""
+    now = time.time() if now is None else now
+    return welcome.check(
+        now, STORE_DIR, users_of=lambda uid: _load_follows()["users"].get(uid) or {}, site=SITE, owner_user=OWNER_USER
+    )
 
 
 @app.post("/api/owner-alerts/test")
@@ -3471,8 +3484,8 @@ SITE = os.environ.get("SIGNALS_SITE", "https://usesignals.app")
 # /tg/in who tapped it, signed with our bot token, and the account that chat is connected to is signed in there with a
 # one-time Clerk sign-in pass. Who tapped, never who it was sent to, so a forwarded alert signs no one into another's
 # account. Off unless SIGNALS_TG_LOGIN=1 (set it only once @BotFather → /setdomain links the bot to the site: until
-# then Telegram refuses every message with the button) and CLERK_SECRET_KEY is set (the one place a Clerk secret is
-# used: making those passes).
+# then Telegram refuses every message with the button) and CLERK_SECRET_KEY is set (it makes those passes; it also
+# reads new sign-ups for David's welcome note and sign-up alert, signals/welcome.py).
 CLERK_SECRET = os.environ.get("CLERK_SECRET_KEY", "")
 TG_LOGIN = os.environ.get("SIGNALS_TG_LOGIN", "") == "1"
 MAX_FOLLOWS = 20
