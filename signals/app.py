@@ -4051,10 +4051,10 @@ def _vote(chat: str, data: str) -> str | None:
     return "Noted: useful." if useful == "1" else "Noted: not useful."
 
 
-def _on_choice(chat: str, data: str) -> None:
+def _on_choice(chat: str, data: str, message_id: int | None = None) -> None:
     """"Fewer alerts" under an alert (``few:<wallet>``): what you get from that trader now, and the choices; a choice
-    (``am:<wallet>:a|o|s``: every trade, only trades over the suggested amount, a summary) saves it and says so. Only for
-    a trader the chat's account follows."""
+    (``am:<wallet>:a|o|s``: every trade, only trades over the suggested amount, a summary) saves it, ticks it on the
+    message it was tapped on (``message_id``) and says so. Only for a trader the chat's account follows."""
     uid = _chat_owner(chat)
     w = data.split(":")[1] if data.count(":") >= 1 else ""
     u = (_load_follows()["users"].get(uid) or {}) if uid else {}
@@ -4062,15 +4062,15 @@ def _on_choice(chat: str, data: str) -> None:
         return
     p = _pace(w)
     if data.startswith("few:"):
-        mode, usd = _choice(u, w)
-        lines = [f"From <b>{html.escape(_who(w))}</b> you get {_choice_words(mode, usd)}."]
+        have = _choice(u, w)
+        lines = [f"From <b>{html.escape(_who(w))}</b> you get {_choice_words(*have)}."]
         if p and p["per_day"] > BUSY_PER_DAY:
             lines.append(f"They made about {round(p['per_day']):,} alerts a day over the past week.")
         if p and p.get("usd"):
             lines.append(_estimate_line(p))
         lines.append("Choose what you want from them. Every trade stays in your Feed.")
         try:
-            _say(chat, "\n\n".join(lines), reply_markup=_choices_markup(w, p))
+            _say(chat, "\n\n".join(lines), reply_markup=_choices_markup(w, p, have))
         except RuntimeError:
             pass
         if p is None:
@@ -4082,6 +4082,11 @@ def _on_choice(chat: str, data: str) -> None:
         return
     usd = _rounded(p["usd"]) if mode == "over" and p else None  # the amount as suggested
     if _set_choice(uid, w, mode, usd) is not None:
+        if message_id is not None:  # the ✓ moves to what was picked, on the message it was picked on
+            try:
+                tg("editMessageReplyMarkup", chat_id=chat, message_id=message_id, reply_markup=_choices_markup(w, p, (mode, usd)))
+            except RuntimeError:
+                pass  # deleted, or the same ✓ already: the "Done" below says it either way
         try:
             _say(chat, f"Done: from <b>{html.escape(_who(w))}</b> you'll get {_choice_words(mode, usd)}.")
         except RuntimeError:
@@ -4111,7 +4116,7 @@ def _on_update(u: dict[str, Any]) -> None:
         except RuntimeError:
             pass
         if chat and data.startswith(("few:", "am:")):
-            _on_choice(chat, data)
+            _on_choice(chat, data, (cb.get("message") or {}).get("message_id"))
             return
         if chat and data.startswith("unf:"):
             w = data[4:]
@@ -4820,13 +4825,21 @@ def _estimate_line(p: dict[str, Any]) -> str:
             " day. That's an estimate from last week, not a promise of how many alerts you'll get.")  # fmt: skip
 
 
-def _choices_markup(trader: str, p: dict[str, Any] | None) -> dict[str, Any]:
+def _choices_markup(trader: str, p: dict[str, Any] | None, chosen: tuple[str, float | None] | None = None) -> dict[str, Any]:
     """The choices for one trader, as Telegram buttons (``am:<wallet>:a|o|s``); "only trades over" when there's an
-    amount to suggest."""
-    row = [{"text": "Every trade", "callback_data": f"am:{trader}:a"}]
+    amount to suggest. ``chosen`` (``_choice``) gets a ✓, so a tapped choice shows as picked where it was tapped
+    (owner, 5 Nov: the others looked just as picked); "only trades over" only at the amount on its button."""
+    over = _rounded(p["usd"]) if p and p.get("usd") else None
+    mode, usd = chosen or (None, None)
+    on = {"all": "a", "summary": "s"}.get(mode or "") or ("o" if mode == "over" and over is not None and usd == over else None)
+
+    def button(key: str, text: str) -> dict[str, str]:
+        return {"text": f"✓ {text}" if key == on else text, "callback_data": f"am:{trader}:{key}"}
+
+    row = [button("a", "Every trade")]
     if p and p.get("usd"):
-        row.append({"text": f"Only trades over {_about(p['usd'])}", "callback_data": f"am:{trader}:o"})
-    return {"inline_keyboard": [row, [{"text": f"A summary every {SUMMARY_S // 3600} hours", "callback_data": f"am:{trader}:s"}]]}
+        row.append(button("o", f"Only trades over {_about(p['usd'])}"))
+    return {"inline_keyboard": [row, [button("s", f"A summary every {SUMMARY_S // 3600} hours")]]}
 
 
 def _busy_text(trader: str, p: dict[str, Any]) -> str:
@@ -4858,7 +4871,7 @@ def _pace_after_follow(uid: str, trader: str) -> None:
     if p["per_day"] <= BUSY_PER_DAY or not u.get("chat") or trader not in (u.get("follows") or []):
         return
     try:
-        _say(u["chat"], _busy_text(trader, p), reply_markup=_choices_markup(trader, p))
+        _say(u["chat"], _busy_text(trader, p), reply_markup=_choices_markup(trader, p, _choice(u, trader)))
     except RuntimeError:
         pass
 
