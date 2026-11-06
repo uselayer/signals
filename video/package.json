@@ -12,7 +12,9 @@
     "render:schema": "remotion render OneSchema out/layer-one-schema.mp4",
     "render:every": "remotion render EveryVenue out/layer-every-venue.mp4 && remotion render EveryVenue out/layer-every-venue-silent.mp4 --props='{\"music\":false}'",
     "record:watchlist": "node scripts/record-watchlist.mjs",
-    "render:watchlist": "remotion render Watchlist out/signals-watchlist.mp4"
+    "record:starters": "node scripts/record-starters.mjs",
+    "render:watchlist": "remotion render Watchlist out/signals-watchlist.mp4",
+    "render:starters": "remotion render StarterBot out/layer-starter-bot.mp4"
   },
   "dependencies": {
     "@remotion/cli": "4.0.534",

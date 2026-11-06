@@ -1,0 +1,14 @@
+{
+  "recorded": "2026-11-06T07:57:21.335Z",
+  "frames": 683,
+  "events": {
+    "start": 0,
+    "summary": 2.311,
+    "rowStart": 4.228,
+    "rowSaved": 5.937,
+    "scroll": 7.353,
+    "run": 9.479,
+    "copied": 10.733,
+    "end": 12.794
+  }
+}
