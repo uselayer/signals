@@ -94,11 +94,12 @@ behind Vercel (see README, "Hosting").
   between the reads (`price_changed`) it says "Price changed—refresh quote", never that nothing is for sale;
   "Only $X is for sale" is only for an amount bigger than the book holds within the limit. Transparency over a
   quote that always succeeds.
-- Traders (the leaderboard, Top profit) and trader pages need no account; everything in the Feed (Following,
-  Top traders, Big trades, an alert's "Check your price") is behind signing in (Clerk: Google, or Telegram as a
-  custom OpenID Connect provider). Signed out, a Feed page is the sign-in page ("Sign in to see the Feed", Sign in,
-  Browse traders), and the engine refuses its reads (`feed_reader`: `/api/live`, `/api/trading-now`, `/api/bet`)
-  without a valid session. Without Clerk's key (running locally) nothing is gated. On a trader's page the Follow
+- Traders (the leaderboard, Top profit), trader pages and an alert's "Check your price" (`#/check`, `/api/bet`)
+  need no account: Telegram opens alert links in its own browser, signed out, and people who follow from Telegram
+  may have no account (5 Nov: Zach had to sign in again on two alert taps). Everything else in the Feed (Following,
+  Top traders, Big trades) is behind signing in (Clerk: Google, or Telegram as a custom OpenID Connect provider).
+  Signed out, a Feed page is the sign-in page ("Sign in to see the Feed", Sign in, Browse traders), and the engine
+  refuses its reads (`feed_reader`: `/api/live`, `/api/trading-now`) without a valid session. Without Clerk's key (running locally) nothing is gated. On a trader's page the Follow
   button says what you get ("Follow · get an alert after they trade"). Signed out, with alerts on, Follow needs no
   account (owner, 29 Oct: visitors left at the sign-in box): it opens Telegram with a one-time link that carries the
   trader (`/api/follow/telegram`), and Start there follows them with alerts on (`_follow_from_chat`): on the chat's

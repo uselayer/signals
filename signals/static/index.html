@@ -768,7 +768,7 @@ let exploreOn = false; // SIGNALS_EXPLORE: Traders' Explore tab (the directory)
 const kalshiOn = () => venuesOn.includes("kalshi");
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
 
-const SIGNED = /^\/api\/(me|live|trading-now|bet)(\/|\?|$)/;
+const SIGNED = /^\/api\/(me|live|trading-now)(\/|\?|$)/;
 async function api(path, opts = {}) {
   if (SIGNED.test(path)) { // your follows, and the Feed: sent with Clerk's short-lived session token
     const t = await window.Clerk?.session?.getToken().catch(() => null);
@@ -782,8 +782,8 @@ async function api(path, opts = {}) {
 const post = (path, body) => api(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 // ---- signing in (Clerk: Google or Telegram): for the Feed, and to follow traders ----
-// Traders, Top profit and trader pages need no account; the Feed (Following, Recommended, Big trades, an alert's
-// trade) is for signed-in people. Clerk loads only when the engine has a publishable key (/api/config), from the
+// Traders, Top profit, trader pages and an alert's trade need no account; the Feed (Following, Recommended, Big
+// trades) is for signed-in people. Clerk loads only when the engine has a publishable key (/api/config), from the
 // Frontend API the key names; without one (running locally) nothing is gated. `wanted`: the key names a Frontend
 // API, so the Feed waits for signing in. `me` is who you follow and whether Telegram alerts are connected.
 const auth = { wanted: false, on: false, alerts: false, ready: false, loading: false, failed: false, me: null, meErr: null, uid: null, then: null };
@@ -2622,13 +2622,22 @@ async function worthTraderPage(wallet) {
   const app = $("#app");
   const back = `<a class="back" href="#/traders">← Traders</a>`;
   app.innerHTML = `${back}<div class="pf-head">${avatar(wallet, 64)}<div class="grow"><div class="skel" style="width:40%;height:24px"></div><div class="skel" style="width:25%;height:14px;margin-top:10px"></div></div></div>
-    <p class="muted" style="margin-top:24px">${boardOn ? "Reading this trader's record (usually a few seconds)…" : "Checking this trader's trades (usually under a minute)…"}</p>`;
+    <p class="muted" id="pfwait" style="margin-top:24px">${boardOn ? "Reading this trader's record (usually a few seconds)…" : "Checking this trader's trades (usually under a minute)…"}</p>`;
   let s;
   const peek = exploreOn && exOpen === wallet; // opened from Explore: check only when asked ("Check now")
   exOpen = null;
   pf.from = peek ? "explore" : null;
-  try { s = await api(`/api/worth/${wallet}${peek ? "?score=0" : ""}`); } catch (e) { app.innerHTML = back + errorState(e.message); bindActions(app); return; }
-  if (location.hash !== `#/worth/${wallet}`) return;
+  // A busy trader's first read can take minutes: the engine answers "reading" after 20 s and keeps reading, so the
+  // page asks again (each ask waits up to 20 s) rather than one request outliving the proxy and failing.
+  for (let tries = 0; ; tries++) {
+    try { s = await api(`/api/worth/${wallet}${peek ? "?score=0" : ""}`); } catch (e) { app.innerHTML = back + errorState(e.message); bindActions(app); return; }
+    if (location.hash !== `#/worth/${wallet}`) return;
+    if (!s.reading) break;
+    if (tries >= 12) { app.innerHTML = back + errorState("This trader's history is taking unusually long to read. Try again in a few minutes."); bindActions(app); return; }
+    const p = $("#pfwait");
+    if (p) p.textContent = "Still reading. This trader has a long history, so the first read can take a minute or two.";
+    await new Promise((ok) => setTimeout(ok, 1000));
+  }
   if (s.unchecked) return renderUnchecked(s, wallet);
   Object.assign(pf, { s, detail: null, account: null, cats: null, tab: "positions", period: s.periods ? pf.period : "30d" });
   renderProfile();
@@ -3667,7 +3676,9 @@ function route() {
   $$("[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
   $("#app").classList.toggle("narrow", name === "traders:top" || !!t); // one width everywhere else, header included
   window.scrollTo(0, 0);
-  const gated = name.startsWith("feed") || !!check || name === "watchlist"; // the Feed's pages and the Watchlist: signed in only; the rest needs no account
+  // the Feed's pages and the Watchlist: signed in only; the rest needs no account, an alert's trade included (Telegram
+  // opens it in its own browser, signed out, and some who follow from Telegram have no account)
+  const gated = name.startsWith("feed") || name === "watchlist";
   const onboarding = interests === null && (name.startsWith("feed") || name === "traders:worth"); // first run; links to a trader skip it
   drawnGate = gated && !onboarding ? gateState() : null;
   if (onboarding) onboardingPage();

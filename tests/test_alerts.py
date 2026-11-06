@@ -342,8 +342,10 @@ def test_check_your_price_opens_that_one_trade(api: TestClient, monkeypatch: pyt
     fills = [trade(WHALE, at, 0.40, 400, "0xw:0", "1"), trade(WHALE, at, 0.50, 500, "0xw:0", "2")]
     live_reads(monkeypatch, lambda *a, **k: TraderDetail(
         Trader(venue="polymarket", id=WHALE, name="whaley"), "visible", {}, [WhalePosition("0xw:0", None, "Yes", 1, 0.45, 0.46, None, None)], fills))  # fmt: skip
-    b = api.get(f"/api/bet/{WHALE}/0xw:0", headers=auth()).json()  # the Feed's: signed in
+    b = api.get(f"/api/bet/{WHALE}/0xw:0", headers=auth()).json()  # signed in
     assert (b["name"], b["copy_ok"], b["status"], b["category"], b["usd"]) == ("whaley", False, "in", "Politics", 900)
+    # signed out too: Telegram opens the link in its own browser, and some who follow from Telegram have no account
+    assert api.get(f"/api/bet/{WHALE}/0xw:0").json()["usd"] == 900
     assert b["price"] == pytest.approx(900 / 2000)
     assert api.get(f"/api/bet/{WHALE}/0xnope:0", headers=auth()).status_code == 404
     assert api.get("/api/bet/0x12/0xw:0", headers=auth()).status_code == 400

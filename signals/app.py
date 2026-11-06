@@ -27,7 +27,8 @@ import urllib.parse
 import urllib.request
 from collections import Counter, deque
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -187,7 +188,7 @@ def venue_error(e: VenueError) -> HTTPException:
 
 
 def feed_reader(request: Request) -> None:
-    """The Feed (Recommended, Big trades, an alert's trade) is for signed-in people; Traders and trader pages need
+    """The Feed (Recommended, Big trades) is for signed-in people; Traders, trader pages and an alert's trade need
     no account. Without signing in switched on (running locally without Clerk's key) it's open like the rest."""
     if clerk_frontend_api(CLERK_KEY):
         _session(request, "Sign in to see the Feed.")
@@ -2376,6 +2377,13 @@ def _win_of(rec: dict[str, Any], period: str) -> dict[str, Any] | None:
 # failed) an older record is shown, with when it was read; with none, the page says why.
 RECORD_PAGE_FRESH_S = 6 * 3600
 _record_one: dict[str, dict[str, Any]] = {}  # records read for a page, kept here too: the writer keeps them later
+# A trader's page waits this long for a record read now. A busy trader's first read can take minutes (5 Nov:
+# HomeRunHazard's, 979 positions closed, ran past the 120 s the proxy in front waits, and the page said "Try again").
+# Past it the page gets an older record if there is one (said to be older), else "still reading" and it asks again;
+# the read carries on either way and is kept, so the next visit has it.
+RECORD_WAIT_S = 20
+_record_reads: dict[str, Future[dict[str, Any]]] = {}  # wallet → its record read in flight, one per wallet
+_record_reads_lock = threading.Lock()
 
 
 def _directory_name(wallet: str) -> str | None:
@@ -2417,6 +2425,28 @@ def record_now(w: str, request: Request | None = None) -> dict[str, Any]:
     return _on_the_spot(w, request, lambda: _fresh_record(_record_one.get(w), time.time()), work)  # type: ignore[no-any-return]
 
 
+def _record_read(w: str, request: Request | None) -> Future[dict[str, Any]]:
+    """``record_now`` for ``w`` on its own thread, so a page can stop waiting while the read carries on: the one in
+    flight if there is one, else a new one."""
+    with _record_reads_lock:
+        if (f := _record_reads.get(w)) is not None:
+            return f
+        f = _record_reads[w] = Future()
+
+    def run() -> None:
+        try:
+            f.set_result(record_now(w, request))
+        except BaseException as e:  # noqa: BLE001 - handed to whoever waits on it
+            f.set_exception(e)
+        finally:
+            with _record_reads_lock:
+                if _record_reads.get(w) is f:
+                    del _record_reads[w]
+
+    threading.Thread(target=run, name="record-read", daemon=True).start()
+    return f
+
+
 def record_page(w: str, request: Request | None = None) -> dict[str, Any]:
     """``/api/worth/{wallet}`` with the skill test off: the wallet's record as a trader's page shows it."""
     if not _WALLET.fullmatch(w):
@@ -2431,7 +2461,11 @@ def record_page(w: str, request: Request | None = None) -> dict[str, Any]:
         rec = _fresh_record(kept, now)
         if rec is None:
             try:
-                rec = record_now(w, request)
+                rec = _record_read(w, request).result(timeout=RECORD_WAIT_S)
+            except FutureTimeout:  # still reading: an older record, said to be older, else the page asks again
+                if kept is None:
+                    return {"wallet": w, "reading": True, "name": _directory_name(w)}
+                rec = kept
             except HTTPException:  # busy: an older record, said to be older, if there is one
                 if kept is None:
                     raise
@@ -2997,9 +3031,11 @@ def _sells_of(d: Any, who: dict[str, Any], since: datetime) -> list[dict[str, An
 
 
 @app.get("/api/bet/{wallet}/{market}")
-def one_bet(wallet: str, market: str, response: Response, _: None = Depends(feed_reader)) -> dict[str, Any]:
+def one_bet(wallet: str, market: str, response: Response) -> dict[str, Any]:
     """One trader's buy of one outcome, as a Feed card has it (status, price now, copy_ok): what an alert's
-    "Check current price" opens. From their last 100 trades; 404 when it isn't among them."""
+    "Check your price" opens. From their last 100 trades; 404 when it isn't among them. No account needed: alerts
+    reach people who follow from Telegram without one, and Telegram opens links in its own browser, signed out
+    (5 Nov: Zach signed in again on two alert taps)."""
     _private(response)
     w = wallet.lower()
     if not _WALLET.fullmatch(w):

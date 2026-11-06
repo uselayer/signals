@@ -4,6 +4,7 @@ are stand-ins)."""
 
 from __future__ import annotations
 
+import threading
 import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -135,6 +136,34 @@ def test_when_a_record_cant_be_read_now_an_older_one_is_shown_with_when_it_was_r
     assert got["record"] is True and got["stored_at"] == pytest.approx(old)
     assert TestClient(engine.app).get(f"/api/worth/{BEN}").status_code == 429  # nothing to show: says so
     assert TestClient(engine.app).get("/api/worth/not-a-wallet").status_code == 400
+
+
+def test_a_slow_read_never_holds_a_traders_page_past_the_wait(board: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 5 Nov: HomeRunHazard's first read ran past the proxy's 120 s and the page said "Try again"
+    old = time.time() - 3 * DAY
+    board.keep_record(AMY, rec(500.0, read_at=old), at=old)
+    gate = threading.Event()
+    reads: list[str] = []
+
+    def slow(w: str, request: Any = None) -> dict[str, Any]:
+        reads.append(w)
+        gate.wait(5)
+        engine._record_one[w] = rec(700.0) | {"via": "read"}  # as record_now keeps it
+        return engine._record_one[w]
+
+    monkeypatch.setattr(engine, "record_now", slow)
+    monkeypatch.setattr(engine, "RECORD_WAIT_S", 0.05)
+    api = TestClient(engine.app)
+    got = api.get(f"/api/worth/{AMY}").json()
+    assert got["record"] is True and got["stored_at"] == pytest.approx(old)  # the older one, said to be older
+    assert api.get(f"/api/worth/{BEN}").json() == {"wallet": BEN, "reading": True, "name": None}  # none: still reading
+    assert api.get(f"/api/worth/{BEN}").json()["reading"] is True
+    assert reads == [AMY, BEN]  # asking again waits on the read in flight, never starts another
+    inflight = engine._record_reads[BEN]
+    gate.set()
+    inflight.result(timeout=5)
+    assert api.get(f"/api/worth/{BEN}").json()["periods"]["30d"]["trading_pnl"] == 700  # kept: the next visit has it
+    assert reads == [AMY, BEN]
 
 
 # ---- alerts ----
