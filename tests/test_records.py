@@ -16,7 +16,7 @@ from uselayer import ProfitHistory
 
 from signals import app as engine
 from signals import records
-from signals.directory import BOARD_MIN_CLOSED, RECORD_REFRESH_S, Directory, Seen, record_of_score
+from signals.directory import BOARD_MIN_CLOSED, RECORD_REFRESH_S, Directory, Seen, quick_look, record_of_score
 
 DAY = 86400
 NOW = 1_800_000_000.0
@@ -24,6 +24,7 @@ AMY = "0x" + "a1" * 20
 BEN = "0x" + "b2" * 20
 CAL = "0x" + "c3" * 20
 DAN = "0x" + "d4" * 20
+EVE = "0x" + "e5" * 20
 
 
 def history(days: int, per_day: float, volume_per_day: float = 1000.0, now: float = NOW) -> ProfitHistory:
@@ -381,6 +382,51 @@ def test_traders_the_leaderboard_waits_on_are_read_next_the_most_profitable_firs
     assert [x["wallet"] for x in d.due(10, now=NOW + 3) if x["kind"] == "board"] == [AMY]
 
 
+def test_the_top_of_the_leaderboard_is_its_first_by_30_day_profit_overall_and_on_each_market_chip(d: Directory) -> None:
+    """``board_top``: ranked and filtered as the Leaderboard opens (30 days, by profit, new accounts left out, only
+    rows it lists in full), its first ``n``, and the first ``per_category`` of each chip asked for."""
+    sports = ["0x" + f"{i:02x}" * 20 for i in range(10, 13)]
+    d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in (AMY, BEN, CAL, DAN)]
+          + [Seen(w, "leaderboard", "PNL MONTH SPORTS", category="Sports") for w in sports] + [Seen(EVE, "search")])  # fmt: skip
+    for w, pnl in ((AMY, 900), (BEN, 800), (CAL, 700)):
+        d.keep_record(w, rec(pnl), at=NOW)
+    d.keep_record(DAN, rec(5000, weeks=(1, 1)), at=NOW)  # a new account: not on the list it opens on
+    d.keep_record(EVE, rec(9000), at=NOW)  # only searched for: never listed
+    for w, pnl in zip(sports, (300, 200, 100), strict=True):
+        d.keep_record(w, rec(pnl), at=NOW)
+    d.keep_record("0x" + "99" * 20, rec(10_000, won=None, closed=None), via="score", at=NOW)  # not listed yet
+    assert d.board_top(2, now=NOW) == [AMY, BEN]
+    assert d.board_top(2, 2, ["Sports", "Crypto"], now=NOW) == [AMY, BEN, sports[0], sports[1]]
+    assert d.board_top(0, 5, ["Sports"], now=NOW) == sports
+
+
+def test_the_top_of_the_leaderboard_is_read_again_once_its_record_is_a_few_hours_old_ahead_of_the_rest(d: Directory) -> None:
+    """``due``'s ``top``: due once last looked at ``top_fresh_s`` ago whatever their next look says (a record's is
+    2 days off), right after the traders people are shown and ahead of the records the Leaderboard waits on and
+    wallets never looked at, the most profit first. A read, a quick check or a failed try each count as a look, so
+    one that can't be read isn't read over and over."""
+    d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in (AMY, BEN, CAL, DAN)])
+    d.keep_record(AMY, rec(100), at=NOW - 5 * 3600)
+    d.keep_record(BEN, rec(900), at=NOW - 5 * 3600)
+    d.keep_record(CAL, rec(500), at=NOW - 3600)  # read an hour ago: fresh enough
+    d.keep_record(DAN, rec(800, won=None, closed=None), via="score", at=NOW - DAY)  # waits on its own read
+    d.board_due_now(NOW)
+    d.add([Seen(EVE, "leaderboard", "PNL MONTH OVERALL")], at=NOW)  # never looked at
+    top = {AMY, BEN, CAL}
+    assert [x["wallet"] for x in d.due(10, now=NOW)] == [DAN, EVE]  # without ``top``, nobody's record is old yet
+    got = [(x["wallet"], x["kind"]) for x in d.due(10, now=NOW, top=top, top_fresh_s=4 * 3600)]
+    assert got == [(BEN, "top"), (AMY, "top"), (DAN, "board"), (EVE, "new")]
+    assert [x["wallet"] for x in d.due(10, now=NOW, top=top, top_fresh_s=4 * 3600, new_first=True)][:2] == [BEN, AMY]
+    assert d.due_counts(now=NOW, top=top, top_fresh_s=4 * 3600)["top"] == 2
+    d.keep_record(BEN, rec(900), at=NOW)  # read again
+    d.quick_checked(AMY, quick_look([], NOW, read_all=True), at=NOW)  # stopped trading: looked at all the same
+    assert [x["kind"] for x in d.due(10, now=NOW + 1, top=top, top_fresh_s=4 * 3600)] == ["board", "new"]
+    d.score_failed(CAL, "VenueError: 503", at=NOW)
+    assert CAL not in {x["wallet"] for x in d.due(10, now=NOW + 1, top=top, top_fresh_s=4 * 3600)}
+    later = [x["wallet"] for x in d.due(10, now=NOW + 4 * 3600 + 1, top=top, top_fresh_s=4 * 3600)]
+    assert later[:3] == [BEN, CAL, AMY]  # all due again 4 hours on (CAL's retry first came round in 15 minutes)
+
+
 def test_a_record_read_schedules_the_next_look_and_says_nothing_against_them(d: Directory) -> None:
     d.add([Seen(AMY, "leaderboard", "PNL MONTH OVERALL")])
     d.keep_record(AMY, rec(500), at=NOW)
@@ -451,6 +497,45 @@ def test_a_wallet_that_bought_lately_gets_a_record_and_one_that_didnt_only_the_q
     assert read == [AMY]
     assert d.record(AMY)["periods"]["30d"]["trading_pnl"] == 60  # type: ignore[index]
     assert d.wallet(BEN)["not_recommended"] == "dormant" and d.record(BEN) is None  # type: ignore[index]
+
+
+def test_the_evaluation_reads_the_top_of_the_leaderboard_and_followed_traders_again_on_the_backgrounds_budget(
+        store: Any, monkeypatch: pytest.MonkeyPatch) -> None:  # fmt: skip
+    """A record read 5 hours ago is read again for a wallet the Leaderboard opens on, or one someone follows, so
+    their page has it fresh; through ``background`` (never the checks' budget). One read an hour ago waits, and so
+    does everyone with SIGNALS_BOARD_FRESH_TOP=0."""
+    now = time.time()
+    read: list[str] = []
+
+    class Sdk:
+        def profit_history(self, w: str) -> ProfitHistory:
+            read.append(w)
+            return history(40, 2.0, now=now)
+
+        def trades(self, venue: str, w: str, limit: int) -> list[Any]:
+            return [trade(now - 3600)]
+
+        def completed_positions(self, w: str, **k: Any) -> Any:
+            return positions([position(10, closed_days_ago=1)])
+
+    def no_check() -> Any:
+        raise AssertionError("the checks' budget is the pages'")
+
+    monkeypatch.setattr(engine, "background", lambda: Sdk())
+    monkeypatch.setattr(engine, "checker", no_check)
+    d = engine.directory()
+    d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in (AMY, CAL)] + [Seen(BEN, "follow")])
+    for w, ago in ((AMY, 5 * 3600), (BEN, 5 * 3600), (CAL, 3600)):
+        d.keep_record(w, rec(500, last_buy=now - DAY), at=now - ago)
+    engine.follows_file().write_text('{"users": {"u1": {"follows": ["%s"]}}}' % BEN.upper().replace("0X", "0x"))
+    monkeypatch.setattr(engine, "BOARD_FRESH_TOP", 0)
+    assert engine.board_top() == frozenset() and engine.evaluate_round()["due"] == 0
+    monkeypatch.setattr(engine, "BOARD_FRESH_TOP", 300)
+    assert engine.board_top() == {AMY, BEN, CAL}
+    r = engine.evaluate_round()
+    assert r["done"]["recorded"] == 2 and sorted(read) == [AMY, BEN]
+    assert now - d.record(AMY)["read_at"] < 60  # type: ignore[index]
+    assert engine.evaluate_round()["due"] == 0  # read: not due again for 4 hours
 
 
 def test_the_leaderboard_api_pages_the_records_with_each_rows_win_rate(store: Any) -> None:

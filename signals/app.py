@@ -740,6 +740,17 @@ OUTCOMES = ("scored", "recorded", "not_enough_recent_evidence", "not_trading_lat
 # reads, signals/records.py) for the Leaderboard: what they did, ranked, never a verdict on whether they're skilled.
 SKILL_TEST = os.environ.get("SIGNALS_SKILL_TEST", "0") == "1"
 RECORD_READS = 6  # a track record's reads after the quick check, about (measured 5–8 on live wallets, 2026-10-20)
+# The top of the Leaderboard kept fresh (the skill test off): its first BOARD_FRESH_TOP by profit over 30 days (the
+# order it opens on), the first BOARD_FRESH_CATEGORY_TOP of each market chip (it opens on Sports before any choice),
+# and every followed trader get their record read again once it's BOARD_FRESH_S old, ahead of the rest of the
+# directory (``due``'s ``top``), so the profiles people open are read within the 6 hours a page shows as it is
+# (RECORD_PAGE_FRESH_S) instead of read on the spot. On the background's budget, as every evaluation read is: up to
+# ~700 wallets × ~7 reads every 4 hours ≈ 0.34 reads a second, under a tenth of BACKGROUND_RATE. 0 turns it off.
+BOARD_FRESH_TOP = int(os.environ.get("SIGNALS_BOARD_FRESH_TOP", "300"))
+BOARD_FRESH_CATEGORY_TOP = 100
+BOARD_FRESH_S = float(os.environ.get("SIGNALS_BOARD_FRESH_HOURS", "4")) * 3600
+BOARD_CHIPS = ("Politics", "Sports", "Crypto", "Esports")  # the Leaderboard's market chips (the page's INTERESTS)
+BOARD_TOP_TTL_S = 600  # the top is worked out again this often
 # Rescoring recommended traders comes first, but it mustn't take everything: while any wallet has never been looked
 # at, at least NEW_SHARE of the evaluation's reads go to those (a round takes them before other recommended traders
 # whenever their share has fallen below it). Reads are estimated: a quick look is 1, a full score SCORE_READS.
@@ -766,6 +777,22 @@ def presented_wallets() -> frozenset[str]:
         return frozenset(rec | follows | _held_stale)
 
     return cached("presented", 60, read)  # type: ignore[no-any-return]
+
+
+def board_top() -> frozenset[str]:
+    """The wallets whose records are kept fresh ahead of anyone opening them (BOARD_FRESH_TOP, above): the
+    Leaderboard's first by profit over 30 days, overall and on each market chip, and every followed trader. From
+    directory.db and the follows only, kept BOARD_TOP_TTL_S. None with the skill test on (no Leaderboard) or
+    SIGNALS_BOARD_FRESH_TOP=0."""
+    if SKILL_TEST or BOARD_FRESH_TOP <= 0:
+        return frozenset()
+
+    def read() -> frozenset[str]:
+        top = directory().board_top(BOARD_FRESH_TOP, BOARD_FRESH_CATEGORY_TOP, BOARD_CHIPS)
+        follows = {w.lower() for u in _load_follows()["users"].values() for w in u.get("follows") or []}
+        return frozenset(top) | follows
+
+    return cached("board_top", BOARD_TOP_TTL_S, read)  # type: ignore[no-any-return]
 
 
 def _check_result() -> dict[str, Any] | None:
@@ -944,7 +971,8 @@ def evaluate_round(stop: threading.Event | None = None) -> dict[str, Any]:
     reads = _evaluate_state["reads"]
     for k in reads:
         reads[k] *= READS_DECAY
-    due = directory().due(EVALUATE_BATCH, presented=presented_wallets(), new_first=_reserve_new())
+    due = directory().due(EVALUATE_BATCH, presented=presented_wallets(), new_first=_reserve_new(), top=board_top(),
+                          top_fresh_s=BOARD_FRESH_S)  # fmt: skip
     if due and SKILL_TEST:  # only a score reads on_leaderboard
         _on_leaderboard(due)
     done = dict.fromkeys(OUTCOMES, 0)
@@ -997,7 +1025,7 @@ def _evaluate_loop() -> None:
         if time.time() - logged >= EVALUATE_LOG_S:
             budget = _background["budget"].state() if "budget" in _background else {}
             try:
-                due = directory().due_counts(presented=presented_wallets())
+                due = directory().due_counts(presented=presented_wallets(), top=board_top(), top_fresh_s=BOARD_FRESH_S)
             except (sqlite3.Error, OSError):
                 due = {}
             print(f"directory evaluation, last {(time.time() - logged) / 60:.0f} min: "
@@ -1541,7 +1569,7 @@ def monitoring_report(days: int = 14) -> dict[str, Any]:
 
     def build() -> dict[str, Any]:
         t0, now = time.monotonic(), time.time()
-        r = directory().monitoring(presented_wallets(), days, now)
+        r = directory().monitoring(presented_wallets(), days, now, top=board_top(), top_fresh_s=BOARD_FRESH_S)
         r["by_day"] = [_day_view(d, r["counted_from"]) for d in r["by_day"]]
         r["sweeps"] = _sweep_status(r["sweeps"])
         r["failures"]["why"] = {_scrub(k): n for k, n in r["failures"]["why"].items()}

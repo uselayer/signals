@@ -16,8 +16,13 @@ behind Vercel (see README, "Hosting").
   (`/api/leaderboard`). A row is listed only with every column (owner, 19 Oct: "if they don't have all values for
   all columns, remove them"): a profit for the period, a usual trade and a win rate from 10 positions closed
   (`_complete`); a search still finds anyone, and the foot says how many wait. Records copied from scores have no
-  win rate, so the evaluation reads those first (`board` in `due`, right after presented traders, the most profit
-  over 30 days first, made due at launch by `board_due_now`). Facts only: no tier, no "recommended", nothing about whether they'll make money next. The
+  win rate, so the evaluation reads those first (`board` in `due`, right after presented traders and `top`, the most profit
+  over 30 days first, made due at launch by `board_due_now`). Every other record is read again every 2 days as the
+  queue allows (about a week behind on 5 Nov), but the wallets profiles are opened for are read again once last
+  looked at 4 hours ago (`top` in `due`, right after presented traders: `board_top`, the Leaderboard's first
+  `SIGNALS_BOARD_FRESH_TOP` (300) by 30-day profit, each market chip's first 100, and every followed trader;
+  `SIGNALS_BOARD_FRESH_HOURS`), on the background's budget like the rest (~0.3 reads a second), so a trader's page
+  mostly finds a record under 6 hours old instead of reading one on the spot. Facts only: no tier, no "recommended", nothing about whether they'll make money next. The
   background reads a record for each wallet instead of the skill test; `SIGNALS_SKILL_TEST=1` brings back the skill
   test, Recommended and Explore as they were. With it off, no verdict reaches anything (`_worth_load` and
   `_stored_score` give nothing, and the once-a-day check doesn't run): the Feed's second part is **Top traders**
