@@ -223,3 +223,18 @@ def test_the_test_message_is_the_owners_only(owner: Telegram, monkeypatch: pytes
     monkeypatch.setattr(engine, "OWNER_USER", "user_nobody")
     r = c.post("/api/owner-alerts/test", headers={"authorization": "Bearer owner-secret"})
     assert r.json()["sent"] is False and "SIGNALS_OWNER_USER" in r.json()["why"]
+
+
+def test_owner_check_tells_when_telegram_refused_the_sign_in_button(owner: Telegram, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(engine._tg, "login_refused", "Telegram: Bad Request: BOT_DOMAIN_INVALID")
+    monkeypatch.setitem(engine._tg, "bot", "UseSignalsBot")
+    engine.owner_check(NOW)
+    assert len(owner.calls) == 1
+    text = owner.calls[0]["text"]
+    assert text.startswith("Signals needs a look: Telegram refused an alert for its sign-in button (Telegram: Bad Request: BOT_DOMAIN_INVALID)")
+    assert "/setdomain → @UseSignalsBot → usesignals.app" in text and "SIGNALS_TG_LOGIN=0" in text
+    engine.owner_check(NOW + 60)  # the same problem: not told again
+    assert len(owner.calls) == 1
+    monkeypatch.setitem(engine._tg, "login_refused", None)  # after a restart with the domain linked
+    engine.owner_check(NOW + 120)
+    assert owner.calls[-1]["text"].startswith("Signals, fixed: Alerts carry the sign-in button again.")

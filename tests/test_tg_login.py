@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import time
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from test_alerts import SAM, api, user  # noqa: F401 - the alerts' fixture and helpers
+from test_alerts import SAM, Telegram, api, user  # noqa: F401 - the alerts' fixture and helpers
 
 from signals import app as engine
 
@@ -28,6 +30,7 @@ def login(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> list[str]:  # noq
     monkeypatch.setattr(engine, "TG_LOGIN", True)
     monkeypatch.setattr(engine, "CLERK_SECRET", "sk_test_x")
     engine._tg_logins_used.clear()
+    monkeypatch.setitem(engine._tg, "login_refused", None)
     made: list[str] = []
     monkeypatch.setattr(engine, "_sign_in_pass", lambda uid: made.append(uid) or f"pass-{uid}")
     return made
@@ -105,3 +108,44 @@ def test_the_login_button_is_off_until_switched_on(api: TestClient, login: list[
     assert engine.tg.sent[-1]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Useful"
     r = api.get(f"/tg/in/{aid}", params=tg_data(), follow_redirects=False)
     assert r.headers["location"] == CHECK and login == []
+
+
+class RefusingTelegram(Telegram):
+    """Telegram that refuses every message with a login button, as it does while the bot isn't linked to the site."""
+
+    def __call__(self, method: str, **params: Any) -> Any:
+        if method == "sendMessage" and engine._has_login_button(params.get("reply_markup") or {}):
+            raise engine.TelegramError("Telegram: Bad Request: BOT_DOMAIN_INVALID", 400)
+        return super().__call__(method, **params)
+
+
+def test_an_alert_telegram_refuses_for_its_button_goes_out_without_it(api: TestClient, login: list[str], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    user()
+    tg = RefusingTelegram()
+    monkeypatch.setattr(engine, "tg", tg)
+    aid = check_alert()
+    assert aid and len(tg.sent) == 1  # sent now, at the second ask: the first was refused for the button
+    assert tg.sent[0]["reply_markup"]["inline_keyboard"][0][0]["text"] == "Useful"
+    assert "Check current price" in tg.sent[0]["text"]  # the link stays in the text
+    with engine._db() as con:
+        state, body = con.execute("SELECT state, body FROM alerts WHERE id = ?", (aid,)).fetchone()
+    assert state == "sent" and not engine._has_login_button(json.loads(body)["markup"])
+    assert engine._tg["login_refused"] == "Telegram: Bad Request: BOT_DOMAIN_INVALID"
+    assert not engine._tg_login_on()
+    check_alert()  # from now on no alert asks for the button, so none is refused
+    assert len(tg.sent) == 2 and not engine._has_login_button(tg.sent[1]["reply_markup"])
+    assert engine._sent_today("user_1") == 2
+
+
+def test_a_refusal_for_anything_but_the_button_still_fails_the_alert(api: TestClient, login: list[str], monkeypatch: pytest.MonkeyPatch) -> None:  # noqa: F811
+    user()
+
+    class Refusing(Telegram):
+        def __call__(self, method: str, **params: Any) -> Any:
+            raise engine.TelegramError("Telegram: Bad Request: can't parse entities", 400)
+
+    monkeypatch.setattr(engine, "tg", Refusing())
+    assert check_alert() == ""
+    with engine._db() as con:
+        assert con.execute("SELECT state FROM alerts").fetchone()[0] == "failed"
+    assert engine._tg["login_refused"] is None and engine._tg_login_on()
