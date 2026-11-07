@@ -521,6 +521,8 @@
   .wl-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 16px; }
   .wl-top h1 { font-size: 26px; }
   .wl-top .lede { margin: 4px 0 0; }
+  .wl-intro h2 { font-size: 17px; margin: 0; }
+  .wl-intro-act { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; margin: 18px 0 0; }
   .wl-banner { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; margin-bottom: 16px; font-size: 14.5px; }
   .wl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
   .wl-card { display: flex; flex-direction: column; gap: 12px; }
@@ -864,11 +866,34 @@ function signInPage() {
   const st = gateState(), traders = `<a class="btn ghost" href="#/traders">Browse traders</a>`;
   $("#app").innerHTML = st === "loading" ? skelCards(3)
     : st === "failed" ? emptyState("Signing in couldn't load just now", "The Feed needs signing in. Try again in a minute; Traders and trader pages need no account.", traders)
-    : routeName() === "watchlist" ? emptyState("Sign in to see your Watchlist", "Follow traders to see what they hold and every change they make, a few minutes after they make it. Traders and their pages need no account.",
-      `<button class="btn" id="gatesignin">Sign in</button> ${traders}`)
+    : routeName() === "watchlist" ? watchlistIntro(traders)
     : emptyState("Sign in to see the Feed", "The trades of the traders you follow and of the traders we recommend, a few minutes after they're made. Traders and their pages need no account.",
       `<button class="btn" id="gatesignin">Sign in</button> ${traders}`);
   const b = $("#gatesignin"); if (b) b.onclick = () => window.Clerk.openSignIn();
+  const add = $("#wladd"); if (add) add.onclick = () => followSheet("watchlist"); // the sheet asks to sign in on Follow
+  if ($("#wlexample")) watchlistExample();
+}
+// The Watchlist signed out (owner, 7 Nov): what it does before Sign in, under the same header as signed in. "+ Follow a
+// trader" works here too, and a trader's watch page needs no account, so the Leaderboard's top trader is the example.
+function watchlistIntro(traders) {
+  return `<div class="wl-top"><div><h1>Watchlist</h1><p class="lede">The traders you follow: what they hold and every change they make.</p></div>
+      <button class="btn" id="wladd">+ Follow a trader</button></div>
+    <section class="pf-card wl-intro"><h2>What you get</h2>
+      <dl class="pf-facts">
+        <dt>One place</dt><dd>Every trader you follow, up to 20, on a card: their record, what they hold now and their latest changes, read about every 30 seconds.</dd>
+        <dt>Every change</dt><dd>A new position, more bought, some sold, all sold, over the last 30 days, each with the facts behind it: their position now, its size against their usual trade, their record in that category and the price now.</dd>
+        <dt>Where they agree</dt><dd>Put traders in a basket to see the markets two or more of them hold, and where they split.</dd>
+        <dt>On Telegram</dt><dd>Connect Telegram to get a message after a trader you follow buys or sells.</dd>
+      </dl>
+      <p class="wl-intro-act"><button class="btn" id="gatesignin">Sign in</button> ${traders}<span id="wlexample"></span></p>
+      <p class="fine" style="text-align:left;margin-top:14px">Following is how you hear about their trades. Signals places no orders.</p></section>`;
+}
+async function watchlistExample() {
+  if (!boardOn) return;
+  let p;
+  try { p = await api(boardUrl(0)); } catch { return; } // no example, then
+  const t = p.rows?.[0], el = $("#wlexample");
+  if (t?.wallet && el) el.innerHTML = `<a class="link" href="#/watch/${esc(t.wallet)}">See an example: ${esc(displayName(t.name, t.wallet))}'s watch page</a>`;
 }
 // A link to the Feed while signed out (its tab, or any #/ link): Clerk's sign-in, as Follow opens, then that Feed page.
 document.addEventListener("click", (e) => {
@@ -955,7 +980,7 @@ function redrawFollow() {
   if (!el) return;
   el.innerHTML = followHtml(el.dataset.wallet);
   $$("[data-follow]", el).forEach((b) => (b.onclick = () => whenSignedIn(async () => {
-    try { auth.me = await post("/api/me/follows", { wallet: b.dataset.follow }); track("trader followed", { from: followFrom() }); } catch (e) { toast(esc(e.message)); }
+    try { auth.me = await post("/api/me/follows", { wallet: b.dataset.follow }); track("trader followed", { from: followFrom(), ...traderOnPage() }); } catch (e) { toast(esc(e.message)); }
     redrawFollow();
     waitForPace(b.dataset.follow);
   })));
@@ -970,7 +995,7 @@ function redrawFollow() {
     saveAlerts(b.dataset.saveOver, { mode: "over", usd });
   }));
   $$("[data-unfollow]", el).forEach((b) => (b.onclick = async () => {
-    try { auth.me = await api(`/api/me/follows/${b.dataset.unfollow}`, { method: "DELETE" }); track("trader unfollowed", { from: followFrom() }); } catch (e) { toast(esc(e.message)); }
+    try { auth.me = await api(`/api/me/follows/${b.dataset.unfollow}`, { method: "DELETE" }); track("trader unfollowed", { from: followFrom(), ...traderOnPage() }); } catch (e) { toast(esc(e.message)); }
     redrawFollow();
   }));
   $$("[data-tg]", el).forEach((b) => (b.onclick = () => connectTelegram(b)));
@@ -979,25 +1004,27 @@ function redrawFollow() {
 // Follow with no account: a one-time link to our bot that carries the trader; Start there follows them with alerts on.
 // The tab opens in the tap, so it isn't blocked; the page asks until Start is pressed (up to 15 minutes, while open).
 async function followOnTelegram(btn) {
-  const wallet = btn.dataset.tgfollow, from = followFrom(), win = window.open("", "_blank");
+  const wallet = btn.dataset.tgfollow, from = followFrom(), who = traderOnPage(), win = window.open("", "_blank");
   let r;
   try { r = await post("/api/follow/telegram", { wallet }); } catch (e) { win?.close(); toast(esc(e.message)); return; }
   if (win) win.location = r.link; else location.href = r.link;
-  track("follow telegram opened", { from });
+  track("follow telegram opened", { from, ...who });
   btn.parentElement.innerHTML = `<small>Tap Start in Telegram to finish…</small>`;
   for (let i = 0; i < 300 && $("#follow")?.dataset.wallet === wallet; i++) {
     await new Promise((ok) => setTimeout(ok, 3000));
     if (!(await api(`/api/follow/telegram/${encodeURIComponent(r.code)}`).catch(() => null))?.done) continue;
     tgFollowed(wallet);
-    track("trader followed", { from, via: "telegram" });
+    track("trader followed", { from, via: "telegram", ...who });
     toast("Following. You'll get a message on Telegram a few minutes after they trade.");
     break;
   }
   redrawFollow();
 }
-// A one-time link to our bot; Start there connects the chat. The tab opens in the tap, so it isn't blocked.
+// A one-time link to our bot; Start there connects the chat. The tab opens in the tap, so it isn't blocked. The tap
+// and the bot's confirmation (seen here, in /api/me's telegram) are named events, with the trader it was opened from.
 async function connectTelegram(btn) {
-  const win = window.open("", "_blank");
+  const from = followFrom(), who = traderOnPage(), win = window.open("", "_blank");
+  track("telegram connect opened", { from, ...who });
   let link;
   try { ({ link } = await post("/api/me/telegram", {})); } catch (e) { win?.close(); toast(esc(e.message)); return; }
   if (win) win.location = link; else location.href = link;
@@ -1007,7 +1034,7 @@ async function connectTelegram(btn) {
     auth.me = await api("/api/me").catch(() => auth.me);
   }
   redrawFollow();
-  if (auth.me?.telegram) toast("Telegram connected. You'll get a message a few minutes after they trade.");
+  if (auth.me?.telegram) { track("telegram connected", { from, ...who }); toast("Telegram connected. You'll get a message a few minutes after they trade."); }
 }
 
 // ---- numbers ----
@@ -1069,6 +1096,9 @@ function updatedAgo(ms) {
 // No wallet addresses on screen: a trader without a real name gets "Trader 0x91…76" and an identicon.
 const ADDR = /^0x[0-9a-f]{6,}/i;
 const SHORT_ADDR = /^0x[0-9a-f]{2,}\s*(…|\.{2,3})\s*[0-9a-f]{2,}$/i; // Polymarket names some wallets "0xd654…23e3"
+// The name Signals shows for a trader, or null for one it shows as "Trader 0x91…76": a wallet, or Polymarket's shortened
+// one, is no name.
+const namedAs = (name) => { const n = String(name || "").trim(); return n && !ADDR.test(n) && !SHORT_ADDR.test(n) ? n : null; };
 function displayName(name, id) {
   const n = String(name || "").trim();
   if (n && !ADDR.test(n) && !SHORT_ADDR.test(n)) return n;
@@ -1840,15 +1870,20 @@ function interestPicker(el, { selected = [], go, alt, onDone }) {
   $("[data-go]", el).onclick = () => onDone(INTERESTS.filter((c) => picked.has(c)));
   $("[data-alt]", el).onclick = () => onDone([]); // all markets, Economy, Weather and the rest included
 }
+// The one onboarding question (which markets interest you) is asked on the Feed, once signed in and once per browser
+// (owner, 7 Nov): a signed-out visitor lands on the Leaderboard (on Sports until a choice is made) and a Feed page
+// signed out is the sign-in page, never the question. Traders' chips and the Feed's "Change" ask it too, so nobody
+// has to answer it to look around.
+const needsOnboarding = (name) => interests === null && name.startsWith("feed");
 function onboardingPage() {
   $$("[data-tab]").forEach((a) => a.classList.remove("on"));
   $("#app").innerHTML = `<section class="onb"><h1>Find traders worth following.</h1>
     <p class="lede">Discover interesting traders, understand how they trade, and decide who to follow.</p><div id="onbpick"></div></section>`;
-  interestPicker($("#onbpick"), { selected: ["Sports"], go: "Discover traders →", alt: "Skip", onDone: (v) => {
+  interestPicker($("#onbpick"), { selected: ["Sports"], go: "Show my Feed →", alt: "Skip", onDone: (v) => {
     if (v.length) post("/api/count/picked", {}).catch(() => {}); // counted, anonymously: no id of any kind
     setInterests(v, { picked: true });
     bd.cat = boardCatOf(v); // the Leaderboard opens on what was just picked
-    if (location.hash === "#/traders") route(); else location.hash = "#/traders";
+    route(); // the Feed page they were on, following their choice
   } });
 }
 // ---- traders: a leaderboard of the traders we recommend ----
@@ -2587,6 +2622,7 @@ async function loadRecord(wallet) {
   api(`/api/categories/${wallet}`).then((c) => { cats = c; }, (e) => { cats = readFailed(e); }).then(draw);
 }
 function renderUnchecked(s, wallet) {
+  pf.peek = s;
   const app = $("#app"), r = s.directory, name = displayName(s.name, wallet);
   const limited = r && r.group === "limited", full = r && r.evidence === "scored";
   const label = limited ? `<span class="tier t3">Limited evidence</span><span class="tier t2">${full ? "Full check" : "Quick look"}</span>` : r && r.evidence === "quick" ? exBadges(r) : `<span class="tier t2">Not checked yet</span>`;
@@ -2644,7 +2680,7 @@ async function topView() {
 // Header with Follow, a stat strip, the profit chart, why they're here, then Positions / Activity /
 // Stats. Same helpers as the leaderboard (profitOf, weeksUp, lbPct), so the two always agree. A
 // figure the data doesn't have yet (wallet, exits, price range: the SDK's next release) shows "—".
-const pf = { period: "30d", tab: "positions", s: null, detail: null };
+const pf = { period: "30d", tab: "positions", s: null, detail: null, peek: null }; // peek: an unchecked trader's answer (renderUnchecked)
 const PF_PERIOD = { "7d": "7 days", "30d": "30 days", "90d": "90 days" };
 
 async function worthTraderPage(wallet) {
@@ -2667,6 +2703,7 @@ async function worthTraderPage(wallet) {
     if (p) p.textContent = "Still reading. This trader has a long history, so the first read can take a minute or two.";
     await new Promise((ok) => setTimeout(ok, 1000));
   }
+  track("trader page viewed", { from: "trader page", ...traderFacts(wallet, s, null) });
   if (s.unchecked) return renderUnchecked(s, wallet);
   clearTimeout(pf.retryTimer);
   const visit = {}; // this opening of the page: what arrives after leaving it, or opening another, is dropped
@@ -3535,7 +3572,8 @@ function followSheet(from) {
     found.innerHTML = `<div class="skel" style="width:60%;height:14px;margin:18px 0"></div>`;
     let r;
     try { r = await api(`/api/find?q=${encodeURIComponent(q.value)}`); } catch (err) { found.innerHTML = `<p class="inline-err">${esc(err.message)}</p>`; return; }
-    track("trader looked up", { by: r.wallet ? "link or wallet" : "name", found: r.wallet ? 1 : r.results.length });
+    const one = r.wallet || r.results.length === 1 ? r.results[0] : null; // the one trader it named, when it did
+    track("trader looked up", { by: r.wallet ? "link or wallet" : "name", found: r.wallet ? 1 : r.results.length, ...(one ? traderFacts(one.wallet, one, null) : {}) });
     if (r.wallet || r.results.length === 1) return followPreview(found, r.wallet || r.results[0].wallet);
     if (!r.results.length) {
       found.innerHTML = `<p class="explain">No trader by that name in Signals yet. Paste their Polymarket profile link (polymarket.com/profile/0x…) or wallet address instead: it's the address of their profile page on Polymarket.</p>`;
@@ -3566,7 +3604,7 @@ async function followPreview(box, wallet) {
     <p class="fine">Following is how you hear about their trades. Signals places no orders.</p>`;
   const go = $("#wlfollow", box);
   if (go) go.onclick = () => whenSignedIn(async () => {
-    try { auth.me = await post("/api/me/follows", { wallet }); track("trader followed", { from: "follow sheet" }); } catch (e) { const err = $("#wlerr"); if (err) { err.hidden = false; err.textContent = e.message; } return; }
+    try { auth.me = await post("/api/me/follows", { wallet }); track("trader followed", { from: "follow sheet", ...traderFacts(wallet, s, null) }); } catch (e) { const err = $("#wlerr"); if (err) { err.hidden = false; err.textContent = e.message; } return; }
     closeSheet();
     location.hash = `#/watch/${wallet}`;
     toast(`Following ${esc(name)}. New changes show up within about 30 seconds.`);
@@ -3584,9 +3622,11 @@ async function watchPage(wallet) {
   $("#app").innerHTML = `${watchBack()}<div class="pf-head">${avatar(wallet, 64)}<div class="grow"><div class="skel" style="width:40%;height:24px"></div>
     <div class="skel" style="width:25%;height:14px;margin-top:10px"></div></div></div><p class="muted" style="margin-top:24px">Reading their trades and what they hold (usually a few seconds)…</p>`;
   const redraw = () => { if (onWatch(wallet) && wt.d) renderWatch(true); };
-  api(`/api/worth/${wallet}?score=0`).then((s) => { wt.s = s; }, () => { wt.s = { error: true }; }).then(redraw);
+  const record = api(`/api/worth/${wallet}?score=0`).then((s) => { wt.s = s; }, () => { wt.s = { error: true }; }).then(redraw);
   api(`/api/categories/${wallet}`).then((c) => { wt.cats = c; }, (e) => { wt.cats = readFailed(e); }).then(redraw);
   await loadWatch();
+  await record; // their name and category are known once their record is
+  if (onWatch(wallet)) track("trader page viewed", { from: "watch page", ...watchFacts() });
 }
 const onWatch = (w) => location.hash === `#/watch/${w}`;
 const watchBack = () => signedIn() || !auth.wanted ? `<a class="back" href="#/watchlist">← Watchlist</a>` : `<a class="back" href="#/traders">← Traders</a>`;
@@ -3771,11 +3811,42 @@ function startAnalytics(key) {
     if (auth.uid) window.posthog.identify(auth.uid);
   }).catch(() => {}); // blocked or down: the page works the same without it
 }
-// A named event for what page views and clicks can't say on their own (following, unfollowing, looking a trader up):
-// where on the page it happened, never which trader or anything from /api/me.
+// A named event for what page views and clicks can't say on their own (following, unfollowing, connecting Telegram,
+// looking a trader up): where on the page it happened and, since 7 Nov, which trader it was about (traderFacts): their
+// wallet (the address already in their page's link), their name as Signals shows it and their category, so follows
+// can be read by kind of trader. Never anything about the person: no name, email, Telegram account or anything from
+// /api/me.
 function track(event, props) {
   if (analyticsOn) window.posthog.capture(event, props);
 }
+// What an event says about the trader it's about, from what the page has read for them: `wallet`; `name` when Signals
+// shows one (namedAs); `category`, their main one as the page classifies them (a score's most-traded category, else a
+// track record's or directory row's); `categories`, every one known (the score's, then the ones they made or lost
+// money in: `cats`, /api/categories). `s` is a score, a track record, an unchecked trader's answer or null; a fact not
+// read is left out, never made up.
+function traderFacts(wallet, s, cats) {
+  const out = { wallet: String(wallet || s?.wallet || "").toLowerCase() };
+  const name = namedAs(s?.name || s?.directory?.name);
+  if (name) out.name = name;
+  const scored = (s?.categories || []).map((c) => c.category).filter(Boolean);
+  const main = scored[0] || s?.category || s?.directory?.category || null;
+  const traded = cats && !cats.error ? (cats.rows || []).map((r) => r.category).filter((c) => c && c !== UNCATEGORISED) : [];
+  const all = [...new Set([...(main ? [main] : []), ...scored, ...traded])];
+  if (main) out.category = main;
+  if (all.length) out.categories = all;
+  return out;
+}
+// The trader the open page is about (the Follow control's), with what the page has read for them: the watch page's
+// (wt), the profile's (pf.s and their profit by category) or an unchecked trader's answer (pf.peek).
+function traderOnPage() {
+  const w = $("#follow")?.dataset.wallet;
+  if (!w) return {};
+  if (wt.w === w && location.hash.startsWith("#/watch/")) return watchFacts();
+  if (pf.s?.wallet === w) return traderFacts(w, pf.s, pf.cats);
+  if (pf.peek?.wallet === w) return traderFacts(w, pf.peek, null);
+  return traderFacts(w, null, null);
+}
+const watchFacts = () => { const s = wt.s && !wt.s.error ? wt.s : {}; return traderFacts(wt.w, { ...s, name: s.name || wt.d?.name }, wt.cats); };
 // Signing in links this browser's visits to the account; signing out starts a new anonymous visitor.
 function analyticsAccount(uid, was) {
   if (!analyticsOn) return;
@@ -3814,10 +3885,9 @@ function route() {
   // the Feed's pages and the Watchlist: signed in only; the rest needs no account, an alert's trade included (Telegram
   // opens it in its own browser, signed out, and some who follow from Telegram have no account)
   const gated = name.startsWith("feed") || name === "watchlist";
-  const onboarding = interests === null && (name.startsWith("feed") || name === "traders:worth"); // first run; links to a trader skip it
-  drawnGate = gated && !onboarding ? gateState() : null;
-  if (onboarding) onboardingPage();
-  else if (gated && drawnGate !== "open") signInPage();
+  drawnGate = gated ? gateState() : null;
+  if (gated && drawnGate !== "open") signInPage();
+  else if (needsOnboarding(name)) onboardingPage();
   else if (name.startsWith("feed")) feedPage(feedView());
   else if (name === "watchlist") watchlistPage();
   else if (watching) watchPage(watching[1].toLowerCase());

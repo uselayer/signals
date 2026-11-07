@@ -33,8 +33,9 @@ Tests: `uv run pytest -q`.
 ## What's on the page
 
 Three tabs: **Feed**, **Watchlist** and **Traders**. Traders and trader pages need no account; the Feed and the
-Watchlist need signing in. The first visit asks which markets interest you (Politics, Sports, Crypto, Esports, or
-Skip for all). The choice is kept in your browser, and the Feed follows it.
+Watchlist need signing in. Signed out, you land on the Leaderboard, and the Watchlist page says what it does before
+asking you to sign in. Your first Feed visit, once signed in, asks which markets interest you (Politics, Sports,
+Crypto, Esports, or Skip for all). The choice is kept in your browser, and the Feed follows it.
 
 ### Traders: the Leaderboard
 
@@ -70,6 +71,10 @@ once closed), and **Recent trades**, each buy and sell. **Follow** adds them to 
 
 Follow up to 20 traders: from their page, or with **+ Follow a trader** (paste a Polymarket profile link or wallet,
 or type their username). Each one gets a card with their record, what they hold and their latest changes.
+
+Signed out, the page says what you get (every trader you follow on a card, every change with the facts behind it,
+baskets, Telegram) above **Sign in**; **+ Follow a trader** works there too, and it links an example watch page from
+the top of the Leaderboard.
 
 A trader's **watch page** (`#/watch/<wallet>`, no account needed) shows what they hold and every change over the
 last 30 days: a new position, more bought, some sold, all sold. Pick one to see the facts behind it: their
@@ -216,11 +221,29 @@ The same key opens `/api/monitoring` (how the wallet search and reads are going,
 
 ### Analytics
 
-With `SIGNALS_POSTHOG_KEY` set: page views, clicks, scroll depth and session replay in PostHog, plus a few named
-events (`trader followed`, with `via: "telegram"` when followed with no account, `follow telegram opened`,
-`trader unfollowed`, `follow sheet opened`, `trader looked up`), never which trader. It's
-sent through `/lyr` on usesignals.app (`web/vercel.json`), so it only works behind Vercel. A signed-in person is
-known by their Clerk user id only. Replays mask every field and Clerk's menus.
+With `SIGNALS_POSTHOG_KEY` set: page views, clicks, scroll depth and session replay in PostHog, plus the named events
+below. It's sent through `/lyr` on usesignals.app (`web/vercel.json`), so it only works behind Vercel. A signed-in
+person is known by their Clerk user id only: never their name, email, Telegram account or chat id, or anything from
+`/api/me`. Replays mask every field and Clerk's menus.
+
+Since 7 Nov an event about a trader says which one (a trader's page link carried the wallet anyway): `wallet`;
+`name` when Signals shows one (never its made-up "Trader 0x91…76"); `category`, their main one as the Leaderboard's
+chips classify them (Sports, Politics, Crypto, Esports, Economics, …); `categories`, every one known (their score's,
+and the ones they made or lost money in). A fact the page hasn't read is left out. `from` is where on the page it
+happened: `trader page`, `watch page`, `follow sheet`, or for the follow sheet `watchlist`, `empty watchlist`, `new
+basket`.
+
+- `trader page viewed`: a trader's profile or watch page opened, with the trader.
+- `trader followed` and `trader unfollowed`, with the trader; `via: "telegram"` when followed with no account.
+- `follow telegram opened`: Follow signed out, opening the bot; with the trader.
+- `telegram connect opened`: "Connect Telegram" tapped; `telegram connected`: the bot confirmed the link while the
+  page was open. Both carry the trader whose page it was tapped on.
+- `follow sheet opened` (only where from: no trader yet) and `trader looked up` (`by`, `found`, and the trader when
+  the search named one).
+- Baskets: `basket picked`, `basket tab`, `basket trader opened`, `basket sheet opened`, `basket created`,
+  `basket changed`, `basket deleted`; no trader.
+
+Counting (above) stays the record of alerts and follows; nothing here changes it.
 
 ## Good to know
 
