@@ -110,7 +110,10 @@ behind Vercel (see README, "Hosting").
   also a Telegram login button: `/tg/in` checks Telegram's signed data (our bot token, under 10 minutes old, used
   once) and signs in the account the tapper's chat is connected to, with a one-time Clerk pass the page uses and
   drops from the address. The tapper, never the alert's recipient, so a forwarded alert opens no one else's account;
-  anything short of that opens the trade signed out. Everything else in the Feed (Following,
+  anything short of that opens the trade signed out. Telegram refuses the whole message when the bot isn't linked
+  to the site (BOT_DOMAIN_INVALID, 5–7 Nov: 2,072 alerts lost); since then a refused alert is sent again without
+  the button, no alert carries it until a restart (`_tg["login_refused"]`) and the owner is told
+  (`owner_check`). Everything else in the Feed (Following,
   Top traders, Big trades) is behind signing in (Clerk: Google, or Telegram as a custom OpenID Connect provider).
   Signed out, a Feed page is the sign-in page ("Sign in to see the Feed", Sign in, Browse traders), and the engine
   refuses its reads (`feed_reader`: `/api/live`, `/api/trading-now`) without a valid session. Without Clerk's key (running locally) nothing is gated. On a trader's page the Follow

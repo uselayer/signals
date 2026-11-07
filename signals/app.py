@@ -1670,7 +1670,7 @@ _owner_watch = owner_alerts.Watch(_owner_send)
 
 
 def owner_check(now: float | None = None) -> None:
-    """The three checks, told to the owner as ``owner_alerts.Watch`` says (``_monitor_loop``, each minute)."""
+    """The checks, told to the owner as ``owner_alerts.Watch`` says (``_monitor_loop``, each minute)."""
     if not (TG_TOKEN and (OWNER_CHAT or OWNER_USER)):
         return
     now = time.time() if now is None else now
@@ -1679,6 +1679,8 @@ def owner_check(now: float | None = None) -> None:
     scoring = (owner_alerts.scoring_problem(_evaluate_state["error"], _evaluate_state["error_since"], now)
                if EVALUATE_ON else None)  # fmt: skip
     _owner_watch.update("scoring", scoring, now)
+    refused = _tg["login_refused"]  # the bot's name (one getMe, cached) only when there's something to say
+    _owner_watch.update("login_button", owner_alerts.login_button_problem(refused, _bot_name() if refused else None), now)
 
 
 def welcome_check(now: float | None = None) -> dict[str, Any]:
@@ -3546,7 +3548,10 @@ _follow_codes: dict[str, tuple[str, float]] = {}  # one-time "Follow on Telegram
 _followed: dict[str, float] = {}  # those codes once Start followed: code -> when (the page asks, to show Following)
 FOLLOW_CODES_MAX = 5000  # outstanding at once: anyone can ask for one, so there's a ceiling
 TG_ONLY = "tg_"  # a follower with no account, only a Telegram chat: a random id after it, never the chat's
-_tg: dict[str, Any] = {"bot": None, "offset": 0, "error": None}
+_tg: dict[str, Any] = {"bot": None, "offset": 0, "error": None, "login_refused": None}
+# "login_refused": Telegram's words the moment it refused an alert for its login button (BOT_DOMAIN_INVALID: the bot
+# isn't linked to the site in BotFather). From then until a restart alerts go out without the button (_tg_login_on),
+# and the owner is told (owner_check); the alert it refused is sent again without it at once (_attempt).
 _seen: dict[str, set[str]] = {}  # per followed trader: trade ids already looked at
 _alerted: dict[tuple[str, str], float] = {}  # (trader, market) -> when it was last alerted
 
@@ -4427,6 +4432,16 @@ def _keyboard(alert_id: str, stop: str | None = None, text: str = "") -> dict[st
     return {"inline_keyboard": rows}
 
 
+def _has_login_button(markup: dict[str, Any]) -> bool:
+    return any("login_url" in b for row in markup.get("inline_keyboard") or [] for b in row)
+
+
+def _without_login_button(markup: dict[str, Any]) -> dict[str, Any]:
+    """The same keyboard without its login button row (the link stays in the alert's text)."""
+    rows = [row for row in markup.get("inline_keyboard") or [] if not any("login_url" in b for b in row)]
+    return {"inline_keyboard": rows}
+
+
 RETRY_S = (30.0, 60.0, 120.0, 240.0)  # waits before each try again of a temporary failure (or what Telegram asks)
 
 
@@ -4486,7 +4501,19 @@ def _attempt(aid: str, now: float | None = None) -> bool:
     uid, chat, body, tries, queued_at = row
     msg = json.loads(body)
     try:
-        got = _say(chat, msg["text"], reply_markup=msg["markup"])
+        try:
+            got = _say(chat, msg["text"], reply_markup=msg["markup"])
+        except TelegramError as e:
+            if not (e.code == 400 and not e.chat_gone and _has_login_button(msg["markup"])):
+                raise
+            # Telegram may have refused the message for its login button (the bot isn't linked to the site, 5 Nov): the
+            # alert is news all the same, so once more without the button. When that one goes, the button was the
+            # problem: no alert carries it until a restart (_tg_login_on), and the owner is told (owner_check).
+            msg["markup"] = _without_login_button(msg["markup"])
+            with _db() as con:
+                con.execute("UPDATE alerts SET body = ? WHERE id = ?", (json.dumps(msg), aid))
+            got = _say(chat, msg["text"], reply_markup=msg["markup"])
+            _tg["login_refused"] = str(e)
     except RuntimeError as e:
         err = e if isinstance(e, TelegramError) else TelegramError(str(e))
         wait = err.retry_after if err.retry_after is not None else RETRY_S[min(tries, len(RETRY_S) - 1)]
@@ -5405,7 +5432,9 @@ _tg_logins_lock = threading.Lock()
 
 
 def _tg_login_on() -> bool:
-    return TG_LOGIN and bool(CLERK_SECRET and TG_TOKEN)
+    """Whether alerts carry the login button: switched on, with what it needs, and not refused by Telegram since the
+    start (``_tg["login_refused"]``: a refused button would fail every alert, so it's dropped rather than the alerts)."""
+    return TG_LOGIN and bool(CLERK_SECRET and TG_TOKEN) and _tg["login_refused"] is None
 
 
 def _tg_tapper(q: dict[str, str], now: float) -> str | None:

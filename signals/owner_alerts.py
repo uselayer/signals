@@ -132,7 +132,18 @@ FIXED = {
     "disk": "The disk has room again.",
     "errors": f"No server errors for {ERRORS_WINDOW_S // 60} minutes.",
     "scoring": "Trader scoring is working again.",
+    "login_button": "Alerts carry the sign-in button again.",
 }
+
+
+def login_button_problem(refused: str | None, bot: str | None = None) -> str | None:
+    """Telegram refused an alert for its sign-in button (``refused``: its words), so alerts go out without the button
+    until a restart. What to do: link the bot to the site in BotFather, or switch the button off."""
+    if not refused:
+        return None
+    who = f"@{bot}" if bot else "the bot"
+    return (f"Telegram refused an alert for its sign-in button ({refused}). Alerts go out without the button until the "
+            f"next restart. In BotFather, /setdomain → {who} → usesignals.app, then redeploy; or set SIGNALS_TG_LOGIN=0.")
 
 
 @dataclass

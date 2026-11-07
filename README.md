@@ -184,7 +184,8 @@ usesignals.app is the same engine with `SIGNALS_HOSTED=1`:
 4. **Railway**: set `CLERK_PUBLISHABLE_KEY` (pk_live_…).
 5. **Signed in from alerts** (optional): in Telegram, @BotFather → `/setdomain` → your bot → `usesignals.app`. Only
    then set `CLERK_SECRET_KEY` (sk_live_…, Clerk's dashboard → API keys) and `SIGNALS_TG_LOGIN=1` in Railway: until the
-   domain is linked, Telegram refuses every alert that has the button.
+   domain is linked, Telegram refuses the button. Signals then sends the alert again without it, leaves the button
+   off every alert until the next restart, and tells the owner (owner alerts) what to do.
 
 Follows are kept in `/data/follows.json` by Clerk user id; alerts and counts in `/data/alerts.db`; wallets and
 track records in `/data/directory.db`.
