@@ -489,19 +489,69 @@ def test_analytics_knows_a_signed_in_person_by_their_clerk_id_only(run_js: Any) 
     assert got == [["identify", "user_1"], ["identify", "user_2"], ["reset"]]
 
 
-def test_follow_events_say_where_never_which_trader(run_js: Any) -> None:
-    # Following and unfollowing are named PostHog events with the page they happened on, and nothing about the trader.
-    got = run_js(("analyticsOn", "track", "followFrom"), """(() => {
+def test_events_say_where_and_which_trader_never_the_account(run_js: Any) -> None:
+    # Named PostHog events carry the page they happened on and the trader they're about (the owner, 7 Nov): the wallet,
+    # the name Signals shows (never its made-up "Trader 0x…"), their main category as the page classifies them and every
+    # category known, from what the page has read. A fact not read is left out, and nothing about the person is sent.
+    got = run_js(("ADDR", "SHORT_ADDR", "namedAs", "UNCATEGORISED", "traderFacts", "analyticsOn", "track", "followFrom"), """(() => {
       const calls = []; globalThis.window = { posthog: { capture: (...a) => calls.push(a) } };
-      globalThis.location = { hash: "#/watch/0xabc" };
-      track("trader followed", { from: followFrom() }); // analytics off (no key, or blocked): nothing is sent
+      globalThis.location = { hash: "#/watch/0xABC" };
+      const score = { wallet: "0xABC", name: "Amy", categories: [{ category: "Sports", bets: 9 }, { category: "Politics", bets: 2 }] };
+      track("trader followed", { from: followFrom(), ...traderFacts("0xABC", score, null) }); // analytics off (no key, or blocked): nothing is sent
       analyticsOn = true;
-      track("trader followed", { from: followFrom() });
+      track("trader followed", { from: followFrom(), ...traderFacts("0xABC", score, null) });
       location.hash = "#/worth/0xabc";
-      track("trader unfollowed", { from: followFrom() });
+      // the Leaderboard's track record: one main category, and their realized profit by category read beside it;
+      // Polymarket's shortened wallet is no name, and "Uncategorised" is no category
+      const record = { wallet: "0xabc", record: true, name: "0xd654…23e3", category: "Crypto" };
+      const cats = { rows: [{ category: "Crypto", usd: 5 }, { category: "Sports", usd: -1 }, { category: "Uncategorised", usd: 2 }] };
+      track("trader unfollowed", { from: followFrom(), ...traderFacts("0xabc", record, cats) });
+      const unchecked = { wallet: "0xabc", unchecked: true, name: null, directory: { name: "Ben", category: "Esports" } };
+      track("telegram connect opened", { from: followFrom(), ...traderFacts("0xabc", unchecked, { error: true }) });
+      track("trader looked up", { by: "name", found: 1, ...traderFacts("0xabc", { wallet: "0xabc", name: "0xabc1234567" }, null) });
+      track("trader page viewed", { from: "watch page", ...traderFacts("0xabc", null, null) });
       return calls;
     })()""")
-    assert got == [["trader followed", {"from": "watch page"}], ["trader unfollowed", {"from": "trader page"}]]
+    assert got == [
+        ["trader followed", {"from": "watch page", "wallet": "0xabc", "name": "Amy", "category": "Sports", "categories": ["Sports", "Politics"]}],
+        ["trader unfollowed", {"from": "trader page", "wallet": "0xabc", "category": "Crypto", "categories": ["Crypto", "Sports"]}],
+        ["telegram connect opened", {"from": "trader page", "wallet": "0xabc", "name": "Ben", "category": "Esports", "categories": ["Esports"]}],
+        ["trader looked up", {"by": "name", "found": 1, "wallet": "0xabc"}],
+        ["trader page viewed", {"from": "watch page", "wallet": "0xabc"}],
+    ]  # fmt: skip
+
+
+def test_an_events_trader_is_the_follow_controls_with_what_the_page_read(run_js: Any) -> None:
+    # The trader an event is about is the Follow control's, with what that page holds for them: the watch page's record
+    # (its name from the watch read when the record failed), the profile's score or record with their profit by
+    # category, or an unchecked trader's answer; nothing without a Follow control, and only the wallet when nothing was read.
+    got = run_js(("ADDR", "SHORT_ADDR", "namedAs", "UNCATEGORISED", "traderFacts", "traderOnPage", "watchFacts", "pf", "wt"), """(() => {
+      let follow = null; globalThis.$ = () => follow; globalThis.location = { hash: "#/watch/0xabc" };
+      const none = traderOnPage();
+      follow = { dataset: { wallet: "0xabc" } };
+      Object.assign(wt, { w: "0xabc", s: { error: true }, d: { name: "Amy" }, cats: { rows: [{ category: "Sports", usd: 3 }] } });
+      const watch = traderOnPage();
+      location.hash = "#/worth/0xabc"; pf.s = { wallet: "0xabc", name: "Amy", category: "Politics" }; pf.cats = null;
+      const profile = traderOnPage();
+      pf.s = null; pf.peek = { wallet: "0xabc", unchecked: true, directory: { category: "Crypto" } };
+      const peek = traderOnPage();
+      pf.peek = null;
+      return [none, watch, profile, peek, traderOnPage()];
+    })()""")
+    assert got == [{}, {"wallet": "0xabc", "name": "Amy", "categories": ["Sports"]},
+                   {"wallet": "0xabc", "name": "Amy", "category": "Politics", "categories": ["Politics"]},
+                   {"wallet": "0xabc", "category": "Crypto", "categories": ["Crypto"]}, {"wallet": "0xabc"}]  # fmt: skip
+
+
+def test_onboarding_is_asked_on_the_feed_never_on_the_leaderboard(run_js: Any) -> None:
+    # The markets question is asked on a Feed page only (the owner, 7 Nov): a signed-out visitor lands on the Leaderboard.
+    # route() draws the sign-in page before it, so signed out a Feed page asks to sign in, never which markets.
+    got = run_js(("interests", "needsOnboarding"), """(() => {
+      const before = [needsOnboarding("traders:worth"), needsOnboarding("traders:top"), needsOnboarding("watchlist"), needsOnboarding("feed"), needsOnboarding("feed:rec")];
+      interests = []; // Skip: all markets, answered
+      return [before, needsOnboarding("feed")];
+    })()""")
+    assert got == [[False, False, False, True, True], False]
 
 
 def test_one_polling_loop_however_often_the_feed_is_loaded(run_js: Any) -> None:

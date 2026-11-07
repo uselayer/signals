@@ -73,7 +73,9 @@ behind Vercel (see README, "Hosting").
   `/lyr` (`web/vercel.json`). A signed-in person is identified by their Clerk user id only: never send PostHog a
   name, email, Telegram account or anything from `/api/me`, and keep fields and Clerk's menus masked in replays.
   It's for seeing how the page is used; Counting (above) stays the record of alerts and follows. Named events go
-  through `track` (README lists them) and say where on the page, never which trader.
+  through `track` (README lists them) and say where on the page (`from`) and, since 7 Nov (the owner: a trader's
+  page link carried the wallet anyway), which trader: `traderFacts` (wallet, the name Signals shows, main category,
+  categories), only from what the page has read, never made up. Still never anything about the person.
 - Signals is a consumer website (usesignals.app); running it locally is for development. It places no orders:
   no sandbox, no in-app trading, no automatic copying, and it never holds anyone's keys or funds. Buying means
   "What buying now costs", then "Buy on Polymarket ↗", where the user buys it themselves. A session never
@@ -205,7 +207,9 @@ behind Vercel (see README, "Hosting").
     SDK's Polymarket reader, `BASKET_HISTORY_IDS` markets a read, kept like the positions), so a busy trader's is
     whole. A fact that wasn't read (a failed read, or more trades than `BASKET_HISTORY_ROWS`) is left out, never
     guessed or shown as "no trades".
-  - Onboarding (first visit, once per browser) asks one question: which markets interest you (Politics, Sports,
+  - Onboarding (the first Feed page once signed in, once per browser; the owner, 7 Nov: a signed-out visitor lands on
+    the Leaderboard, and the Watchlist signed out says what it does, with "+ Follow a trader" and an example watch
+    page, before Sign in) asks one question: which markets interest you (Politics, Sports,
     Crypto, Esports; Skip means all markets), with Sports already picked (owner, 29 Oct: niching to sports; people
     from X picked it first). The Leaderboard opens on the one market picked (`boardCatOf`: Sports before any
     choice, All for Skip or several). Nothing else: no budget, goals or signup. The choice is kept in
