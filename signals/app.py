@@ -1683,12 +1683,23 @@ def owner_check(now: float | None = None) -> None:
     _owner_watch.update("login_button", owner_alerts.login_button_problem(refused, _bot_name() if refused else None), now)
 
 
+def _welcome_activity(uid: str) -> welcome.Activity:
+    """When they first followed (the counting log) and whether a trade from someone they follow has reached their
+    Telegram (big-trade alerts come from people they don't follow, so they don't count)."""
+    with _db() as con:
+        first = con.execute("SELECT MIN(at) FROM events WHERE kind = 'follow' AND uid = ?", (uid,)).fetchone()[0]
+        reached = con.execute("SELECT 1 FROM alerts WHERE uid = ? AND kind IN ('buy', 'sell', 'group', 'summary')"
+                              " AND COALESCE(state, 'sent') = 'sent' LIMIT 1", (uid,)).fetchone()  # fmt: skip
+    return welcome.Activity(first, reached is not None)
+
+
 def welcome_check(now: float | None = None) -> dict[str, Any]:
-    """New sign-ups (signals/welcome.py): David's alert about each, and his note to each an hour after they sign up
+    """New sign-ups (signals/welcome.py): David's alert about each, and his notes to each as they come due
     (``_monitor_loop``, each minute; Clerk is asked every welcome.POLL_S). Off without CLERK_SECRET_KEY."""
     now = time.time() if now is None else now
+    users = _load_follows()["users"]
     return welcome.check(
-        now, STORE_DIR, users_of=lambda uid: _load_follows()["users"].get(uid) or {}, site=SITE, owner_user=OWNER_USER
+        now, STORE_DIR, users_of=lambda uid: users.get(uid) or {}, activity_of=_welcome_activity, site=SITE, owner_user=OWNER_USER
     )
 
 
