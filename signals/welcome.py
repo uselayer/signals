@@ -94,9 +94,9 @@ def _hi(first_name: str | None) -> str:
 
 def thanks_text(first_name: str | None, follows: int, telegram: bool, site: str) -> str:
     """They followed someone in their first day: thanks and where to go, nothing to answer (the owner's wording, 8 Nov)."""
-    links = [f"Your traders and their latest trades: {site}"]
+    links = [f"You can see all the Polymarket traders and their latest trades here: {site}"]
     if not telegram:
-        links.append("Turn on Telegram alerts to get their trades the moment they happen.")
+        links.append("Also, make sure to turn on Telegram alerts to get their trades the moment they happen.")
     return "\n".join([
         _hi(first_name), "",
         f"Thanks for signing up, and for following {_traders(follows)}. I'm David, I built Signals.", "",
@@ -116,7 +116,7 @@ def hello_text(first_name: str | None, site: str) -> str:
         "Two quick questions, if you have a minute:",
         "1. What were you hoping to find on Signals?",
         "2. Is anything stopping you from following a trader?", "",
-        f"Start by following a trader: {site}",
+        f"You can start by following a trader: {site}",
         "Happy to do a 5-minute walkthrough too, just reply with a time that works :)", "",
         "David",
     ])  # fmt: skip

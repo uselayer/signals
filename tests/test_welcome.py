@@ -111,7 +111,7 @@ def test_followed_gets_thanks_an_hour_after_sign_up_once(tmp_path: Path) -> None
     note = f.note(welcome.THANKS_SUBJECT)
     assert note["to"] == ["sam@example.com"] and note["reply_to"] == "david@uselayer.sh" and note["from"] == ENV["SIGNALS_WELCOME_FROM"]
     assert note["text"].startswith("Hi Sam,\n\nThanks for signing up, and for following 3 traders. I'm David, I built Signals.")
-    assert f"Your traders and their latest trades: {SITE}\nTurn on Telegram alerts" in note["text"]
+    assert f"You can see all the Polymarket traders and their latest trades here: {SITE}\nAlso, make sure to turn on Telegram alerts to get their trades the moment they happen." in note["text"]
     assert note["text"].endswith("It comes straight to me.\n\nDavid")
     f.run(tmp_path, SIGNED_UP + welcome.NOTE_AFTER_S + 120)
     assert f.subjects() == [welcome.THANKS_SUBJECT]
@@ -129,7 +129,7 @@ def test_nobody_followed_gets_hello_a_day_on(tmp_path: Path) -> None:
     assert f.subjects() == []
     f.run(tmp_path, SIGNED_UP + welcome.HELLO_AFTER_S)
     text = f.note(welcome.HELLO_SUBJECT)["text"]
-    assert "Thanks for signing up yesterday." in text and f"Start by following a trader: {SITE}" in text
+    assert "Thanks for signing up yesterday." in text and f"You can start by following a trader: {SITE}" in text
     assert text.endswith("just reply with a time that works :)\n\nDavid")
 
 
