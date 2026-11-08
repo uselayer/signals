@@ -161,7 +161,7 @@ def test_congratulations_a_day_after_the_first_follow(tmp_path: Path) -> None:
     assert out["nudged"] == 1
     assert f.note(welcome.CONGRATS_SUBJECT)["text"] == (
         "Hi Sam,\n\nI see you're following 3 traders. Congratulations on your first follow.\n\n"
-        "You said Sports is what you're here for, and their trades are already reaching you on Telegram.\n\n"
+        "You said Sports is what you're here for, and I believe their trades are already reaching you on Telegram.\n\n"
         "What's the next thing you need from Signals? If something's missing or wrong, tell me and I'll look at it this week.\n\nDavid"
     )
     f.run(tmp_path, follow + welcome.NUDGE_AFTER_S + 3600)  # never twice
@@ -172,8 +172,8 @@ def test_congratulations_wording() -> None:
     not_yet = welcome.congrats_text("Sam", 3, ["Sports", "Crypto"], False)
     assert "You said Sports and Crypto are what you're here for, and their trades will come to you on Telegram the moment they happen." in not_yet
     three = welcome.congrats_text("Sam", 3, ["Sports", "Crypto", "Politics"], True)
-    assert "You said Sports, Crypto and Politics are what you're here for, and their" in three
-    assert "\n\nTheir trades are already reaching you on Telegram.\n\n" in welcome.congrats_text("Sam", 3, [], True)
+    assert "You said Sports, Crypto and Politics are what you're here for, and I believe their" in three
+    assert "\n\nI believe their trades are already reaching you on Telegram.\n\n" in welcome.congrats_text("Sam", 3, [], True)
     assert "\n\nTheir trades will come to you on Telegram the moment they happen.\n\n" in welcome.congrats_text("Sam", 3, [], False)
 
 

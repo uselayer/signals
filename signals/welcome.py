@@ -131,7 +131,7 @@ def _picked(markets: list[str]) -> str:
 
 def congrats_text(first_name: str | None, follows: int, markets: list[str], reached: bool) -> str:
     """A day after their first follow, Telegram connected. ``markets``: what they picked ([] says nothing about it)."""
-    trades = "their trades are already reaching you on Telegram." if reached else "their trades will come to you on Telegram the moment they happen."
+    trades = "I believe their trades are already reaching you on Telegram." if reached else "their trades will come to you on Telegram the moment they happen."
     line = f"You said {_picked(markets)} what you're here for, and {trades}" if markets else trades[0].upper() + trades[1:]
     return "\n".join([
         _hi(first_name), "",
