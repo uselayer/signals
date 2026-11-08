@@ -4,9 +4,10 @@ is Signals' "made a key"; a trade reaching them on Telegram is its "first call".
 
   thanks     an hour after sign-up if they follow someone, or as soon as they do within their first day
   hello      a day after sign-up if they still follow nobody (each person gets thanks or hello, never both)
-  nudge      a day after their first follow: Congratulations (Telegram connected, worded by whether a trade from
-             those they follow has reached them) or Anything in the way (not connected). Only when that first follow
-             was in the last NUDGE_WITHIN_S, so turning this on never emails people who followed long ago
+  nudge      from a day after their first follow: Congratulations (Telegram connected and a trade from those they
+             follow has reached them; until one has, they get nothing) or Anything in the way (not connected). Only
+             while that first follow is within NUDGE_WITHIN_S, so turning this on never emails people who followed
+             long ago
   ask        a week after sign-up and ASK_AFTER_LAST_S after their last note, only for people who never picked markets
              and still haven't connected Telegram; reply with a number
 
@@ -129,10 +130,10 @@ def _picked(markets: list[str]) -> str:
     return f"{', '.join(markets[:-1])} and {markets[-1]} are"
 
 
-def congrats_text(first_name: str | None, follows: int, markets: list[str], reached: bool) -> str:
-    """A day after their first follow, Telegram connected. ``markets``: what they picked ([] says nothing about it)."""
-    trades = "I believe their trades are already reaching you on Telegram." if reached else "their trades will come to you on Telegram the moment they happen."
-    line = f"You said {_picked(markets)} what you're here for, and {trades}" if markets else trades[0].upper() + trades[1:]
+def congrats_text(first_name: str | None, follows: int, markets: list[str]) -> str:
+    """Telegram connected and a trade has reached them. ``markets``: what they picked ([] says nothing about it)."""
+    trades = "I believe their trades are already reaching you on Telegram."
+    line = f"You said {_picked(markets)} what you're here for, and {trades}" if markets else trades
     return "\n".join([
         _hi(first_name), "",
         f"I see you're following {_traders(follows)}. Congratulations on your first follow.", "",
@@ -403,7 +404,9 @@ def _send_notes(
         if not NUDGE_AFTER_S <= since <= NUDGE_WITHIN_S:
             continue
         if u.get("chat"):
-            subject, text = CONGRATS_SUBJECT, congrats_text(first, follows, list(u.get("interests") or []), a.trade_reached)
+            if not a.trade_reached:
+                continue  # nothing to congratulate yet: it goes if a trade reaches them inside the window
+            subject, text = CONGRATS_SUBJECT, congrats_text(first, follows, list(u.get("interests") or []))
         else:
             subject, text = IN_THE_WAY_SUBJECT, in_the_way_text(first, follows, site)
         r = go(email, subject, text, f"signals-nudge-{uid}")
@@ -445,17 +448,15 @@ def _note_status(s: SignUp, note: str | None, note_from: str) -> str:
 
 
 def preview(to: str, key: str, *, site: str = "https://usesignals.app", alert: bool = False, env: dict[str, str] | None = None) -> dict[str, bool]:
-    """One of each note to ``to``, exactly as they'd go to a new user Sam who follows 3 traders and picked Sports (the
-    Congratulations note twice: its two versions), and the sign-up alert only with ``alert``; nothing recorded. Each run
-    sends them all again, so run it once (python -m signals.welcome you@x.com [--alert])."""
+    """One of each note to ``to``, exactly as they'd go to a new user Sam who follows 3 traders and picked Sports, and
+    the sign-up alert only with ``alert``; nothing recorded. Each run sends them all again, so run it once (python -m signals.welcome you@x.com [--alert])."""
     env = dict(os.environ) if env is None else env
     send, stamp = resend_send(key), datetime.now().timestamp()
     note_from = env.get("SIGNALS_WELCOME_FROM", "David from Signals <david@uselayer.sh>")
     notes = {
         "thanks": (THANKS_SUBJECT, thanks_text("Sam", 3, False, site)),
         "hello": (HELLO_SUBJECT, hello_text("Sam", site)),
-        "congrats, a trade has reached them": (CONGRATS_SUBJECT, congrats_text("Sam", 3, ["Sports"], True)),
-        "congrats, no trade yet": (CONGRATS_SUBJECT, congrats_text("Sam", 3, ["Sports"], False)),
+        "congrats": (CONGRATS_SUBJECT, congrats_text("Sam", 3, ["Sports"])),
         "anything in the way": (IN_THE_WAY_SUBJECT, in_the_way_text("Sam", 3, site)),
         "ask": (ASK_SUBJECT, ask_text("Sam")),
     }

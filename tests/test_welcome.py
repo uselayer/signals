@@ -169,12 +169,34 @@ def test_congratulations_a_day_after_the_first_follow(tmp_path: Path) -> None:
 
 
 def test_congratulations_wording() -> None:
-    not_yet = welcome.congrats_text("Sam", 3, ["Sports", "Crypto"], False)
-    assert "You said Sports and Crypto are what you're here for, and their trades will come to you on Telegram the moment they happen." in not_yet
-    three = welcome.congrats_text("Sam", 3, ["Sports", "Crypto", "Politics"], True)
+    two = welcome.congrats_text("Sam", 3, ["Sports", "Crypto"])
+    assert "You said Sports and Crypto are what you're here for, and I believe their trades are already reaching you on Telegram." in two
+    three = welcome.congrats_text("Sam", 3, ["Sports", "Crypto", "Politics"])
     assert "You said Sports, Crypto and Politics are what you're here for, and I believe their" in three
-    assert "\n\nI believe their trades are already reaching you on Telegram.\n\n" in welcome.congrats_text("Sam", 3, [], True)
-    assert "\n\nTheir trades will come to you on Telegram the moment they happen.\n\n" in welcome.congrats_text("Sam", 3, [], False)
+    assert "\n\nI believe their trades are already reaching you on Telegram.\n\n" in welcome.congrats_text("Sam", 3, [])
+
+
+def test_no_congratulations_until_a_trade_reaches_them(tmp_path: Path) -> None:
+    f = Fake()
+    _thanked(f, tmp_path)
+    follow = SIGNED_UP + 600
+    f.following(chat="42", first_follow=follow, reached=False)
+    f.run(tmp_path, follow + welcome.NUDGE_AFTER_S)
+    assert f.subjects() == [welcome.THANKS_SUBJECT]
+    f.following(chat="42", first_follow=follow, reached=True)  # their first trade arrives on day two
+    f.run(tmp_path, follow + 2 * DAY)
+    assert f.subjects() == [welcome.THANKS_SUBJECT, welcome.CONGRATS_SUBJECT]
+
+
+def test_no_trade_inside_the_window_means_no_congratulations(tmp_path: Path) -> None:
+    f = Fake()
+    _thanked(f, tmp_path)
+    follow = SIGNED_UP + 600
+    f.following(chat="42", first_follow=follow, reached=False)
+    f.run(tmp_path, follow + welcome.NUDGE_WITHIN_S)
+    f.following(chat="42", first_follow=follow, reached=True)  # too late
+    f.run(tmp_path, follow + welcome.NUDGE_WITHIN_S + 60)
+    assert f.subjects() == [welcome.THANKS_SUBJECT]
 
 
 def test_anything_in_the_way_without_telegram(tmp_path: Path) -> None:
