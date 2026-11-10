@@ -153,6 +153,9 @@ class ContainerGone(Exception):
     """The API refused the session's code container (expired or unknown)."""
 
 
+_container_error_logged = False
+
+
 def _container_refused(e: Exception) -> bool:
     """An API error saying the container named can't be used (a 400 or 404 about the container)."""
     return getattr(e, "status_code", None) in (400, 404) and "container" in str(e).lower()
@@ -181,6 +184,11 @@ class Agent:
                 return _d(stream.get_final_message())  # type: ignore[no-any-return]
         except Exception as e:
             if container and _container_refused(e):
+                global _container_error_logged
+                if not _container_error_logged:  # the API's exact words, once, to tighten _container_refused
+                    _container_error_logged = True
+                    print(f"research: container refused, first time: status {getattr(e, 'status_code', None)} "
+                          f"body {json.dumps(getattr(e, 'body', None), default=str)[:2000]}", flush=True)  # fmt: skip
                 raise ContainerGone(str(e)) from e
             raise
 
