@@ -4143,6 +4143,7 @@ def _vote(chat: str, data: str) -> str | None:
             return None
         con.execute("INSERT INTO votes VALUES (?, ?, ?, ?) ON CONFLICT (alert_id, uid) DO UPDATE SET useful = "
                     "excluded.useful, at = excluded.at", (aid, uid, int(useful), time.time()))  # fmt: skip
+    ph("telegram alert voted", uid, {"useful": useful == "1"} | _alert_facts(aid)[1])
     return "Noted: useful." if useful == "1" else "Noted: not useful."
 
 
@@ -4158,6 +4159,8 @@ def _on_choice(chat: str, data: str, message_id: int | None = None) -> None:
     p = _pace(w)
     if data.startswith("few:"):
         have = _choice(u, w)
+        count("fewer", uid=uid, trader=w, target=have[0])
+        ph("telegram fewer alerts opened", uid, {"wallet": w, "mode_before": have[0], "busy": bool(p and p["per_day"] > BUSY_PER_DAY)})
         lines = [f"From <b>{html.escape(_who(w))}</b> you get {_choice_words(*have)}."]
         if p and p["per_day"] > BUSY_PER_DAY:
             lines.append(f"They made about {round(p['per_day']):,} alerts a day over the past week.")
@@ -4176,7 +4179,7 @@ def _on_choice(chat: str, data: str, message_id: int | None = None) -> None:
     if mode is None or (mode == "over" and not (p and p.get("usd"))):
         return
     usd = _rounded(p["usd"]) if mode == "over" and p else None  # the amount as suggested
-    if _set_choice(uid, w, mode, usd) is not None:
+    if _set_choice(uid, w, mode, usd, via="telegram") is not None:
         if message_id is not None:  # the ✓ moves to what was picked, on the message it was picked on
             try:
                 tg("editMessageReplyMarkup", chat_id=chat, message_id=message_id, reply_markup=_choices_markup(w, p, (mode, usd)))
@@ -4218,7 +4221,9 @@ def _on_update(u: dict[str, Any]) -> None:
             mid = (cb.get("message") or {}).get("message_id")
             owner = _chat_owner(chat)
             if owner and w in ((_load_follows()["users"].get(owner) or {}).get("follows") or []):  # a real stop
-                count("stop", uid=owner, trader=w, alert_id=_alert_of(chat, mid))
+                aid = _alert_of(chat, mid)
+                count("stop", uid=owner, trader=w, alert_id=aid)
+                ph("telegram stop tapped", owner, {"wallet": w} | _alert_facts(aid)[1])
             with _follow_lock:
                 d = _load_follows()
                 for x in d["users"].values():
@@ -4257,7 +4262,8 @@ def _on_update(u: dict[str, Any]) -> None:
                 mine["chat"] = chat
                 _save_follows(d)
             count("telegram", uid=hit[0])
-            names = ", ".join(_who(w) for w in mine["follows"]) or "nobody yet"
+            ph("telegram connected", hit[0], {"follows": len(mine["follows"])})
+            names =", ".join(_who(w) for w in mine["follows"]) or "nobody yet"
             _say(chat, CONNECTED.format(names=html.escape(names)))
         elif fol and time.time() - fol[1] <= CODE_TTL_S:
             _follow_from_chat(chat, arg, fol[0])
@@ -4266,10 +4272,15 @@ def _on_update(u: dict[str, Any]) -> None:
         else:
             _say(chat, f"Follow traders on {SITE}, then tap Connect Telegram there to get an alert after they trade.")
     elif cmd == "/list":
+        ph("telegram list opened", _chat_owner(chat))
         mine = next((x for x in _load_follows()["users"].values() if x.get("chat") == chat), None)
         names = [_who(w) for w in (mine or {}).get("follows", [])]
         _say(chat, html.escape("You follow: " + ", ".join(names)) if names else f"You don't follow anyone yet. Find traders on {SITE}.")
     elif cmd == "/stop":
+        owner = _chat_owner(chat)
+        if owner:  # a chat with alerts on: counted before it's let go (a Telegram-only account goes with it)
+            count("tg_stop", uid=owner)
+            ph("telegram alerts stopped", owner, {"follows": len((_load_follows()["users"].get(owner) or {}).get("follows") or [])})
         with _follow_lock:
             d = _load_follows()
             for k, x in list(d["users"].items()):
@@ -4304,8 +4315,10 @@ def _follow_from_chat(chat: str, code: str, w: str) -> None:
     _followed[code] = time.time()
     if joined:
         count("telegram", uid=uid)
+        ph("telegram connected", uid, {"follows": 1})
     if new:
         count("follow", uid=uid, trader=w)
+        ph("trader followed", uid, {"via": "telegram", "from": "bot", "wallet": w})
         _directory_note_later([Seen(w, "follow")])  # the wallet only: who follows them stays in follows.json
         _pace_later(uid, w)  # how busy they are; a busy one gets a message with the choices
     names = ", ".join(_who(x) for x in mine["follows"])
@@ -4544,10 +4557,14 @@ def _attempt(aid: str, now: float | None = None) -> bool:
         with _db() as con:
             con.execute("UPDATE alerts SET state = ?, next_at = ?, error = ? WHERE id = ?",
                         (state, now + wait if state == "retry" else None, why, aid))  # fmt: skip
+        if state == "failed":  # for good (a retry isn't yet, an unknown may have arrived)
+            ph("telegram alert failed", uid, {"why": why[:120], "tries": tries + 1} | _alert_facts(aid)[1])
         return False
     with _db() as con:
         con.execute("UPDATE alerts SET state = 'sent', sent_at = ?, message_id = ?, error = NULL WHERE id = ?",
                     (time.time(), got.get("message_id") if isinstance(got, dict) else None, aid))  # fmt: skip
+    ph("telegram alert sent", uid, {"tries": tries + 1, "minutes_late": round((time.time() - queued_at) / 60, 1) if queued_at else None}
+       | _alert_facts(aid)[1])  # fmt: skip
     return True
 
 
@@ -4585,6 +4602,7 @@ def _chat_gone(uid: str, chat: str) -> None:
         con.execute("UPDATE alerts SET state = 'failed', error = 'chat gone' WHERE chat = ? AND state IN ('queued', 'retry')",
                     (chat,))  # fmt: skip
     count("telegram_lost", uid=uid)
+    ph("telegram chat lost", uid)
 
 
 def _cents(p: float) -> str:
@@ -4828,9 +4846,9 @@ def _hold(uid: str, trader: str, outcome: str | None, side: str, usd: float | No
         con.execute("INSERT INTO held VALUES (?, ?, ?, ?, ?, ?)", (uid, trader, outcome, side, usd, now))
 
 
-def _set_choice(uid: str, trader: str, mode: str, usd: float | None = None) -> dict[str, Any] | None:
+def _set_choice(uid: str, trader: str, mode: str, usd: float | None = None, via: str = "page") -> dict[str, Any] | None:
     """Save what this person wants from a trader they follow; their record after, or None when they don't follow
-    them. "all" clears the choice (every trade is the default)."""
+    them. "all" clears the choice (every trade is the default). ``via``: where it was chosen (page or telegram)."""
     if mode not in ALERT_MODES or (mode == "over" and not (usd and usd > 0)):
         raise ValueError(mode)
     with _follow_lock:
@@ -4845,6 +4863,8 @@ def _set_choice(uid: str, trader: str, mode: str, usd: float | None = None) -> d
             choices[trader] = {"mode": mode} | ({"usd": round(float(usd or 0), 2)} if mode == "over" else {})
         _save_follows(d)
     count("alert_mode", uid=uid, trader=trader, target=mode)
+    ph("alert choice saved", uid, {"wallet": trader, "mode": mode, "usd": round(float(usd), 2) if mode == "over" and usd else None,
+                                   "via": via})  # fmt: skip
     return u
 
 
@@ -5372,7 +5392,8 @@ _alert_wake = threading.Event()
 # profile (events: no_profile). /api/metrics sums them up for the owner: locally, or with SIGNALS_METRICS_KEY.
 
 METRICS_KEY = os.environ.get("SIGNALS_METRICS_KEY", "")
-EVENTS = ("tap", "stop", "unfollow", "follow", "telegram", "telegram_lost", "picked", "no_profile", "alert_mode")
+EVENTS = ("tap", "stop", "unfollow", "follow", "telegram", "telegram_lost", "picked", "no_profile", "alert_mode",
+          "fewer", "tg_stop")  # fmt: skip
 _ALERT_ID = re.compile(r"[A-Za-z0-9_-]{4,16}")
 
 
@@ -5384,6 +5405,68 @@ def count(kind: str, *, uid: str | None = None, alert_id: str | None = None, tar
             con.execute("INSERT INTO events VALUES (?, ?, ?, ?, ?, ?)", (time.time(), kind, uid, alert_id, target, trader))
     except (sqlite3.Error, OSError):
         pass
+
+
+# ---- Telegram in PostHog (README, "Analytics") ----
+# What happens in Telegram never reaches the page, so the engine tells PostHog itself (owner, 10 Nov: "we need
+# connected events to telegram"): connected (from the bot's own confirmation, so a closed tab no longer loses it),
+# each alert sent or failed, taps on its links, "Fewer alerts" opened and the choice made, "Stop alerts", /stop, votes,
+# a chat lost. Same rules as the page: the person is their account id only (a Clerk user id, or a Telegram-only
+# follower's random tg_ id), never a chat id, Telegram name or anything else about them. Sent in the background,
+# a batch at a time; never in the way: with no key, a full queue or PostHog down, the event is dropped.
+POSTHOG_HOST = os.environ.get("SIGNALS_POSTHOG_HOST", "https://us.i.posthog.com")
+PH_QUEUE_MAX = 1000
+_ph_queue: deque[dict[str, Any]] = deque()
+_ph_wake = threading.Event()
+_ph_state: dict[str, Any] = {"thread": None}
+
+
+def ph(event: str, uid: str | None, props: dict[str, Any] | None = None) -> None:
+    """Queue one server-side event for PostHog about account ``uid``. Nothing without SIGNALS_POSTHOG_KEY or an id."""
+    if not POSTHOG_KEY or not uid or len(_ph_queue) >= PH_QUEUE_MAX:
+        return
+    p = {k: v for k, v in (props or {}).items() if v is not None}
+    p |= {"source": "engine", "account": "telegram only" if uid.startswith(TG_ONLY) else "signed in"}
+    _ph_queue.append({"event": event, "distinct_id": uid, "properties": p,
+                      "timestamp": datetime.now(UTC).isoformat()})  # fmt: skip
+    if _ph_state["thread"] is None:
+        _ph_state["thread"] = threading.Thread(target=_ph_loop, daemon=True, name="posthog")
+        _ph_state["thread"].start()
+    _ph_wake.set()
+
+
+def _ph_send(batch: list[dict[str, Any]]) -> None:
+    req = urllib.request.Request(f"{POSTHOG_HOST}/batch/", data=json.dumps({"api_key": POSTHOG_KEY, "batch": batch}).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")  # fmt: skip
+    with urllib.request.urlopen(req, timeout=10) as r:
+        r.read()
+
+
+def _ph_loop() -> None:
+    while True:
+        _ph_wake.wait(30)
+        _ph_wake.clear()
+        batch = [_ph_queue.popleft() for _ in range(min(len(_ph_queue), 100))]
+        if not batch:
+            continue
+        try:
+            _ph_send(batch)
+        except (urllib.error.URLError, OSError, ValueError):
+            pass  # dropped: analytics never holds anything up
+        if _ph_queue:
+            _ph_wake.set()
+
+
+def _alert_facts(alert_id: str | None) -> tuple[str | None, dict[str, Any]]:
+    """The account an alert went to and what PostHog may hear about it: its id, kind and trader."""
+    if not alert_id:
+        return None, {}
+    try:
+        with _db() as con:
+            row = con.execute("SELECT uid, kind, trader FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+    except (sqlite3.Error, OSError):
+        return None, {}
+    return (row[0], {"alert_id": alert_id, "kind": row[1], "wallet": row[2]}) if row else (None, {})
 
 
 def count_quote(outcome: str, reads_made: int, t0: float) -> None:
@@ -5435,6 +5518,8 @@ def go(alert_id: str, target: str, to: str = "") -> RedirectResponse:
     dest = to if _allowed(to) else SITE
     if _ALERT_ID.fullmatch(alert_id) and target in set(LINK_TARGETS.values()) and _alert_known(alert_id):
         count("tap", alert_id=alert_id, target=target)
+        uid, facts = _alert_facts(alert_id)
+        ph("telegram alert tapped", uid, {"target": target} | facts)
     return RedirectResponse(dest, status_code=302, headers={"Cache-Control": "no-store"})
 
 
@@ -5520,7 +5605,9 @@ def tg_in(alert_id: str, request: Request) -> RedirectResponse:
     if to is None:
         return RedirectResponse(SITE, status_code=302, headers={"Cache-Control": "no-store"})
     count("tap", alert_id=alert_id, target="check")
-    who = _tg_tapper(dict(request.query_params), time.time()) if _tg_login_on() else None
+    uid0, facts = _alert_facts(alert_id)
+    ph("telegram alert tapped", uid0, {"target": "check"} | facts)
+    who =_tg_tapper(dict(request.query_params), time.time()) if _tg_login_on() else None
     uid = _account_of_chat(who) if who else None
     ticket = _sign_in_pass(uid) if uid else None
     if ticket:
@@ -5589,6 +5676,9 @@ def metrics(request: Request, response: Response, days: int = 30) -> dict[str, A
         quotes = con.execute("SELECT outcome, reads, ms FROM quotes WHERE at >= ?", (since,)).fetchall()
         no_profile = dict(con.execute("SELECT target, COUNT(*) FROM events WHERE kind = 'no_profile' AND at >= ?"
                                       " GROUP BY target", (since,)).fetchall())  # fmt: skip
+        modes = dict(con.execute("SELECT target, COUNT(*) FROM events WHERE kind = 'alert_mode' AND at >= ? GROUP BY target",
+                                 (since,)).fetchall())  # fmt: skip
+        fewer_people = con.execute("SELECT COUNT(DISTINCT uid) FROM events WHERE kind = 'fewer' AND at >= ?", (since,)).fetchone()[0]
     users = _load_follows()["users"].values()
     followers = [u for u in users if u.get("follows")]
     with_interests = [u for u in users if u.get("interests") is not None]
@@ -5608,7 +5698,11 @@ def metrics(request: Request, response: Response, days: int = 30) -> dict[str, A
                          "chats_disconnected": n.get("telegram_lost", 0)}},
         "taps": {"by_target": taps, "alerts_tapped": tapped, "share_of_alerts_tapped": ratio(tapped, counted)},
         "stops": {"stop_taps": n.get("stop", 0), "stop_taps_within_7_days_of_an_alert": after.get("stop", 0),
-                  "unfollows": n.get("unfollow", 0), "unfollows_within_7_days_of_an_alert": after.get("unfollow", 0)},
+                  "unfollows": n.get("unfollow", 0), "unfollows_within_7_days_of_an_alert": after.get("unfollow", 0),
+                  "alerts_turned_off_with_stop": n.get("tg_stop", 0)},
+        # "Fewer alerts" under an alert: how often it's opened (and by how many accounts), and every choice saved
+        # (in the chat or on a trader's page) by what was picked: all (back to every trade), over an amount, summary
+        "fewer": {"menu_opened": n.get("fewer", 0), "accounts": fewer_people, "choices_saved": modes},
         "votes": {"useful": votes.get(1, 0), "not_useful": votes.get(0, 0), "alerts_voted_on": voted},
         "follows": {"interest_picks": n.get("picked", 0), "follows": n.get("follow", 0),
                     "follows_per_interest_pick": ratio(n.get("follow", 0), n.get("picked", 0)),

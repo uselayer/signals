@@ -208,7 +208,8 @@ curl -X POST -H "Authorization: Bearer $SIGNALS_METRICS_KEY" https://usesignals.
 
 ### Counting
 
-What was sent, how it was delivered, taps on alert links, votes, follows and unfollows are counted in `alerts.db`,
+What was sent, how it was delivered, taps on alert links, votes, follows and unfollows, "Fewer alerts" opened and
+the choice made (the summary's `fewer`), and `/stop` in the chat (`alerts_turned_off_with_stop`) are counted in `alerts.db`,
 with nothing personal beyond the signed-in account (no IPs). Price checks are counted with no id at all. To read the
 summary:
 
@@ -237,12 +238,28 @@ basket`.
 - `trader page viewed`: a trader's profile or watch page opened, with the trader.
 - `trader followed` and `trader unfollowed`, with the trader; `via: "telegram"` when followed with no account.
 - `follow telegram opened`: Follow signed out, opening the bot; with the trader.
-- `telegram connect opened`: "Connect Telegram" tapped; `telegram connected`: the bot confirmed the link while the
-  page was open. Both carry the trader whose page it was tapped on.
+- `telegram connect opened`: "Connect Telegram" tapped, with the trader whose page it was tapped on.
 - `follow sheet opened` (only where from: no trader yet) and `trader looked up` (`by`, `found`, and the trader when
   the search named one).
 - Baskets: `basket picked`, `basket tab`, `basket trader opened`, `basket sheet opened`, `basket created`,
   `basket changed`, `basket deleted`; no trader.
+
+What happens in Telegram never reaches the page, so since 10 Nov the engine sends it to PostHog itself (same key, in
+the background, dropped rather than ever holding anything up). The person is their account id only: a Clerk user id,
+or a Telegram-only follower's random `tg_…` id; never a chat id or Telegram name. Each has `source: "engine"` and
+`account` (`signed in` or `telegram only`); one about an alert has `alert_id`, `kind` (buy, sell, group, summary,
+whale, cap) and `wallet`.
+
+- `telegram connected`: the bot confirmed a chat (Connect Telegram's Start, or a first Follow with no account), with
+  `follows`. From the bot, so a tab closed before Start no longer loses it (the page used to send it).
+- `trader followed` with `via: "telegram"`, `from: "bot"`: Follow with no account, Start pressed.
+- `telegram alert sent` (`tries`, `minutes_late`) and `telegram alert failed` (`why`, Telegram's words): each alert's
+  delivery, once it's settled.
+- `telegram alert tapped`: one of its links (`target`: market, market_us, market_kalshi, record, check, feed).
+- `telegram fewer alerts opened` (`mode_before`, `busy`) and `alert choice saved` (`mode`: all, over, summary; `usd`;
+  `via`: telegram or page).
+- `telegram stop tapped` ("Stop alerts from …", with the trader), `telegram alerts stopped` (`/stop`, with `follows`),
+  `telegram list opened` (`/list`), `telegram alert voted` (`useful`), `telegram chat lost` (blocked or deleted).
 
 Counting (above) stays the record of alerts and follows; nothing here changes it.
 
