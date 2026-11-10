@@ -213,6 +213,20 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .agent-head .t { font-weight: 600; font-size: 14.5px; } .agent-head .s { font-size: 12.5px; color: var(--muted); }
 .agent-head > div:last-child { flex: 1; min-width: 0; } /* room for the run clock's bar */
 .runclock .el { font-variant-numeric: tabular-nums; }
+/* the Windows tab: the count line, the filter chips, every buy on one chart; the record line in the header */
+.tally { font-size: 14px; line-height: 1.5; margin: 0; } .tally .muted { display: block; font-size: 12.5px; }
+.wfilter { display: flex; flex-wrap: wrap; gap: 6px; }
+.wfilter button { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 999px; padding: 4px 11px; font-size: 13px; }
+.wfilter button.on { color: var(--fg); border-color: var(--fg); }
+.wfilter button:disabled { opacity: .45; }
+.wfilter.small button { font-size: 12px; padding: 3px 9px; }
+.allwin { margin: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.allwin-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
+.allwin svg { display: block; max-width: 100%; height: auto; } .allwin circle { cursor: pointer; }
+.allwin figcaption { display: flex; flex-direction: column; gap: 4px; }
+.allwin .keys { display: flex; flex-wrap: wrap; gap: 14px; }
+.allwin .key { display: inline-flex; align-items: center; gap: 6px; } .allwin .key i { width: 9px; height: 9px; border-radius: 50%; opacity: .7; display: inline-block; }
+.recline { margin: 6px 0 0; }
 .runclock .bar { display: block; height: 3px; margin-top: 6px; }
 .runclock .bar i { transition: width 1s linear; }
 .atabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); }
