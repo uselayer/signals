@@ -47,16 +47,21 @@ function App() {
     ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} />`)}`;
 }
 
-// Example questions under the ask box (owner, 10 Nov: four, small, one row, and each must say WHICH wallet): every card
-// names its wallet. With the wallet field empty that's a sample trader (SAMPLE_TRADER, active in BTC 15-minute markets)
-// and a click fills both fields; with a wallet typed, the cards name that one (shortened) and fill the question only.
-// A click never starts anything: Break it down still shows the plan and its cost first. BTC 15-minute only.
-const SAMPLE_TRADER = { wallet: '0xb945945d5bcaf7b56834d4da8cdf8f8f94b2db68', name: 'l5Zn1bWoM8eTsK' };
-const EXAMPLES = [
-  [w => `How does ${w} make money?`, w => `How does ${w} make money on BTC 15-minute markets?`],
-  [w => `Does ${w} buy both Up and Down?`, w => `In BTC 15-minute markets, does ${w} buy both Up and Down in the same window?`],
-  [w => `When does ${w} buy in a window?`, w => `In BTC 15-minute markets, when does ${w} buy: before the window opens, or after BTC moves?`],
-  [w => `Is ${w}'s profit steady?`, w => `Is ${w}'s profit on BTC 15-minute markets steady, or does it come from a few big windows?`],
+// Example questions under the ask box (owner, 10 Nov: four, small, one row, and each must say WHICH wallet). Each card
+// shows a different kind of answer (owner, 10 Nov): an explanation, a chart, a replay, a comparison. Two sample traders
+// share them (owner: mix and match two traders across the four), both active in every BTC 15-minute window. With the
+// wallet field empty, or holding a sample trader's wallet, each card names its own trader and a click fills both fields;
+// with any other wallet typed, every card names that one (shortened) and fills the question only. A click never starts
+// anything: Break it down still shows the plan and its cost first. BTC 15-minute only.
+const SAMPLE_TRADERS = [
+  { wallet: '0xbdaacd345fec209cd09d933e62f92e8b530afd60', name: 'the.prod.dt' },
+  { wallet: '0x329df14a9e177b5bade2228b9062265697a5b047', name: 'HuskyTrade' },
+];
+const EXAMPLES = [  // [sample trader, card, question]
+  [0, w => `How does ${w} make money?`, w => `How does ${w} make money on BTC 15-minute markets?`],
+  [1, w => `Chart ${w}'s buys against the BTC price`, w => `In BTC 15-minute markets, chart ${w}'s buys against the BTC price over its latest windows.`],
+  [0, w => `Replay ${w}'s latest window`, w => `Replay ${w}'s latest finished BTC 15-minute window: when did it buy Up and Down, and where was BTC?`],
+  [1, w => `Compare ${w}'s winning and losing windows`, w => `In BTC 15-minute markets, compare ${w}'s winning and losing windows: what did it do differently?`],
 ];
 
 // Signed out: what a breakdown is, the recorded one to watch (no sign-in, no model run), and Sign in to ask your own.
@@ -79,12 +84,12 @@ function Home({ api }) {
   // after a card: focus Break it down
   const go = useRef(), focusNext = useRef(null);
   useEffect(() => { const el = focusNext.current; focusNext.current = null; if (el && el.current) el.current.focus(); });
-  // whom the cards name: the sample trader by name (also once a card filled its address in), else the wallet typed
-  const whoOf = w => (!w.trim() || w.trim().toLowerCase() === SAMPLE_TRADER.wallet ? SAMPLE_TRADER.name : shortWallets(w.trim()));
-  const who = whoOf(wallet);
-  const pick = question => { if (!wallet.trim()) setWallet(SAMPLE_TRADER.wallet); setQ(question); focusNext.current = go; };
+  // whom card i names: its own sample trader by name (also once a card filled a sample address in), else the wallet typed
+  const isSample = w => !w.trim() || SAMPLE_TRADERS.some(t => t.wallet === w.trim().toLowerCase());
+  const whoOf = (w, i) => (isSample(w) ? SAMPLE_TRADERS[EXAMPLES[i][0]].name : shortWallets(w.trim()));
+  const pick = i => { if (isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet); setQ(EXAMPLES[i][2](whoOf(wallet, i))); focusNext.current = go; };
   // a card's question follows the wallet field, so it never names one trader while the field holds another
-  const onWallet = w => { setWallet(w); const i = EXAMPLES.findIndex(([, question]) => question(who) === q); if (i >= 0) setQ(EXAMPLES[i][1](whoOf(w))); };
+  const onWallet = w => { setWallet(w); const i = EXAMPLES.findIndex(([, , question], j) => question(whoOf(wallet, j)) === q); if (i >= 0) setQ(EXAMPLES[i][2](whoOf(w, i))); };
   useEffect(() => { if (!SAMPLE) api.sessions().then(setList, e => setErr(e.message)); }, []);
   const start = async () => {
     if (!q.trim()) return; setBusy(true); setErr(null);
@@ -103,8 +108,8 @@ function Home({ api }) {
         <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
-        <p class="muted small">${wallet.trim() ? 'Try asking' : html`Try asking about <b>${SAMPLE_TRADER.name}</b>, a trader active in BTC 15-minute markets, or paste a wallet above`}</p>
-        <div class="ex-grid">${EXAMPLES.map(([label, question]) => html`<button type="button" class=${'ex' + (q === question(who) ? ' on' : '')} onClick=${() => pick(question(who))}>${label(who)}</button>`)}</div></div>`}
+        <p class="muted small">${!isSample(wallet) ? 'Try asking' : html`Try asking about <b>${SAMPLE_TRADERS[0].name}</b> or <b>${SAMPLE_TRADERS[1].name}</b>, two traders active in BTC 15-minute markets, or paste a wallet above`}</p>
+        <div class="ex-grid">${EXAMPLES.map(([, label, question], i) => html`<button type="button" class=${'ex' + (q === question(whoOf(wallet, i)) ? ' on' : '')} onClick=${() => pick(i)}>${label(whoOf(wallet, i))}</button>`)}</div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
