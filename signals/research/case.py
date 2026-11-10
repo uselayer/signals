@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from signals.research import trace, workspace
@@ -18,6 +19,7 @@ from signals.research.data import ReadError
 from signals.research.tools import CALLER
 
 STAGES = ("windows", "window", "trades")
+SHOW_AT_ONCE = 6  # windows built at once by show_windows
 STATUSES = ("queued", "running", "done", "warning", "failed")
 
 _obj = {"type": "object"}
@@ -275,11 +277,19 @@ class Case:
             raise ReadError("Give the window ids (slugs) to show.")
         tags = inp.get("tags") or {}
         briefs, covs, failed = [], [], []
-        for slug in ids:
+
+        def one(slug: str) -> dict[str, Any] | str:
             try:
-                r = workspace.build(self.store, self.reads, self.sid, slug, tags.get(slug))
-            except ReadError as e:
-                failed.append({"window_id": slug, "why": str(e)})
+                return workspace.build(self.store, self.reads, self.sid, slug, tags.get(slug))
+            except Exception as e:  # noqa: BLE001 - a window that can't be read is named, the rest still show
+                return f"{type(e).__name__}: {e}"[:200]
+
+        # Built SHOW_AT_ONCE at a time (a call from code must answer within about 4 minutes), shown in order.
+        with ThreadPoolExecutor(max_workers=SHOW_AT_ONCE) as pool:
+            built = list(pool.map(one, ids))
+        for slug, r in zip(ids, built, strict=True):
+            if isinstance(r, str):
+                failed.append({"window_id": slug, "why": r})
                 continue
             s = workspace.summary(r)
             self.emit({"type": "window.summary", **s})

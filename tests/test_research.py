@@ -344,7 +344,7 @@ class FakeCaseReads:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def window(self, slug: str, condition_id: Any = None) -> dict[str, Any]:
+    def window(self, slug: str, condition_id: Any = None, **kw: Any) -> dict[str, Any]:
         self.calls.append("window")
         return _recorded_read()
 

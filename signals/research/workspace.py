@@ -219,8 +219,8 @@ def build(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, Any] | No
     ``ready`` and its ``summary``, and returns the ``ready``."""
     kept = store.window(sid, slug)
     read = kept["read"]
-    if read is None:
-        read = reads.window(slug)
+    if read is None:  # the replay needs the window's facts and prices, not everyone's trades
+        read = reads.window(slug, with_trades=False)
         store.put_window(sid, slug, read=read)
     start, end = int(read["start"]), int(read["end"])
     trades = store.trades(sid, slug)
