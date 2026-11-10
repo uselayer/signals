@@ -326,8 +326,11 @@ Each step only when the owner asks (AGENTS.md, "Deploying"). Done on 10 Nov 2026
    ```
    rm -rf /tmp/research-deploy && mkdir /tmp/research-deploy && git archive main | tar -x -C /tmp/research-deploy
    cd /tmp/research-deploy && cp Dockerfile.research Dockerfile && cp railway.research.json railway.json
-   railway up . --path-as-root --service signals-research
+   railway up . --path-as-root --project 1fa0df51-dcc0-4870-970d-129224fc3df9 --environment production --service signals-research --ci
    ```
+   Always name the project (`--project`, the `signals` project's id): `/tmp/research-deploy` isn't linked to it, and on
+   10 Nov 16:18 UTC an upload without it made a new Railway project ("pure-liberation", deleted at once) instead of
+   deploying to `signals-research`. Check the output names `signals`, never a new project.
    Then check that https://signals-research-production.up.railway.app/openapi.json is titled "Signals research" (not
    "Signals"), `/api/research/health` says `"ok": true, "model_key": true`, and a `POST /api/research/sessions`
    without a sign-in gets 401.
