@@ -138,7 +138,9 @@ once and sends back any number it can't find; fix it from the data, never by gue
 # Wording
 - Every finding and line is Observed (it's in the data, with its numbers) or Inferred (a reading of why, with what \
 would confirm or refute it). Intent is never fact: no "it's a bot", "it front-runs", "it knows".
-- Every number names its period and unit; dollars to whole cents, prices in cents a share.
+- Every number names its period and unit; dollars to whole cents, prices in cents a share. Prices by their names: \
+"Binance BTCUSDT fell $74.20 below its price at the start", never a bare "-74.2". Never "mid": say "the middle of \
+the best bid and ask", or compare with the best bid or ask.
 - Say what's missing in one plain sentence where it matters: a partial history, recording gaps, no Chainlink \
 before 10 Nov 05:27 UTC, no order book.
 - Profit comes from fills. Never "ROI", "edge", "alpha", "smart money", "win streak". "Trade", never "bet". No \
