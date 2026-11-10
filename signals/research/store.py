@@ -1,0 +1,157 @@
+"""Investigations, kept so follow-ups work: SQLite on the research service's own volume (``RESEARCH_STORE_DIR``).
+
+- ``sessions``: one investigation per row, whose it is (Clerk user id) and its code-execution container, so a
+  follow-up's code still has the last turn's variables.
+- ``messages``: the conversation exactly as sent to and returned by the API (thinking blocks, code runs and tool
+  calls included), so a follow-up replays it unchanged.
+- ``events``: what the page was streamed, in order, so an investigation can be redrawn or a dropped stream resumed.
+- ``charts``: the Vega-Lite specs the agent made.
+- ``runs``: per question, tokens and dollars (Opus 5.5 list prices), rounds, tool calls and whether the number
+  check passed: "what one investigation costs" (the brief's open item).
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import secrets
+import sqlite3
+import threading
+import time
+from datetime import UTC, datetime
+from typing import Any
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, user TEXT NOT NULL, created REAL NOT NULL,
+  title TEXT, container TEXT);
+CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user, created);
+CREATE TABLE IF NOT EXISTS messages (session TEXT NOT NULL, seq INTEGER NOT NULL, role TEXT NOT NULL,
+  content TEXT NOT NULL, hidden INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (session, seq));
+CREATE TABLE IF NOT EXISTS events (session TEXT NOT NULL, seq INTEGER NOT NULL, at REAL NOT NULL,
+  event TEXT NOT NULL, PRIMARY KEY (session, seq));
+CREATE TABLE IF NOT EXISTS charts (id TEXT PRIMARY KEY, session TEXT NOT NULL, created REAL NOT NULL,
+  title TEXT, caption TEXT, spec TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, user TEXT NOT NULL,
+  started REAL NOT NULL, ended REAL, day TEXT NOT NULL, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+  cache_read INTEGER DEFAULT 0, cache_write INTEGER DEFAULT 0, cost_usd REAL DEFAULT 0, rounds INTEGER DEFAULT 0,
+  tool_calls INTEGER DEFAULT 0, check_ok INTEGER, error TEXT);
+"""
+# (table, column definition): when the session's container was made (they expire after 30 days), and per question
+# the code runs, the container's estimated seconds and their dollars (cost_usd includes them).
+ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 0"),
+         ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0")]  # fmt: skip
+
+
+def day(t: float | None = None) -> str:
+    return datetime.fromtimestamp(t or time.time(), UTC).strftime("%Y-%m-%d")
+
+
+class Store:
+    def __init__(self, path: str | None = None) -> None:
+        if path is None:
+            folder = os.environ.get("RESEARCH_STORE_DIR", os.path.expanduser("~/.signals-research"))
+            os.makedirs(folder, exist_ok=True)
+            path = os.path.join(folder, "research.db")
+        self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        self._db.row_factory = sqlite3.Row
+        self._lock = threading.Lock()
+        with self._lock:
+            self._db.execute("PRAGMA journal_mode=WAL")
+            self._db.executescript(SCHEMA)
+            for table, col in ADDED:  # columns added after a store was first made
+                have = {r[1] for r in self._db.execute(f"PRAGMA table_info({table})")}
+                if col.split()[0] not in have:
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+
+    def _q(self, sql: str, args: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
+        with self._lock:
+            return self._db.execute(sql, args).fetchall()
+
+    # ---- sessions ----
+
+    def new_session(self, user: str, title: str | None = None) -> str:
+        sid = secrets.token_urlsafe(12)
+        self._q("INSERT INTO sessions (id, user, created, title) VALUES (?, ?, ?, ?)", (sid, user, time.time(), title))
+        return sid
+
+    def session(self, sid: str, user: str) -> dict[str, Any] | None:
+        """The session, only for the user it belongs to."""
+        rows = self._q("SELECT * FROM sessions WHERE id = ? AND user = ?", (sid, user))
+        return dict(rows[0]) if rows else None
+
+    def session_any(self, sid: str) -> dict[str, Any] | None:
+        """The session whoever it belongs to: for the agent, after the server checked the owner."""
+        rows = self._q("SELECT * FROM sessions WHERE id = ?", (sid,))
+        return dict(rows[0]) if rows else None
+
+    def sessions(self, user: str, limit: int = 50) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._q(
+            "SELECT id, created, title FROM sessions WHERE user = ? ORDER BY created DESC LIMIT ?", (user, limit))]  # fmt: skip
+
+    def set_container(self, sid: str, container: str | None) -> None:
+        """The session's code container, and when it was first given (None: none, a new one next time)."""
+        self._q("UPDATE sessions SET container = ?, container_at = ? WHERE id = ?",
+                (container, time.time() if container else None, sid))  # fmt: skip
+
+    def set_title(self, sid: str, title: str) -> None:
+        self._q("UPDATE sessions SET title = COALESCE(title, ?) WHERE id = ?", (title, sid))
+
+    # ---- the conversation ----
+
+    def messages(self, sid: str) -> list[dict[str, Any]]:
+        return [{"role": r["role"], "content": json.loads(r["content"])}
+                for r in self._q("SELECT role, content FROM messages WHERE session = ? ORDER BY seq", (sid,))]  # fmt: skip
+
+    def add_message(self, sid: str, role: str, content: Any, hidden: bool = False) -> None:
+        with self._lock:
+            seq = self._db.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE session = ?", (sid,)).fetchone()[0]
+            self._db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", (sid, seq, role, json.dumps(content), int(hidden)))
+
+    # ---- events ----
+
+    def add_event(self, sid: str, event: dict[str, Any]) -> int:
+        with self._lock:
+            seq = self._db.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM events WHERE session = ?", (sid,)).fetchone()[0]
+            self._db.execute("INSERT INTO events VALUES (?, ?, ?, ?)", (sid, seq, time.time(), json.dumps(event, default=str)))
+        return int(seq)
+
+    def events(self, sid: str, after: int = -1) -> list[dict[str, Any]]:
+        return [json.loads(r["event"]) | {"seq": r["seq"]}
+                for r in self._q("SELECT seq, event FROM events WHERE session = ? AND seq > ? ORDER BY seq", (sid, after))]  # fmt: skip
+
+    # ---- charts ----
+
+    def add_chart(self, sid: str, title: str, spec: dict[str, Any], caption: str | None) -> str:
+        cid = "c_" + secrets.token_urlsafe(8)
+        self._q("INSERT INTO charts VALUES (?, ?, ?, ?, ?, ?)", (cid, sid, time.time(), title, caption, json.dumps(spec)))
+        return cid
+
+    def chart(self, cid: str, user: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT c.* FROM charts c JOIN sessions s ON s.id = c.session WHERE c.id = ? AND s.user = ?",
+                       (cid, user))  # fmt: skip
+        if not rows:
+            return None
+        r = dict(rows[0])
+        return r | {"spec": json.loads(r["spec"])}
+
+    # ---- costs ----
+
+    def start_run(self, sid: str, user: str) -> int:
+        with self._lock:
+            cur = self._db.execute("INSERT INTO runs (session, user, started, day) VALUES (?, ?, ?, ?)",
+                                   (sid, user, time.time(), day()))  # fmt: skip
+            return int(cur.lastrowid or 0)
+
+    def update_run(self, run: int, **fields: Any) -> None:
+        if fields:
+            cols = ", ".join(f"{k} = ?" for k in fields)
+            self._q(f"UPDATE runs SET {cols} WHERE id = ?", (*fields.values(), run))  # noqa: S608 (column names are ours)
+
+    def spent_today(self, user: str | None = None) -> float:
+        sql, args = "SELECT COALESCE(SUM(cost_usd), 0) FROM runs WHERE day = ?", (day(),)
+        if user is not None:
+            sql, args = sql + " AND user = ?", (*args, user)
+        return float(self._q(sql, args)[0][0])
+
+    def runs(self, limit: int = 100) -> list[dict[str, Any]]:
+        return [dict(r) for r in self._q("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,))]

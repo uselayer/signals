@@ -246,6 +246,68 @@ basket`.
 
 Counting (above) stays the record of alerts and follows; nothing here changes it.
 
+## Research agent
+
+A signed-in trader names a wallet and asks, e.g. "Analyze 0x… BTC 15-minute trades since Nov 8: when does it enter,
+at what prices, and what's its strategy?" Claude Opus 5.5 investigates with code: it reads the wallet's trades,
+lines each Bitcoin 15-minute window up with Polymarket's prices, Binance's and the window's start price and result,
+draws charts, and answers with what it observed and what it infers, each figure traced to the data. Follow-ups stay
+in the same investigation.
+
+It's `signals/research/`, its own service (`Dockerfile.research`, `railway.research.json`), never inside the engine:
+investigations are long and read a lot, and the engine keeps alerts first.
+
+- **The loop** (`agent.py`): `claude-opus-5-5`, adaptive thinking, code execution. Its five tools are called from its
+  code (programmatic tool calling), so a wallet's thousands of trades go to the code, never into the chat:
+  `wallet_trades` (uselayer 0.19 `whales.trades_between`, filtered to `btc-updown-15m-` slugs, paged past full
+  reads), `wallet_profile` (the engine's public `/api/record` and `/api/account`), `window` (a window's start price,
+  final price, result, Up/Down prices about every minute, everyone's trades in it, coverage; from Layer's recording
+  when there is one: top-10 books, Chainlink and Binance by the second, the recording's own coverage), `outside_prices`
+  (Binance spot candles from `data-api.binance.vision`; Chainlink once Layer's recordings are readable) and
+  `make_chart` (a Vega-Lite spec with its data inline).
+- **Every number traces to data** (`trace.py`): before an answer is shown, each figure in it must match (rounded,
+  as $, k, ¢ or %) something a tool returned or its code printed. A miss gets one retry; what's still unmatched is
+  shown flagged (`unverified`).
+- **Reads** (`data.py`): Polymarket through the SDK on the service's own budget (`RESEARCH_READ_RATE`, 4 a second),
+  never the engine's. Order books and Chainlink come from Layer's recorded windows (`recorded.py`: layer#642's
+  `derived/windows/btc-15m/…json.gz` in R2, read with a read-only token); without the token, or for a window not
+  recorded, `window` reads Polymarket's API and says the book isn't available, rather than returning nothing.
+- **Kept** (`store.py`, SQLite in `RESEARCH_STORE_DIR`): investigations, the conversation, every event, charts, and
+  per question its tokens and cost (`/api/research/runs`, the owner's).
+
+| Route | |
+|---|---|
+| `POST /api/research/sessions` | a new investigation |
+| `GET /api/research/sessions` | yours |
+| `GET /api/research/sessions/{id}` | one, with every event so far |
+| `POST /api/research/sessions/{id}/ask` `{question}` | starts answering (202), one at a time per person |
+| `GET /api/research/sessions/{id}/events?after=N` | server-sent events from N on, live until `done` |
+| `GET /api/research/charts/{id}` | a chart's spec |
+
+Events have `type`, `v` (1) and `run`: `start`, `progress` (the agent's notes between steps), `code`, `tool_call`,
+`tool_result` (counts, coverage, errors), `code_result`, `chart` (`chart_id`, `spec`), `check`, `answer` (`text`,
+`unverified`), `notice` (e.g. an expired working state being rebuilt), `usage` (tokens, `token_usd`, `code_runs`,
+`container_s`, `container_usd`, `cost_usd`), `error`, `done`. Trades carry a stable `id`.
+
+A follow-up reuses the investigation's code container (its variables). Containers expire 30 days after they're made:
+when the API refuses one (or it's 29 days old), the question runs in a new container, the page gets a `notice`, and
+the agent is told to read again what it needs. Container time is billed by execution time, at least 5 minutes a
+question ($0.05 an hour after 1,550 free hours a month); `container_s` is an estimate from when the container was
+first used to the end of the question.
+
+Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (required with `RESEARCH_HOSTED=1`),
+`RESEARCH_MAX_USD` per question (3), `RESEARCH_USER_DAILY_USD` (10), `RESEARCH_DAILY_USD` for everyone (30),
+`RESEARCH_AT_ONCE` (2), `RESEARCH_MAX_ROUNDS` (40), `RESEARCH_EFFORT` (high), `SIGNALS_ENGINE_URL`,
+`RESEARCH_METRICS_KEY`, and for Layer's recorded windows a read-only R2 token on `layer-history`: `R2_ACCOUNT_ID`,
+`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_BUCKET`, default layer-history).
+
+Locally: `ANTHROPIC_API_KEY=… uv run signals-research`, then http://127.0.0.1:8791/api/research/dev (a bare page
+for trying it; the Research tab waits on its design).
+
+Hosting it (owner): a Railway service in the `signals` project from this repo with config `railway.research.json`,
+a volume at `/research`, and its variables; then a rewrite in `web/vercel.json` above the catch-all,
+`{ "source": "/api/research/(.*)", "destination": "https://<research service>/api/research/$1" }`.
+
 ## Good to know
 
 - **Polymarket International only.** Its trades are public; every wallet is public. Signals reads them through the

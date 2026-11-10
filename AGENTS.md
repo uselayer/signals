@@ -332,6 +332,54 @@ behind Vercel (see README, "Hosting").
     either way is "Price moved away" (a big drop means the market turned against them, not a bargain).
 - Pull requests: sessions never merge. Only the owner merges, when they say "merge #N".
 
+## Research agent (`signals/research`, README "Research agent")
+
+- Its own service, never inside the engine (`app.py`): no agent run, model call or research read in the engine's
+  process. Its Polymarket reads go through the SDK on its own budget (`Budget(…, name="research")`).
+- Every number it shows traces to data (`trace.py`): a figure that doesn't match a tool result or its code's printed
+  output is never shown as fact (one retry, then flagged `unverified`). Don't loosen the check to make answers pass.
+- Wording: "Research wording" below (a draft until the owner confirms it).
+- Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
+  Layer's recordings.
+- Signed in only, and an investigation, its events and charts are only ever its owner's. Costs are capped per
+  question, per person and per day (`RESEARCH_*_USD`); raising them is the owner's call.
+- Keys (`ANTHROPIC_API_KEY`) are set by the owner in the service's variables, never by a session.
+
+### Research wording (DRAFT, 10 Nov: for the owner to confirm or change)
+
+Research is for traders and researchers, so it may say more than the consumer pages (how a wallet trades, its
+patterns, why it might trade that way), but the consumer rules above still hold: plain words, facts before
+readings, no advice. The agent's instructions (`SYSTEM` in `signals/research/agent.py`) carry 1, 3, 4, 6 and 8
+today; once these are confirmed, bring them fully in line, and from then on change both together.
+
+1. **Observed or Inferred, every finding.** Observed: what the data shows, with its numbers ("Observed: it bought
+   Up in 41 of 52 windows, at 92¢ on average, in the last 90 seconds"). Inferred: a reading of why, said as a
+   reading, with what would confirm or refute it ("Inferred: it seems to buy once the outcome looks settled. If so,
+   its entries should cluster when BTC is far from the price to beat; the window chart shows that for 3 of 4
+   windows"). Intent is never stated as fact: no "it's a bot", "it's front-running", "it knows".
+2. **Every number traces to data** (`trace.py`), names its period and unit ("over 10 Nov 00:00–24:00 UTC", "$",
+   "contracts", "¢ a contract") and is rounded the way the consumer pages round (whole cents; tenths only under 1¢).
+   A figure that wasn't read is left out, never estimated; "Unverified" numbers are shown as such, never hidden.
+3. **Say what's missing, plainly, where it matters.** Partial history ("Polymarket couldn't list every trade after
+   14:02 UTC, so this covers 14:02 back to 00:00"), recording gaps, no order book, no Chainlink before 10 Nov 05:27
+   UTC, maker vs taker unknown. One sentence each, never a disclaimer block.
+4. **Prices by their names.** "Chainlink BTC/USD" (what windows settle on), "Binance BTCUSDT", "the price to beat",
+   "the Up price on Polymarket". Never one called another, never "the BTC price" alone, never "mid".
+5. **Profit is the window's or the period's, worked out from fills** ("made $212 on these 52 windows after what it
+   paid; Polymarket's all-time figure is +$40.1k"). Never "ROI", "edge", "alpha", "smart money", "win streak".
+   A strategy's past profit is never framed as something the reader could repeat.
+6. **No advice, no predictions, no copying.** No "you could", "worth following", "likely to keep winning", "buy
+   when". "Trade", never "bet". Nothing about placing orders.
+7. **People.** The wallet asked about by its Polymarket name, else "Trader 0x91…76"; its full address only where the
+   user typed it. Other wallets only shortened, never named as the same person as anyone ("likely"/"possible" with
+   the evidence, as the consumer rule says). No judgments of the trader ("genius", "reckless", "manipulating").
+8. **Shape.** One or two plain sentences first (the pattern in short), then findings, then what the data doesn't
+   show. Short paragraphs, sentence case, times in UTC. Methodology (how a figure was worked out) only when asked,
+   or one clause.
+9. **Charts.** A plain title that says what's shown ("Window 10 Nov 04:30 UTC: BTC on Binance and Chainlink, their
+   entries"), axes with units, a one-sentence caption. Green and red only for gains and losses; sides (Up/Down) in
+   neutral colours. No chart of a figure the answer doesn't trace.
+
 ## Deploying (only when the owner asks)
 
 - **Engine** (Railway project and service `signals`): `railway up --service signals` from the repo root. It
