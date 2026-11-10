@@ -33,7 +33,7 @@ export async function fixtureApi(base = './fixtures/') {
       const ev = [{ type: 'ask.started', ask_id: asked, text: question, context: context ? ctx : null }];
       if (answer) ev.push({ type: 'answer.progress', ask_id: asked, text: 'Reading that part of the window.' }, { type: 'answer.card', ask_id: asked, ...answer }, { type: 'done' });
       else if (recorded) ev.push(...recorded.map(e => ({ ...e, ask_id: e.ask_id ?? asked })));
-      else ev.push({ type: 'answer.card', ask_id: asked, text: 'In fixtures mode only the suggested questions have recorded answers. Click a buy on the chart and choose "Why here?", or pick a suggestion.', number_check: { passed: true, flagged: {} }, fixtures_note: true }, { type: 'done' });
+      else ev.push({ type: 'answer.card', ask_id: asked, text: 'In the sample only the suggested questions have recorded answers. Click a buy on the chart and choose "Why here?", or pick a suggestion.', number_check: { passed: true, flagged: {} }, fixtures_note: true }, { type: 'done' });
       const after = log.length - 1;
       play(ev);
       return { started: true, after };
@@ -41,7 +41,7 @@ export async function fixtureApi(base = './fixtures/') {
     plan: async (id, planId, action, text) => {
       push({ type: 'plan.answered', plan_id: planId, action, text: text || null, run: null });
       if (action === 'approve' && planId === 'plan-1') { play(sample.runs[1]); return { started: true }; }
-      if (action === 'approve') { play([{ type: 'ask.started', ask_id: ++asked, text: 'Start', context: { plan_id: planId } }, { type: 'notice', text: 'Fixtures mode has no more recorded windows, so the sample stops here. With the service, this plan would run now.' }, { type: 'done' }]); return { started: true }; }
+      if (action === 'approve') { play([{ type: 'ask.started', ask_id: ++asked, text: 'Start', context: { plan_id: planId } }, { type: 'notice', text: 'There are no more recorded windows, so the sample stops here. With the service, this plan would run now.' }, { type: 'done' }]); return { started: true }; }
       play([{ type: 'notice', text: 'Tell me what to change, for example "only 9 Nov" or "include October". I\'ll redo the plan before anything runs.' }]);
       return { started: false };
     },

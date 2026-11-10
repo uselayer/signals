@@ -44,6 +44,7 @@ p { margin: 0; }
 .tabs a { padding: 7px 12px; border-radius: 999px; color: var(--muted); font-size: 14.5px; font-weight: 500; }
 .tabs a:hover { color: var(--fg); }
 .tabs a.on { background: color-mix(in srgb, var(--accent) 12%, var(--card)); color: var(--accent); }
+.tabs a.new { border: 1.5px dotted color-mix(in srgb, var(--accent) 75%, transparent); padding: 5.5px 10.5px; } /* a new feature's tab, as on the main page */
 .top .acct { margin-left: auto; display: flex; gap: 10px; align-items: center; }
 @media (max-width: 700px) { .tabs a:not(.on) { display: none; } .top .acct .chip { display: none; } .top .in { gap: 10px; } }
 .tile .tf span:last-child { white-space: nowrap; }
@@ -73,6 +74,13 @@ p { margin: 0; }
 /* home */
 .home { max-width: 860px; margin: 0 auto; padding: 40px max(16px, env(safe-area-inset-left, 0px)) 60px; display: flex; flex-direction: column; gap: 28px; }
 .home h1 { font-size: 30px; letter-spacing: -0.025em; }
+/* signed out: the teaser */
+.tag.new { align-self: flex-start; color: var(--accent); border: 1.5px dotted color-mix(in srgb, var(--accent) 75%, transparent); }
+.teaser .row { display: flex; gap: 10px; flex-wrap: wrap; }
+.sample-card { display: flex; flex-direction: column; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; box-shadow: var(--shadow); }
+.sample-card:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.sample-card q { font-size: 16px; line-height: 1.5; quotes: "\201C" "\201D"; }
+.sample-card .go { color: var(--accent); font-size: 14px; font-weight: 500; }
 .compose-big { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
 .compose-big input, .compose-big textarea { border: 0; background: transparent; font: 16px/1.5 var(--font); color: var(--fg); outline: none; width: 100%; resize: none; }
 .compose-big input { font-size: 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }

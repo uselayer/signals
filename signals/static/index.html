@@ -76,6 +76,8 @@
   @media (max-width: 900px) { .askbar { display: none; } }
   /* Breakdowns (tab, ask bar, phone tab) stay hidden until /api/config says research is on (SIGNALS_RESEARCH) */
   [data-research][hidden] { display: none !important; }
+  /* a new feature's tab: a dotted accent outline, signed in or out, until the owner takes it off (class="new") */
+  .tabs a.new { border: 1.5px dotted color-mix(in srgb, var(--accent) 75%, transparent); padding: 5.5px 10.5px; }
   .theme-btn { flex: none; width: 32px; height: 32px; margin-left: -8px; display: grid; place-items: center; border: 0; border-radius: 999px;
     background: none; color: var(--muted); cursor: pointer; }
   .theme-btn:hover { color: var(--fg); background: var(--soft); }
@@ -712,6 +714,7 @@
     .tabbar a { flex: 1; display: grid; justify-items: center; gap: 2px; padding: 4px 0; font-size: 11.5px; font-weight: 500; color: var(--faint); }
     .tabbar a.on { color: var(--accent); }
     .tabbar svg { width: 22px; height: 22px; }
+    .tabbar a.new { border: 1.5px dotted color-mix(in srgb, var(--accent) 75%, transparent); border-radius: 12px; margin: 2px 3px; padding: 2px 0; }
     body { padding-bottom: 72px; }
     #toast { bottom: calc(84px + env(safe-area-inset-bottom)); }
     main.wrap { padding-top: 20px; }
@@ -763,7 +766,7 @@
   <div class="wrap">
     <a class="brand" href="#/traders"><span class="logo"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1"/><rect x="8.5" y="7" width="3" height="10" rx="1"/><rect x="14" y="3" width="3" height="14" rx="1"/></svg></span>Signals</a>
     <nav class="tabs" aria-label="Main">
-      <a href="/research/" data-research hidden>Breakdowns</a><a href="#/" data-tab="feed">Feed</a><a href="#/watchlist" data-tab="watch">Watchlist</a><a href="#/traders" data-tab="traders">Traders</a>
+      <a href="/research/" class="new" data-research hidden>Breakdowns</a><a href="#/" data-tab="feed">Feed</a><a href="#/watchlist" data-tab="watch">Watchlist</a><a href="#/traders" data-tab="traders">Traders</a>
     </nav>
     <form class="askbar" data-research hidden action="/research/" method="get" role="search"><input type="search" name="q" placeholder="Ask about a trader or wallet" aria-label="Ask in Breakdowns"></form>
     <div class="account" id="account"></div>
@@ -773,7 +776,7 @@
 <main class="wrap" id="app"></main>
 <footer class="wrap foot">Built on <a href="https://uselayer.sh" target="_blank" rel="noopener">uselayer</a> · Every trader here trades on Polymarket International · Signals places no orders</footer>
 <nav class="tabbar" aria-label="Main">
-  <a href="/research/" data-research hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20"/><path d="M8 11.5l1.8-2 1.6 1.4 2-2.4"/></svg>Breakdowns</a>
+  <a href="/research/" class="new" data-research hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20"/><path d="M8 11.5l1.8-2 1.6 1.4 2-2.4"/></svg>Breakdowns</a>
   <a href="#/" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13h3l2.5-6 4 11 2.5-5H20"/></svg>Feed</a>
   <a href="#/watchlist" data-tab="watch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>Watchlist</a>
   <a href="#/traders" data-tab="traders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.7-3.2 2.9-5 5.5-5s4.8 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.4c1.6.7 2.6 2.3 3 4.6"/></svg>Traders</a>
