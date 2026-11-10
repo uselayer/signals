@@ -92,9 +92,19 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 
 ### Evidence
 - `proposal` `{proposal_id, ask_id, text, accept_label}`
-- `answer.card` `{ask_id, text, truncated, number_check}`: the answer to a question (M4 makes it structured:
-  label, observed lines, inferred lines, annotations, focus, finding ids).
-- `finding.added` / `finding.updated` (M4).
+- `finding.added` `{finding_id, ask_id, kind: pattern|read|unsure|data|change, label: observed|inferred, title,
+  stat: {count, out_of, unit, text}|null, rule, evidence: {supporting_window_ids, against_window_ids, trade_ids},
+  example: {window_id, step_index}|null, based_on: [finding_id], would_change_mind, number_check, counts}`.
+  `counts` is false when its numbers didn't check out: it's left out of the Findings total and nothing inferred can
+  rest on it. Evidence ids are checked against the investigation's own fills and windows.
+- `finding.updated`: the same fields plus `previous` `{title, stat, rule, label, number_check}` and `history`
+  (every earlier version). "Ask the agent to fix it" = an ask with `{finding_id}`; the agent rewrites the card from
+  the data and it comes back as `finding.updated`.
+- `answer.card` `{ask_id, label, observed: [text], inferred: [text], annotations: [{window_id, kind, t0, t1, panel,
+  label}], focus, finding_ids, number_check}`, the answer to a question; a `view.focus` comes first when `focus` is
+  set. The run ends on it. Fallback when the agent writes plain text instead: `{ask_id, text, truncated,
+  number_check}` (flagged field `text`).
+- `GET /api/research/sessions/{id}/findings` → `{findings: [latest version each], counted}`.
 
 ### Number check
 Text the agent writes (walkthrough steps, answers, later findings) is checked when written: every number must match a

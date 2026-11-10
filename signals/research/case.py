@@ -102,6 +102,48 @@ CASE_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "finding",
+        "description": (
+            "Adds an evidence card, or updates one (pass its finding_id; the previous version is kept). label: "
+            "'observed' (it's in the data) or 'inferred' (your reading of why; based_on: the observed finding ids "
+            "it rests on, and would_change_mind: what would refute it). kind: pattern|read|unsure|data|change. stat: "
+            "{count, out_of, unit, text} (e.g. 65 of 94 windows). rule: how you counted, in one plain sentence. "
+            "evidence: {supporting_window_ids, against_window_ids, trade_ids}. example: {window_id, step_index} to "
+            "step through. Every number must be one your code printed or a tool returned; a flagged finding doesn't "
+            "count and can't support an inferred one."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "finding_id": {"type": "string"}, "kind": {"type": "string"},
+                "label": {"type": "string", "enum": ["observed", "inferred"]}, "title": {"type": "string"},
+                "stat": _obj, "rule": {"type": "string"}, "evidence": _obj, "example": _obj,
+                "based_on": {"type": "array", "items": {"type": "string"}}, "would_change_mind": {"type": "string"},
+            },  # fmt: skip
+            "required": ["label", "title"],
+        },
+    },
+    {
+        "name": "answer",
+        "description": (
+            "Answers the user's question as a card: label (a few words), observed: [lines with the data's "
+            "numbers], inferred: [your readings, each saying what would confirm it], annotations: [{window_id, kind: "
+            "point|span|region, t0, t1, panel: btc|prices|position, label}] to draw on the replay, focus: {stage, "
+            "window_id, step_index, label} to move the workspace, finding_ids it rests on or changed. Call it once "
+            "at the end of every answer, then end your turn."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string"}, "observed": {"type": "array", "items": {"type": "string"}},
+                "inferred": {"type": "array", "items": {"type": "string"}},
+                "annotations": {"type": "array", "items": _obj}, "focus": _obj,
+                "finding_ids": {"type": "array", "items": {"type": "string"}},
+            },  # fmt: skip
+            "required": ["label", "observed"],
+        },
+    },
+    {
         "name": "propose",
         "description": "Offers the user a next step as a card ('Next, I'd look at…') with a button; they accept or decline.",
         "input_schema": {
@@ -177,6 +219,7 @@ class Case:
         self.failed_checks: set[str] = set()  # cards whose numbers failed once (the second time they're shown)
         self.sent_ready: set[str] = set()
         self.waiting = False  # a plan is shown and waits for Start
+        self.answered = False  # the answer tool ran: closing text isn't another card
 
     def check(self, key: str, texts: dict[str, str | None]) -> tuple[str | None, dict[str, Any]]:
         """Number-checks a card's texts: (an error for the agent on a first miss, else None; the number_check)."""
@@ -291,6 +334,74 @@ class Case:
         self._ready(slug)
         self.emit({"type": "walkthrough.ready", "window_id": slug, "steps": out})
         return "ok", False, {"steps": len(out), "number_check": check["passed"]}
+
+    def _finding(self, inp: dict[str, Any]) -> tuple[str, bool, dict[str, Any]]:
+        label = inp.get("label")
+        if label not in ("observed", "inferred"):
+            raise ReadError("label must be observed or inferred.")
+        fid = inp.get("finding_id")
+        old = self.store.finding(self.sid, str(fid)) if fid else None
+        if fid and old is None:
+            raise ReadError(f"There's no finding {fid} in this investigation.")
+        ev = inp.get("evidence") or {}
+        trades = [str(t) for t in ev.get("trade_ids") or []]
+        unknown = [t for t in trades if not self.store.trade(self.sid, t)]
+        if unknown:
+            raise ReadError(f"These trade ids aren't the wallet's fills: {', '.join(unknown[:5])}.")
+        windows = {w for k in ("supporting_window_ids", "against_window_ids") for w in ev.get(k) or []}
+        missing = sorted(w for w in windows if self.store.window(self.sid, str(w))["read"] is None
+                         and not self.store.trades(self.sid, str(w)))  # fmt: skip
+        if missing:
+            raise ReadError(f"These windows weren't read in this investigation: {', '.join(missing[:5])}.")
+        based_on = [str(b) for b in inp.get("based_on") or []]
+        if label == "inferred":
+            if not based_on:
+                raise ReadError("An inferred finding needs based_on: the observed finding ids it rests on.")
+            for b in based_on:
+                f = self.store.finding(self.sid, b)
+                if f is None:
+                    raise ReadError(f"There's no finding {b} to rest on.")
+                if not (f.get("number_check") or {}).get("passed", False):
+                    raise ReadError(f"{b} has numbers that didn't check out, so nothing can rest on it until it's fixed.")
+        stat = inp.get("stat") or {}
+        stat_nums = " ".join(str(stat[k]) for k in ("count", "out_of") if stat.get(k) is not None)
+        texts = {"title": inp.get("title"), "stat": " ".join(x for x in (stat.get("text"), stat_nums) if x),
+                 "rule": inp.get("rule"), "would_change_mind": inp.get("would_change_mind")}  # fmt: skip
+        err, check = self.check(f"finding:{fid or inp.get('title')}", texts)
+        if err:
+            return err, True, {"number_check": "failed once"}
+        card = {"kind": inp.get("kind") or ("read" if label == "inferred" else "pattern"), "label": label,
+                "title": inp.get("title"), "stat": stat or None, "rule": inp.get("rule"),
+                "evidence": {"supporting_window_ids": ev.get("supporting_window_ids") or [],
+                             "against_window_ids": ev.get("against_window_ids") or [], "trade_ids": trades},
+                "example": inp.get("example"), "based_on": based_on, "would_change_mind": inp.get("would_change_mind"),
+                "number_check": check, "counts": check["passed"], "ask_id": self.ask_id}  # fmt: skip
+        if old is None:
+            fid = self.store.add_finding(self.sid, card)
+            self.emit({"type": "finding.added", "finding_id": fid, **card})
+        else:
+            prev = {k: old.get(k) for k in ("title", "stat", "rule", "label", "number_check")}
+            card["history"] = [*(old.get("history") or []), prev]
+            self.store.update_finding(self.sid, str(fid), card)
+            self.emit({"type": "finding.updated", "finding_id": fid, "previous": prev, **card})
+        return json.dumps({"finding_id": fid, "number_check": check["passed"]}), False, {"finding_id": fid}
+
+    def _answer(self, inp: dict[str, Any]) -> tuple[str, bool, dict[str, Any]]:
+        observed = [str(x) for x in inp.get("observed") or []]
+        inferred = [str(x) for x in inp.get("inferred") or []]
+        texts = {"label": inp.get("label"), **{f"observed {i + 1}": t for i, t in enumerate(observed)},
+                 **{f"inferred {i + 1}": t for i, t in enumerate(inferred)}}  # fmt: skip
+        err, check = self.check(f"answer:{self.ask_id}", texts)
+        if err:
+            return err, True, {"number_check": "failed once"}
+        focus = inp.get("focus")
+        if focus and focus.get("stage") in STAGES:
+            self._focus(focus)
+        self.emit({"type": "answer.card", "ask_id": self.ask_id, "label": inp.get("label"), "observed": observed,
+                   "inferred": inferred, "annotations": inp.get("annotations") or [], "focus": focus,
+                   "finding_ids": inp.get("finding_ids") or [], "number_check": check})  # fmt: skip
+        self.answered = True
+        return "Answer shown. End your turn now.", False, {"number_check": check["passed"]}
 
     def _propose(self, inp: dict[str, Any]) -> tuple[str, bool, dict[str, Any]]:
         n = sum(e.get("type") == "proposal" for e in self.store.events(self.sid)) + 1

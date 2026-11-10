@@ -594,6 +594,13 @@ def test_an_untraced_number_gets_one_retry() -> None:
     assert len(cards) == 1 and cards[0]["text"] == "Observed: 3 trades." and cards[0]["number_check"]["passed"]
 
 
+def test_repeating_the_same_untraced_number_doesnt_make_it_trace() -> None:
+    model = _model(_calls_tool(), _answers("It made $99.99."), _answers("It made $99.99."))
+    events, _, _ = _ask(model)
+    card = [e for e in events if e["type"] == "answer.card"][0]
+    assert not card["number_check"]["passed"]  # the check's note quoted $99.99; that never makes it data
+
+
 def test_still_untraced_after_the_retry_is_shown_flagged() -> None:
     model = _model(_calls_tool(), _answers("It made $99.99."), _answers("It made $98.00."))
     events, store, _ = _ask(model)
@@ -695,6 +702,63 @@ def test_show_windows_and_focus() -> None:
     assert case.handle("focus", {"stage": "nowhere"})[1]
     assert case.handle("step_status", {"step_id": "trades", "status": "done", "summary": "94 windows"})[0] == "ok"
     assert json.loads(case.handle("propose", {"text": "Next, I'd look at the losing windows"})[0])["proposal_id"] == "P1"
+
+
+def _case_with_fill() -> tuple[Any, Store, str, dict[str, Any], list[dict[str, Any]]]:
+    from signals.research.case import Case
+
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    fill = _wallet_fill("0xa", LATE + 12, 0.62, 10)
+    store.add_trades(sid, [fill])
+    store.put_window(sid, LATE_SLUG, read=_recorded_read())
+    events: list[dict[str, Any]] = []
+    src = trace.Sources(['{"windows": 94, "heavier_lost": 65, "pairs_under_1": 83, "median_pair": 0.929}'])
+    return Case(sid, 7, store, FakeCaseReads(), events.append, lambda: src), store, sid, fill, events
+
+
+def test_findings_observed_inferred_flagged_and_fixed() -> None:
+    case, store, sid, fill, events = _case_with_fill()
+    obs = {"label": "observed", "kind": "pattern", "title": "Extra shares end on the losing side",
+           "stat": {"count": 65, "out_of": 94, "unit": "windows", "text": "65 of 94 windows"},
+           "rule": "The side with more shares at the end lost.",
+           "evidence": {"supporting_window_ids": [LATE_SLUG], "trade_ids": [fill["id"]]}}  # fmt: skip
+    text, failed, _ = case.handle("finding", obs)
+    assert not failed and json.loads(text)["finding_id"] == "F1"
+    added = events[-1]
+    assert added["type"] == "finding.added" and added["counts"] and added["number_check"]["passed"]
+    # a made-up count fails once, then shows flagged and doesn't count
+    bad = {**obs, "title": "Pairs cost under $1", "stat": {"count": 88, "out_of": 94, "text": "88 of 94 windows"}}
+    assert case.handle("finding", bad)[1]
+    case.handle("finding", bad)
+    f2 = events[-1]
+    assert f2["finding_id"] == "F2" and not f2["counts"] and f2["number_check"]["flagged"]["stat"][0]["value_text"] == "88"
+    # nothing rests on a flagged finding; an inferred one needs based_on
+    read = {"label": "inferred", "title": "Resting orders on both sides", "would_change_mind": "maker flags"}
+    assert "needs based_on" in case.handle("finding", read)[0]
+    assert "didn't check out" in case.handle("finding", {**read, "based_on": ["F2"]})[0]
+    assert not case.handle("finding", {**read, "based_on": ["F1"]})[1] and events[-1]["label"] == "inferred"
+    # fixing F2 keeps the earlier version
+    case.handle("finding", {**bad, "finding_id": "F2", "stat": {"count": 83, "out_of": 94, "text": "83 of 94 windows"}})
+    upd = events[-1]
+    assert upd["type"] == "finding.updated" and upd["counts"] and upd["previous"]["stat"]["count"] == 88
+    assert store.finding(sid, "F2")["history"][0]["stat"]["count"] == 88  # type: ignore[index]
+    assert "aren't the wallet's fills" in case.handle("finding", {**obs, "evidence": {"trade_ids": ["x"]}})[0]
+    assert "weren't read" in case.handle("finding", {**obs, "evidence": {"supporting_window_ids": ["btc-updown-15m-1"]}})[0]
+
+
+def test_the_answer_card_and_the_run_ends_on_it() -> None:
+    card = {"label": "Why it lost here", "observed": ["Its heavier side lost in 65 of 94 windows."],
+            "inferred": ["Resting orders fill more on the side that's falling."], "finding_ids": ["F1"]}  # fmt: skip
+    model = _model(_calls_tool(), _turn(_direct("answer", card, "a1")), _turn(_direct("answer", card, "a2")),
+                   _answers("never asked"))  # fmt: skip
+    events, store, sid = _ask(model, "Why does it lose?")
+    assert "65" in model.requests[2]["messages"][-1]["content"][0]["content"]  # the first card bounced, naming 65
+    assert len(model.requests) == 3  # the second is shown flagged, and the run ends on it: no extra call
+    cards = [e for e in events if e["type"] == "answer.card"]
+    assert len(cards) == 1 and cards[0]["label"] == "Why it lost here" and cards[0]["number_check"]["passed"] is False
+    assert cards[0]["number_check"]["flagged"]["observed 1"][0]["value_text"] == "65"  # the fake data has no 65
 
 
 # ---- the server ----

@@ -50,6 +50,7 @@ STDOUT_SHOWN = 4_000  # characters of a code run's output put in its event
 
 EVENT_VERSION = 2  # 2: the case file's events (docs/research-contract.md)
 WALLET_IN = re.compile(r"0x[0-9a-fA-F]{40}")
+CHECK_NOTE = "Signals' number check:"  # starts the note sent back for an untraced number; never itself a source
 EVENTS = """start, progress (the agent's notes between steps), code (what it runs), tool_call, tool_result (a
 summary: counts, coverage, errors), code_result (output), chart (a Vega-Lite spec), check (the number check),
 answer, usage, error, done"""
@@ -139,9 +140,9 @@ def sources_of(messages: list[dict[str, Any]], system: str = SYSTEM) -> trace.So
         content = m["content"] if isinstance(m["content"], list) else [{"type": "text", "text": m["content"]}]
         for b in content:
             t = b.get("type")
-            if m["role"] == "user" and t == "text":
-                s.add(b.get("text") or "", data=False)
-            elif t == "tool_result":
+            if m["role"] == "user" and t == "text" and not (b.get("text") or "").startswith(CHECK_NOTE):
+                s.add(b.get("text") or "", data=False)  # (the check's own note quotes the bad numbers: never a source)
+            elif t == "tool_result" and not b.get("is_error"):  # an error (e.g. a bounced number) is never data
                 c = b.get("content")
                 s.add(c if isinstance(c, str) else json.dumps(c))
             elif (out := _code_output(b)) is not None:
@@ -329,17 +330,19 @@ class Agent:
                 results = self._run_tools(sid, case, pending, emit, state)
                 messages.append({"role": "user", "content": results})
                 self.store.add_message(sid, "user", results, hidden=True)
-                if case.waiting:  # a plan is on the page: the next run starts when the user presses Start
+                if case.waiting or case.answered:  # a plan waits for Start, or the answer card is out: the run ends
                     return True
                 continue
-            # The turn's answer: its text after the last code run or tool call.
+            if case.answered:  # the answer tool made the card; any closing words aren't a second answer
+                return True
+            # No answer tool: the turn's answer is its text after the last code run or tool call (a plain card).
             last_i = max((i for i, b in enumerate(content) if b.get("type") != "text"), default=-1)
             answer = "\n\n".join(b.get("text") or "" for b in content[last_i + 1 :] if b.get("type") == "text").strip()
             src = sources_of(messages)
             flags = trace.flagged(answer, src)
             if flags and not retried:
                 retried = True
-                note = ("Signals' number check: these numbers in your answer aren't in any tool result or printed "
+                note = (f"{CHECK_NOTE} these numbers in your answer aren't in any tool result or printed "
                         f"output: {', '.join(f['value_text'] for f in flags)}. Print each figure you state from your "
                         "code (or drop it), then give the whole answer again.")  # fmt: skip
                 fix = {"role": "user", "content": [{"type": "text", "text": note}]}

@@ -236,6 +236,14 @@ def events(sid: str, request: Request, after: int = -1, user: str = Depends(auth
                              headers={"cache-control": "no-store", "x-accel-buffering": "no"})  # fmt: skip
 
 
+@app.get("/api/research/sessions/{sid}/findings")
+def findings(sid: str, user: str = Depends(auth.user_of)) -> JSONResponse:
+    """The investigation's evidence cards, latest version each (with ``history``), and how many count."""
+    _own(sid, user)
+    fs = store.findings(sid)
+    return _private({"findings": fs, "counted": sum(bool(f.get("counts")) for f in fs)})
+
+
 @app.get("/api/research/sessions/{sid}/windows")
 def windows(sid: str, user: str = Depends(auth.user_of)) -> JSONResponse:
     """The investigation's window tiles (``window.summary``) and its coverage per source."""
