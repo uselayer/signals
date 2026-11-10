@@ -99,6 +99,9 @@ first, then inferred readings resting on them. Aim to answer within about 8 minu
 nearly up, answer at once from what you have. Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \
 about) and focus on it. Offer what you'd look at next with propose. Always finish with answer: the pattern in one \
 or two lines, the observed and inferred lines, and the finding ids.
+- If a code run comes back with an error such as "unavailable" or a timeout, that's a passing fault, not the end: \
+run it again (its variables may be gone, so read again what you need). Give up only after a second failure, and \
+then say so.
 - Every call from your code is a round trip, so keep them few: one show_windows for all windows, step_status for \
 a step's start and end, not every item. Call the workspace tools after your code has finished, never in the same \
 step as a code run.
