@@ -126,7 +126,10 @@ def coverage(window: dict[str, Any]) -> dict[str, Any]:
     book = (rec.get("book") or {}) if recorded else {}
     trades = (rec.get("trades") or {}) if recorded else {}
     has_chainlink = bool(window.get("chainlink")) and start >= OUTSIDE_FROM
-    outage = any(a < end and start < b for a, b in UNUSABLE) or (recorded and rec.get("usable") is False)
+    # An outage is a span the recorder lost as a whole (UNUSABLE). The recording's own usable=false mostly means
+    # seconds without a book: the window still counts for fills, trades and position; only book facts (paid_ask,
+    # what was for sale) depend on it, per second (lost spans), never the whole window.
+    outage = any(a < end and start < b for a, b in UNUSABLE)
     return {
         "window_id": window.get("slug"), "source": window.get("source") or "Polymarket API",
         "chainlink": "full" if has_chainlink else "start_and_result",
@@ -140,7 +143,8 @@ def coverage(window: dict[str, Any]) -> dict[str, Any]:
                           "pct": trades.get("pct")} if recorded
         else {"read": (window.get("coverage") or {}).get("trades_read"), "complete": (window.get("coverage") or {})
               .get("trades_complete")},
-        "outage": bool(outage), "reasons": rec.get("reasons") or [] if recorded else [],
+        "outage": bool(outage), "book_usable": rec.get("usable") if recorded else None,
+        "reasons": rec.get("reasons") or [] if recorded else [],
         "notes": window.get("recording_notes") or [],
     }  # fmt: skip
 
@@ -219,8 +223,8 @@ def build(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, Any] | No
     ``ready`` and its ``summary``, and returns the ``ready``."""
     kept = store.window(sid, slug)
     read = kept["read"]
-    if read is None:
-        read = reads.window(slug)
+    if read is None:  # the replay needs the window's facts and prices, not everyone's trades
+        read = reads.window(slug, with_trades=False)
         store.put_window(sid, slug, read=read)
     start, end = int(read["start"]), int(read["end"])
     trades = store.trades(sid, slug)

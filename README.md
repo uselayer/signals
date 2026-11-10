@@ -275,19 +275,10 @@ investigations are long and read a lot, and the engine keeps alerts first.
 - **Kept** (`store.py`, SQLite in `RESEARCH_STORE_DIR`): investigations, the conversation, every event, charts, and
   per question its tokens and cost (`/api/research/runs`, the owner's).
 
-| Route | |
-|---|---|
-| `POST /api/research/sessions` | a new investigation |
-| `GET /api/research/sessions` | yours |
-| `GET /api/research/sessions/{id}` | one, with every event so far |
-| `POST /api/research/sessions/{id}/ask` `{question}` | starts answering (202), one at a time per person |
-| `GET /api/research/sessions/{id}/events?after=N` | server-sent events from N on, live until `done` |
-| `GET /api/research/charts/{id}` | a chart's spec |
-
-Events have `type`, `v` (1) and `run`: `start`, `progress` (the agent's notes between steps), `code`, `tool_call`,
-`tool_result` (counts, coverage, errors), `code_result`, `chart` (`chart_id`, `spec`), `check`, `answer` (`text`,
-`unverified`), `notice` (e.g. an expired working state being rebuilt), `usage` (tokens, `token_usd`, `code_runs`,
-`container_s`, `container_usd`, `cost_usd`), `error`, `done`. Trades carry a stable `id`.
+The case file (the research page at `/research`, `signals/research/static/`) is driven by the agent through
+events: a plan that waits for Start, step progress, window tiles and replays the server builds from the data,
+walkthroughs, evidence cards (findings) and answer cards. Every route, event and shape is in
+[docs/research-contract.md](docs/research-contract.md), the single source of truth (events version 2).
 
 A follow-up reuses the investigation's code container (its variables). Containers expire 30 days after they're made:
 when the API refuses one (or it's 29 days old), the question runs in a new container, the page gets a `notice`, and

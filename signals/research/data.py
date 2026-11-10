@@ -231,7 +231,10 @@ class Reads:
             raise ReadError(f"Polymarket has no market {slug or condition_id}.")
         return found[0]
 
-    def window(self, slug: str | None = None, condition_id: str | None = None) -> dict[str, Any]:
+    def window(self, slug: str | None = None, condition_id: str | None = None, *,
+               with_trades: bool = True) -> dict[str, Any]:  # fmt: skip
+        """One window. ``with_trades`` false skips everyone's trades in it (the case file's replay doesn't use them on
+        the API path: a tile costs three reads instead of five or more)."""
         if not slug and not condition_id:
             raise ReadError("Give the window's slug (like btc-updown-15m-1794285000) or its condition_id.")
         recorded = self.recorded_window(slug) if slug else None
@@ -269,7 +272,7 @@ class Reads:
             {"ts": int(r.get("timestamp") or 0), "wallet": r.get("proxyWallet"), "outcome": r.get("outcome"),
              "action": "sell" if str(r.get("side")).upper() == "SELL" else "buy", "price": float(r.get("price") or 0),
              "size": float(r.get("size") or 0), "tx": r.get("transactionHash")}
-            for r in self.whales._poly.market_trades(cid, limit=MARKET_TRADES)
+            for r in (self.whales._poly.market_trades(cid, limit=MARKET_TRADES) if with_trades else [])
         ]  # fmt: skip
         trades.sort(key=lambda r: r["ts"])
         gaps = [b[0] - a[0] for pts in out["prices"].values() for a, b in zip(pts, pts[1:], strict=False)]
@@ -281,7 +284,8 @@ class Reads:
             "price_step_s": sorted(gaps)[len(gaps) // 2] if gaps else None,  # measured (median), not assumed
             "price_points": {k: len(v) for k, v in out["prices"].items()},
             "largest_price_gap_s": max(gaps) if gaps else None,
-            "trades_read": len(trades), "trades_complete": len(trades) < MARKET_TRADES,
+            "trades_read": len(trades) if with_trades else None,
+            "trades_complete": len(trades) < MARKET_TRADES if with_trades else None,
         }  # fmt: skip
         if len(trades) >= MARKET_TRADES:
             out["coverage"]["note"] = f"Only the latest {MARKET_TRADES} trades in this market were read."

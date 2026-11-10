@@ -92,15 +92,28 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 
 ### Evidence
 - `proposal` `{proposal_id, ask_id, text, accept_label}`
-- `answer.card` `{ask_id, text, truncated, number_check}`: the answer to a question (M4 makes it structured:
-  label, observed lines, inferred lines, annotations, focus, finding ids).
-- `finding.added` / `finding.updated` (M4).
+- `finding.added` `{finding_id, ask_id, kind: pattern|read|unsure|data|change, label: observed|inferred, title,
+  stat: {count, out_of, unit, text}|null, rule, evidence: {supporting_window_ids, against_window_ids, trade_ids},
+  example: {window_id, step_index}|null, based_on: [finding_id], would_change_mind, number_check, counts}`.
+  `counts` is false when its numbers didn't check out: it's left out of the Findings total and nothing inferred can
+  rest on it. Evidence ids are checked against the investigation's own fills and windows.
+- `finding.updated`: the same fields plus `previous` `{title, stat, rule, label, number_check}` and `history`
+  (every earlier version). "Ask the agent to fix it" = an ask with `{finding_id}`; the agent rewrites the card from
+  the data and it comes back as `finding.updated`.
+- `answer.card` `{ask_id, label, observed: [text], inferred: [text], annotations: [{window_id, kind, t0, t1, panel,
+  label}], focus, finding_ids, number_check}`, the answer to a question; a `view.focus` comes first when `focus` is
+  set. The run ends on it. Fallback when the agent writes plain text instead: `{ask_id, text, truncated,
+  number_check}` (flagged field `text`).
+- `GET /api/research/sessions/{id}/findings` → `{findings: [latest version each], counted}`.
 
 ### Number check
 Text the agent writes (walkthrough steps, answers, later findings) is checked when written: every number must match a
 value in a tool result or the agent's printed output (rounded; $, k/M; ¢ and % as ×100 of a share, never a dollar
 amount). A first miss goes back to the agent to fix; a second is shown flagged:
-`number_check: {passed, flagged: {<field>: [{value_text, start, end, data_value|null}]}}`. `start`/`end` are
+`number_check: {passed, flagged: {<field>: [{value_text, start, end, data_value|null}]}}`. Field names: a finding's
+`title`, `stat` (its text, then its count and out_of), `rule`, `would_change_mind`; a walkthrough step's own
+`number_check` (one per step) `title`, `observed`, `inferred`; a structured `answer.card`'s `label`, `observed 1…`,
+`inferred 1…` (the line's index, from 1); a plain-text `answer.card`'s `text`. `start`/`end` are
 character offsets into that field's text; `data_value` is the data's closest value (within 10%), or null. Times,
 dates, wallet addresses and slugs aren't checked.
 
@@ -111,7 +124,8 @@ dates, wallet addresses and slugs aren't checked.
 
 ## Client calls
 - **Ask** `POST /api/research/sessions/{id}/ask` `{question, context?, origin?}`. `context`: none, `{trade_id}`,
-  `{window_id, t}`, `{finding_id}` or `{finding_id, stat}`. The server reads what it points at from the
+  `{trade_ids: [...]}` (a burst, up to 50), `{window_id, t}` (t in unix seconds), `{finding_id}` or
+  `{finding_id, stat}`. The server reads what it points at from the
   investigation's data (the fill as drawn, or the prices, position and fills within 10 s at that moment) and gives
   the agent those facts with the question; 404 when it isn't in this investigation. `ask.started.context` echoes it.
   Follow-ups answer directly unless they widen the scope, which proposes a plan and waits.

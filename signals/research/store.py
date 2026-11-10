@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS inv_trades (session TEXT NOT NULL, trade_id TEXT NOT 
 CREATE INDEX IF NOT EXISTS inv_trades_slug ON inv_trades(session, slug, ts);
 CREATE TABLE IF NOT EXISTS inv_windows (session TEXT NOT NULL, slug TEXT NOT NULL, updated REAL NOT NULL,
   read TEXT, ready TEXT, summary TEXT, PRIMARY KEY (session, slug));
+CREATE TABLE IF NOT EXISTS findings (session TEXT NOT NULL, id TEXT NOT NULL, n INTEGER NOT NULL, updated REAL NOT NULL,
+  data TEXT NOT NULL, PRIMARY KEY (session, id));
 """
 # (table, column definition): when the session's container was made (they expire after 30 days), and per question
 # the code runs, the container's estimated seconds and their dollars (cost_usd includes them).
@@ -185,6 +187,28 @@ class Store:
     def summaries(self, sid: str) -> list[dict[str, Any]]:
         return [json.loads(r["summary"]) for r in self._q(
             "SELECT summary FROM inv_windows WHERE session = ? AND summary IS NOT NULL ORDER BY slug", (sid,))]  # fmt: skip
+
+    # ---- findings: the evidence cards, each with the versions it had ----
+
+    def add_finding(self, sid: str, data: dict[str, Any]) -> str:
+        """A new finding, F<n> in this investigation; returns its id."""
+        with self._lock:
+            n = self._db.execute("SELECT COALESCE(MAX(n), 0) + 1 FROM findings WHERE session = ?", (sid,)).fetchone()[0]
+            fid = f"F{n}"
+            self._db.execute("INSERT INTO findings VALUES (?, ?, ?, ?, ?)",
+                             (sid, fid, n, time.time(), json.dumps({**data, "finding_id": fid})))  # fmt: skip
+        return fid
+
+    def update_finding(self, sid: str, fid: str, data: dict[str, Any]) -> None:
+        self._q("UPDATE findings SET data = ?, updated = ? WHERE session = ? AND id = ?",
+                (json.dumps({**data, "finding_id": fid}), time.time(), sid, fid))  # fmt: skip
+
+    def finding(self, sid: str, fid: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM findings WHERE session = ? AND id = ?", (sid, fid))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def findings(self, sid: str) -> list[dict[str, Any]]:
+        return [json.loads(r["data"]) for r in self._q("SELECT data FROM findings WHERE session = ? ORDER BY n", (sid,))]
 
     # ---- costs ----
 
