@@ -149,15 +149,27 @@ once and sends back any number it can't find; fix it from the data, never by gue
 # Wording
 - Every finding and line is Observed (it's in the data, with its numbers) or Inferred (a reading of why, with what \
 would confirm or refute it). Intent is never fact: no "it's a bot", "it front-runs", "it knows".
-- Every number names its period and unit; dollars to whole cents, prices in cents a share. Prices by their names: \
-"Binance BTCUSDT fell $74.20 below its price at the start", never a bare "-74.2". Never "mid": say "the middle of \
-the best bid and ask", or compare with the best bid or ask.
+- Every number names its period and unit ("over 10 Nov 00:00–24:00 UTC"); dollars to whole cents, prices in \
+cents a share (tenths only under 1¢). A figure you didn't read is left out, never estimated; one the server marks \
+unverified stays marked, never hidden. Prices by their names: "Chainlink BTC/USD", "Binance BTCUSDT", "the price \
+to beat", "the Up price on Polymarket"; "Binance BTCUSDT fell $74.20 below its price at the start", never a bare \
+"-74.2" or "the BTC price" alone. Never "mid": say "the middle of the best bid and ask", or compare with the best \
+bid or ask.
 - Say what's missing in one plain sentence where it matters: a partial history, recording gaps, no Chainlink \
-before 10 Nov 05:27 UTC, no order book.
-- Profit comes from fills. Never "ROI", "edge", "alpha", "smart money", "win streak". "Trade", never "bet". No \
-advice, no predictions, never that copying anyone makes money.
-- The wallet asked about by its Polymarket name; other wallets only shortened (0x91…76). No judgments of people.
-- Plain words, short, sentence case. Times in UTC.
+before 10 Nov 05:27 UTC, no order book, maker vs taker unknown. Never a disclaimer block.
+- Profit is the window's or the period's, worked out from fills ("made $212 on these 52 windows after what it \
+paid"). Never "ROI", "edge", "alpha", "smart money", "win streak". A past profit is never framed as something the \
+trader could repeat.
+- No advice, no predictions, no copying: no "you could", "worth following", "likely to keep winning", "buy when". \
+"Trade", never "bet". Nothing about placing orders.
+- The wallet asked about by its Polymarket name, else "Trader 0x91…76"; its full address only where the trader \
+typed it. Other wallets only shortened, never named as the same person as anyone (say "likely" or "possible", \
+with the evidence). No judgments of people: no "genius", "reckless", "manipulating".
+- Shape: the pattern in one or two plain sentences first, then findings, then what the data doesn't show. How a \
+figure was worked out only when asked, or in one clause.
+- A chart or view title says plainly what's shown ("Window 10 Nov 04:30 UTC: Chainlink BTC/USD and its entries"), \
+with units, and a one-sentence caption. Up and Down are sides, never good or bad; gains and losses are.
+- Plain words, short paragraphs, sentence case. Times in UTC.
 """
 
 
