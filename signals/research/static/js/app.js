@@ -1,4 +1,4 @@
-// The research page (/research): Investigations, and one investigation's workspace. Routes: #/ (yours, and a new
+// The research page (/research): Breakdowns, and one breakdown's workspace (an "investigation" in the code and contract). Routes: #/ (yours, and a new
 // one), #/i/<id> (an investigation). ?fixtures plays recorded data with no service; ?q= prefills a question (the
 // main site's ask bar sends it).
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
@@ -21,7 +21,7 @@ function Top({ fixtures }) {
   useEffect(() => mountUser(acct.current));
   return html`<header class="top"><div class="in">
     <a class="brand" href="/"><span class="logo">${LOGO}</span>Signals</a>
-    <nav class="tabs" aria-label="Main"><a class="on" href="#/">Investigations</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a></nav>
+    <nav class="tabs" aria-label="Main"><a class="on" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a></nav>
     <div class="acct">${fixtures ? html`<span class="chip">Fixtures: recorded data, no service</span>` : html`<div ref=${acct}></div>`}</div></div></header>`;
 }
 
@@ -41,7 +41,7 @@ function App() {
   return html`<${Hatch} /><${Top} fixtures=${FIXTURES} />
     ${err && html`<div class="home"><div class="banner err"><div><p>${err}</p><p class="small muted" style="margin-top:4px">To see the page with recorded data, open <a class="link" href="?fixtures#/">fixtures mode</a>.</p></div></div></div>`}
     ${!err && !api && html`<div class="home"><p class="muted">Loading…</p></div>`}
-    ${api && gate === 'signin' && html`<div class="home"><h1>Investigations</h1><p class="muted">Research is for signed-in Signals accounts: your investigations are only ever yours.</p><div><button class="btn primary" onClick=${openSignIn}>Sign in</button></div></div>`}
+    ${api && gate === 'signin' && html`<div class="home"><h1>Breakdowns</h1><p class="muted">Breakdowns are for signed-in Signals accounts: yours are only ever yours.</p><div><button class="btn primary" onClick=${openSignIn}>Sign in</button></div></div>`}
     ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} />`)}`;
 }
 
@@ -64,12 +64,12 @@ function Home({ api }) {
       <div class="compose-big">
         <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} onInput=${e => setWallet(e.target.value)} />
         <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} onInput=${e => setQ(e.target.value)}></textarea>
-        <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Investigate'}</button></div></div>
+        <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${err && html`<div class="banner err">${err}</div>`}</div>
-    <div style="display:flex;flex-direction:column;gap:10px"><h3>Your investigations</h3>
+    <div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
-        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled investigation'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div><span class="r">Saved</span></a>`)}</div>`}</div>
-    <p class="muted small">Later: re-running an investigation when the wallet trades again, with Telegram alerts, comes after the first version.</p>
+        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled breakdown'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div><span class="r">Saved</span></a>`)}</div>`}</div>
+    <p class="muted small">Later: re-running a breakdown when the wallet trades again, with Telegram alerts, comes after the first version.</p>
   </main>`;
 }
 
@@ -152,15 +152,15 @@ function Investigation({ api, id }) {
   return html`<div class="inv">
     <section class="main" aria-label="Workspace">
       <div class="head">
-        <div class="muted small"><a href="#/">Investigations</a> /</div>
-        <h1>${shortWallets(inv.title) || 'Investigation'}</h1>
+        <div class="muted small"><a href="#/">Breakdowns</a> /</div>
+        <h1>${shortWallets(inv.title) || 'Breakdown'}</h1>
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}<span>BTC Up or Down 15m</span>
           ${inv.summaries.length > 0 && html`<span>· ${plural(inv.summaries.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
         <div class="acts"><button class="btn sm later" onClick=${() => { ui.laterOpen = !ui.laterOpen; redraw(); }}>Watch for new trades · later</button></div>
-        ${ui.laterOpen && html`<div class="later-pop"><span class="tag plain" style="align-self:flex-start">Later, not in this version</span><b>Keep this investigation up to date</b>
+        ${ui.laterOpen && html`<div class="later-pop"><span class="tag plain" style="align-self:flex-start">Later, not in this version</span><b>Keep this breakdown up to date</b>
           <p>Re-run it when the wallet trades a new window, and tell you on Telegram when a pattern breaks or something new shows up. Those alerts will count in Signals' 20 a day.</p>
-          <p class="muted small">For now the investigation is saved: reopen it any time from Investigations.</p><button class="btn sm" onClick=${() => { ui.laterOpen = false; redraw(); }}>OK</button></div>`}
+          <p class="muted small">For now the breakdown is saved: reopen it any time from Breakdowns.</p><button class="btn sm" onClick=${() => { ui.laterOpen = false; redraw(); }}>OK</button></div>`}
       </div>
       ${FIXTURES && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
@@ -170,7 +170,7 @@ function Investigation({ api, id }) {
       ${ui.stage === 'windows' && html`<${WindowsStage} inv=${inv} ui=${ui} act=${act} />`}
       ${ui.stage === 'window' && html`<${ReplayStage} inv=${inv} ui=${ui} act=${act} w=${cur} steps=${steps} />`}
       ${ui.stage === 'trades' && html`<${TradesStage} w=${cur} act=${act} />`}
-      ${ui.stage === 'later' && html`<div class="ghostbox"><b>Your own views come here later.</b><br />Ask for any chart or table ("plot its average fill price by minute"), and it's kept in this investigation and refreshes with new trades. Not in this version.</div>`}
+      ${ui.stage === 'later' && html`<div class="ghostbox"><b>Your own views come here later.</b><br />Ask for any chart or table ("plot its average fill price by minute"), and it's kept in this breakdown and refreshes with new trades. Not in this version.</div>`}
     </section>
     <${AgentColumn} inv=${inv} ui=${ui} act=${act} fixtures=${!!api.fixtures} />
   </div>`;

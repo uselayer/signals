@@ -293,7 +293,7 @@ Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (require
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_BUCKET`, default layer-history).
 
 **The page** (`signals/research/static/`, served by the service at `/research`; the main site's nav links to it as
-Investigations, and its ask bar opens it with `?q=`). An investigation is a saved case file: the plan waits for
+Breakdowns, and its ask bar opens it with `?q=`). A breakdown (an investigation in the code) is a saved case file: the plan waits for
 Start; the agent's events fill a workspace (tiles of every window, one window's replay with steps, its fills) and a
 column of findings, answers and proposals; you can point at a fill or a moment and ask about it. The replay draws
 Binance BTCUSDT, Chainlink BTC/USD (when recorded), the price to beat, the Up and Down prices, the wallet's fills and

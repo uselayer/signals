@@ -24,7 +24,7 @@ export async function fixtureApi(base = './fixtures/') {
     create: async () => SID,
     session: async () => ({ id: SID, title: sample.runs[0][0].title, running, events: [...log] }),
     ask: async (id, question, context) => {
-      if (running) throw Object.assign(new Error('An investigation of yours is still running. Wait for it to finish.'), { status: 409 });
+      if (running) throw Object.assign(new Error('A breakdown of yours is still running. Wait for it to finish.'), { status: 409 });
       if (!log.length) { play(sample.runs[0]); return { started: true, after: -1 }; }
       asked += 1;
       // context.answer: in fixtures mode the page works out a pointed question's answer from the window itself
