@@ -214,6 +214,35 @@ def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | 
     raise ReadError("Point at a trade (trade_id), a moment (window_id and t) or a finding (finding_id).")
 
 
+def prebuild(store: Any, reads: Any, sid: str, scope: dict[str, Any], emit: Callable[[dict[str, Any]], None]) -> int:
+    """On Start, the approved scope's tiles before the agent asks for them: the wallet's trades in the range, then
+    every window they're in, built SHOW_AT_ONCE at a time, each window.summary sent as soon as it's built, then the
+    coverage. Everything is kept, so the agent's own show_windows (and the page's GETs) find it ready. Returns the
+    number of windows shown; 0 when the scope doesn't name a wallet and a range."""
+    wallet, a, b = scope.get("wallet"), scope.get("from"), scope.get("to")
+    if not (wallet and a and b):
+        return 0
+    family = str(scope.get("family") or "btc-updown-15m").rstrip("-") + "-"
+    got = reads.wallet_trades(wallet, a, b, family)
+    store.set_wallet(sid, str(got.get("wallet") or wallet).lower())
+    store.add_trades(sid, got["trades"])
+    slugs = sorted({t["slug"] for t in got["trades"] if t.get("slug")})
+    covs = []
+    with ThreadPoolExecutor(max_workers=SHOW_AT_ONCE) as pool:
+        futures = {pool.submit(workspace.build, store, reads, sid, s): s for s in slugs}
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception as e:  # noqa: BLE001 - a window that can't be read is left for the agent to retry
+                print(f"research: prebuild {futures[fut]} failed: {type(e).__name__}: {e}", flush=True)
+                continue
+            emit({"type": "window.summary", **workspace.summary(r)})
+            covs.append(r["coverage"])
+    covs.sort(key=lambda c: c["window_id"] or "")
+    emit({"type": "coverage", "per_source": workspace.totals(covs), "windows": covs})
+    return len(covs)
+
+
 def _brief(s: dict[str, Any]) -> dict[str, Any]:
     return {"window_id": s["window_id"], "result": s["result"], "fills": len(s["entries"]),
             "first_entry_s": s["first_entry_s"], "cost": s["cost"], "profit": s["profit"], "coverage": s["coverage"]}  # fmt: skip
@@ -260,6 +289,7 @@ class Case:
         scope = inp.get("scope") or {}
         if scope.get("wallet"):
             self.store.set_wallet(self.sid, str(scope["wallet"]).lower())
+        self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild)
         plan = {"type": "plan.proposed", "plan_id": f"plan-{self.ask_id}", "ask_id": self.ask_id,
                 "title": inp.get("title"), "scope": scope, "steps": steps,
                 "scope_options": inp.get("scope_options") or [], "estimate_usd": inp.get("estimate_usd"),

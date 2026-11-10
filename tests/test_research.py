@@ -652,6 +652,27 @@ def test_a_stop_with_findings_ends_on_an_answer_not_an_error(monkeypatch: pytest
     assert "limit" in events[kinds.index("notice")]["text"]
 
 
+def test_start_builds_the_approved_scopes_tiles_without_waiting_for_the_agent() -> None:
+    plan = {"title": "t", "scope": {"wallet": W, "family": "btc-updown-15m", "from": LATE - 60, "to": LATE + 900},
+            "steps": [{"id": "s", "title": "x", "source": "y"}]}  # fmt: skip
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    reads = FakeCaseReads()
+    model = _model(_turn(_direct("propose_plan", plan)), _answers("Observed: 3 trades."))
+    A.Agent(reads, store, model).ask(sid, "u1", "How?", lambda e: None)  # type: ignore[arg-type]
+    assert store.scope(sid)["from"] == LATE - 60  # type: ignore[index]
+    events: list[dict[str, Any]] = []
+    A.Agent(reads, store, model).ask(sid, "u1", "Start the plan.", events.append,  # type: ignore[arg-type]
+                                     context={"plan_id": "plan-1", "action": "approve"})
+    kinds = [e["type"] for e in events]
+    assert "window.summary" in kinds and "coverage" in kinds
+    assert [e for e in events if e["type"] == "window.summary"][0]["window_id"] == LATE_SLUG
+    assert "trades:btc-updown-15m-" in reads.calls  # the scope's trades, read by the server
+    assert A.PREBUILD_NOTE.strip()[:30] in model.requests[1]["messages"][-1]["content"][-1]["text"]
+    usage = [e for e in events if e["type"] == "usage"][0]
+    assert "tiles_done" in usage["phases"] and "first_tile" in usage["phases"]
+
+
 def test_usage_reports_the_phases() -> None:
     plan = {"title": "t", "scope": {"wallet": W}, "steps": [{"id": "s", "title": "x", "source": "y"}]}
     events, _, _ = _ask(_model(_turn(_direct("propose_plan", plan))))

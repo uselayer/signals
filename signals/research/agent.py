@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -23,7 +24,7 @@ from typing import Any
 
 from signals.research import tools as T
 from signals.research import trace
-from signals.research.case import CASE_TOOLS, Case
+from signals.research.case import CASE_TOOLS, Case, prebuild
 from signals.research.case import NAMES as CASE_NAMES
 from signals.research.data import Reads
 from signals.research.store import Store
@@ -58,6 +59,9 @@ WRAP_UP = ("Time is nearly up for this question. Stop exploring: finish any find
 # all tiles < 60 s after Start, the first finding < 3 min, the answer < 8 min.
 PHASES = {"plan.proposed": "plan", "window.summary": "first_tile", "finding.added": "first_finding",
           "walkthrough.ready": "walkthrough", "answer.card": "answer"}  # fmt: skip
+PREBUILD_NOTE = ("\n\n(The server is already putting every window of the approved scope on the page, built from the "
+                 "wallet's trades: you don't need show_windows for them; it returns their tiles at once if you want the "
+                 "figures.)")  # fmt: skip
 REQUEST_TIMEOUT_S = 300.0  # no bytes for this long ends a model request (streams send pings while it thinks)
 SLOW_REQUEST_S = 120.0
 CHECK_NOTE = "Signals' number check:"  # starts the note sent back for an untraced number; never itself a source
@@ -92,9 +96,9 @@ your code runs and between the trader's questions: reuse them instead of reading
 # The flow
 - A new investigation: call propose_plan first, before reading anything, and end your turn. The trader presses \
 Start (or asks for changes; then propose a new plan).
-- After Start: work through the plan, marking each step running and done with step_status. Read the wallet's \
-trades, group them by window, and call show_windows once with every window it traded (the overview fills in as \
-they're built). Add each finding the moment you've counted it, so the trader reads while you work: observed \
+- After Start: work through the plan, marking each step running and done with step_status. The server puts the \
+approved scope's windows on the page itself as soon as Start is pressed; read the wallet's trades in your code and \
+group them by window for your own counting. Use show_windows only for windows outside the approved scope. Add each finding the moment you've counted it, so the trader reads while you work: observed \
 first, then inferred readings resting on them. Aim to answer within about 8 minutes; if you're told time is \
 nearly up, answer at once from what you have. Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \
 about) and focus on it. Offer what you'd look at next with propose. Always finish with answer: the pattern in one \
@@ -287,12 +291,20 @@ class Agent:
                   "subject": {"wallet": w.group(0).lower() if w else None, "name": None}, "scope": None,
                   "origin": origin})  # fmt: skip
         emit({"type": "ask.started", "ask_id": run, "text": question, "context": context})
+        pre: threading.Thread | None = None
         try:
             if self.store.spent_today() >= DAILY_USD or self.store.spent_today(user) >= USER_DAILY_USD:
                 raise OverBudget("Research has reached today's limit. It resets at 00:00 UTC.")
             said = question
             if facts:  # what the user pointed at, as the server read it from the data
                 said += "\n\nThe user is pointing at this (from the data):\n" + json.dumps(facts, default=str)
+            scope = self.store.scope(sid) if (context or {}).get("action") == "approve" else None
+            if scope and scope.get("wallet") and scope.get("from") and scope.get("to"):
+                # Start: the server builds the approved scope's tiles at once, while the agent is still thinking.
+                pre = threading.Thread(target=self._prebuild, args=(sid, scope, emit), name=f"prebuild-{sid}",
+                                       daemon=True)  # fmt: skip
+                pre.start()
+                said += PREBUILD_NOTE
             ok = self._ask(sid, run, said, emit, totals, state)
             self.store.update_run(run, check_ok=int(ok))
         except OverBudget as e:
@@ -306,6 +318,8 @@ class Agent:
                 emit({"type": "error", "message": "The investigation stopped on an error. Try again in a minute."})
             self.store.update_run(run, error=f"{type(e).__name__}: {e}"[:500])
         finally:
+            if pre is not None and pre.is_alive():  # its tiles belong to this run's events
+                pre.join(timeout=60)
             # Container time: from its first use in this question to the end, at least the billed 5 minutes. An
             # estimate (Anthropic bills execution time; a paused container waiting on our tools may count).
             used = state["container_from"] is not None
@@ -434,6 +448,14 @@ class Agent:
                 emit({"type": "answer.card", "ask_id": run, "text": answer, "truncated": stop == "max_tokens",
                       "number_check": {"passed": not flags, "flagged": {"text": flags} if flags else {}}})  # fmt: skip
             return not flags
+
+    def _prebuild(self, sid: str, scope: dict[str, Any], emit: Callable[[dict[str, Any]], None]) -> None:
+        t0 = time.monotonic()
+        try:
+            n = prebuild(self.store, self.reads, sid, scope, emit)
+            print(f"research: prebuilt {n} windows for {sid} in {time.monotonic() - t0:.1f} s", flush=True)
+        except Exception as e:  # noqa: BLE001 - the agent can still show them itself
+            print(f"research: prebuild for {sid} failed: {type(e).__name__}: {e}", flush=True)
 
     def _fallback_answer(self, sid: str, run: int, why: str, phases: dict[str, float],
                          emit: Callable[[dict[str, Any]], None]) -> bool:  # fmt: skip

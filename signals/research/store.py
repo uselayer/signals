@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS findings (session TEXT NOT NULL, id TEXT NOT NULL, n 
 # the code runs, the container's estimated seconds and their dollars (cost_usd includes them).
 ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 0"),
          ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0"),
-         ("sessions", "wallet TEXT")]  # fmt: skip
+         ("sessions", "wallet TEXT"), ("sessions", "scope TEXT")]  # fmt: skip
 
 
 def day(t: float | None = None) -> str:
@@ -148,6 +148,14 @@ class Store:
         return r | {"spec": json.loads(r["spec"])}
 
     # ---- what the investigation read: the wallet's fills and its windows (the case file draws from these) ----
+
+    def set_scope(self, sid: str, scope: dict[str, Any]) -> None:
+        """The scope of the plan last proposed ({wallet, family, from, to}): what Start builds tiles for."""
+        self._q("UPDATE sessions SET scope = ? WHERE id = ?", (json.dumps(scope), sid))
+
+    def scope(self, sid: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT scope FROM sessions WHERE id = ?", (sid,))
+        return json.loads(rows[0]["scope"]) if rows and rows[0]["scope"] else None
 
     def set_wallet(self, sid: str, wallet: str) -> None:
         self._q("UPDATE sessions SET wallet = COALESCE(wallet, ?) WHERE id = ?", (wallet, sid))
