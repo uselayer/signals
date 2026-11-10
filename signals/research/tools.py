@@ -59,9 +59,15 @@ TOOLS: list[dict[str, Any]] = [
             "final_price (Chainlink at the end), result ('Up'/'Down', null while open), closed, resolution_source, "
             "tokens: {Up: id, Down: id}, prices: {Up: [[ts, price]], Down: [[ts, price]]} (Polymarket's price "
             "history, about 1 point a minute), trades: [{ts, wallet, outcome, action, price, size, tx}] (everyone's "
-            "trades in this market), book: {available, why} (order books: not connected yet), coverage: {source, "
-            "price_step_s, price_points, largest_price_gap_s, trades_read, trades_complete, note}}. When read from "
-            "Layer's recordings it also has recording_notes: say so when coverage shows gaps."
+            "trades in this market), book: {available, why}, coverage: {source, price_step_s, price_points, "
+            "largest_price_gap_s, trades_read, trades_complete, note}}. When Layer recorded the window (source "
+            "starts 'Layer recording') it has more: prices at every change (the middle of best bid and ask), "
+            "best_prices [{receive_ms, up_bid, up_ask, down_bid, down_ask}], book {available: true, rows: [{unix_s, "
+            "up_bids, up_asks, down_bids, down_asks}] top 10 [[price, size]]}, chainlink and binance [[unix_s, "
+            "price]], chainlink_at_start/at_end, result_from_chainlink, trades with stream_ms, and the recording's "
+            "coverage {usable, reasons, book: {secondsWithoutBook, of, largestSilenceS, lost}, trades: {pct, ...}} "
+            "plus recording_notes. Say so when coverage isn't usable or has gaps. Prefer its chainlink and binance "
+            "over outside_prices for that window."
         ),
         "input_schema": {
             "type": "object",

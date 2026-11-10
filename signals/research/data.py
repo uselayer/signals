@@ -220,9 +220,9 @@ class Reads:
             "closed": bool(m.get("closed")), "resolution_source": m.get("resolutionSource") or event.get("resolutionSource"),
             "tokens": dict(zip(outcomes, tokens, strict=False)),
         }  # fmt: skip
-        if recorded:  # Layer's window reader: books, trades, outside prices and its own coverage
-            return out | {"source": "Layer recordings (window reader)", **recorded,
-                          "recording_notes": recording_notes(start, end)}  # fmt: skip
+        if recorded:  # Layer's window reader: books, trades, Chainlink and Binance, and its own coverage
+            return out | {k: v for k, v in recorded.items() if v is not None} | {
+                "recording_notes": recording_notes(start, end)}  # fmt: skip
         out["prices"] = {}
         for name, token in out["tokens"].items():  # Polymarket's CLOB history, about 1 point a minute
             pts = self.whales.price_history(token, start - 60, end + 60)
@@ -300,11 +300,12 @@ def reads() -> Reads:
     from uselayer.whales import Whales
 
     from signals.budget import BackgroundHttp, Budget
+    from signals.research import recorded
 
     client = Client()
     rate = float(os.environ.get("RESEARCH_READ_RATE", "4"))
     whales = Whales(BackgroundHttp(client._http, Budget(rate, name="research")), client._layer, client)  # type: ignore[arg-type]
-    return Reads(whales)
+    return Reads(whales, recorded_window=recorded.reader(recorded.R2.from_env()))
 
 
 def now() -> float:

@@ -133,6 +133,64 @@ def test_window_facts_prices_trades_and_coverage() -> None:
     assert w["coverage"]["trades_complete"] and not w["book"]["available"]
 
 
+LAYER_WINDOW = {
+    "schema": "btc-15m-window-v1", "slug": SLUG, "start": 1794285000000, "end": 1794285900000,
+    "startPrice": {"polymarket": 74719.68, "chainlinkAtStart": 74719.5, "chainlinkAvg60": 74720.1},
+    "endPrice": {"polymarket": 74620.4, "chainlinkAtEnd": 74620.0, "chainlinkAvg60": 74621.0},
+    "result": {"polymarket": "Down", "fromChainlink": "Down", "resolutionSource": "chainlink"},
+    "columns": {"prices": ["receive_ms", "up_bid", "up_ask", "down_bid", "down_ask"],
+                "book": ["unix_s", "up_bids", "up_asks", "down_bids", "down_asks"],
+                "trades": ["venue_unix_s", "stream_receive_ms", "outcome", "side", "price", "size", "taker_wallet",
+                           "transaction_hash"]},
+    "prices": [[1794285000500, 0.49, 0.51, 0.49, 0.51]],
+    "book": [[1794285000, [[0.49, 100]], [[0.51, 80]], [[0.49, 90]], [[0.51, 70]]]],
+    "trades": [[1794285010, 1794285008000, "Up", "BUY", 0.51, 20, W, "0xt"]],
+    "chainlink": [[1794285000, 74719.5]], "binance": [[1794285000, 74827.09]],
+    "coverage": {"usable": True, "reasons": [], "book": {"secondsWithoutBook": 3, "of": 900}},
+}  # fmt: skip
+
+
+def test_a_recorded_window_in_the_tools_shape() -> None:
+    from signals.research import recorded
+
+    s = recorded.shaped(LAYER_WINDOW)
+    assert s["prices"] == {"Up": [[1794285000, 0.5]], "Down": [[1794285000, 0.5]]}
+    assert s["trades"] == [{"ts": 1794285010, "wallet": W, "outcome": "Up", "action": "buy", "price": 0.51,
+                            "size": 20, "tx": "0xt", "stream_ms": 1794285008000}]  # fmt: skip
+    assert s["book"]["available"] and s["book"]["rows"][0]["up_asks"] == [[0.51, 80]]
+    assert (s["result"], s["chainlink_at_start"], s["coverage"]["book"]["secondsWithoutBook"]) == ("Down", 74719.5, 3)
+
+
+def test_r2_signed_get_and_the_window_reading_it() -> None:
+    import gzip
+
+    from signals.research import recorded
+
+    asked: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        asked.append(req)
+        if req.url.path.endswith(f"{SLUG}.json.gz"):
+            return httpx.Response(200, content=gzip.compress(json.dumps(LAYER_WINDOW).encode()))
+        return httpx.Response(404)
+
+    r2 = recorded.R2("acct", "kid", "secret", web=_web(handler), now=lambda: datetime(2026, 11, 10, 5, 0, tzinfo=UTC))
+    read = recorded.reader(r2)
+    poly = SimpleNamespace(_profiles="g", _list=lambda url, p: [_market()] if p["closed"] == "true" else [],
+                           market_trades=lambda *a, **k: pytest.fail("a recorded window reads no API trades"))  # fmt: skip
+    w = D.Reads(SimpleNamespace(_poly=poly), recorded_window=read).window(SLUG)
+    req = asked[0]
+    assert req.url.host == "acct.r2.cloudflarestorage.com"
+    assert req.url.path == f"/layer-history/derived/windows/btc-15m/2026/11/10/{SLUG}.json.gz"
+    auth = req.headers["authorization"]
+    assert auth.startswith("AWS4-HMAC-SHA256 Credential=kid/20261110/auto/s3/aws4_request")
+    assert "secret" not in auth and req.headers["x-amz-date"] == "20261110T050000Z"
+    assert w["source"].startswith("Layer recording") and w["book"]["available"] and w["chainlink"]
+    assert w["start"] == 1794285000 and w["recording_notes"] == []
+    assert read("btc-updown-15m-1794286800") is None  # not cached yet: the API instead
+    assert recorded.reader(None)(SLUG) is None
+
+
 def test_recording_notes() -> None:
     assert "no order book" in D.recording_notes(1_793_000_000, 1_793_000_900)[0]
     assert any("overloaded" in n for n in D.recording_notes(1_794_080_000, 1_794_080_900))
