@@ -351,7 +351,8 @@ class Agent:
         for b in pending:
             emit({"type": "tool_call", "id": b.get("id"), "name": b.get("name"),
                   "input": {k: v for k, v in (b.get("input") or {}).items() if k != "spec"}})  # fmt: skip
-        futures = [self.pool.submit(T.run, b.get("name", ""), b.get("input") or {}, self.reads, save) for b in pending]
+        futures = [self.pool.submit(T.run, b.get("name", ""), b.get("input") or {}, self.reads, save,
+                                    store=self.store, sid=sid) for b in pending]  # fmt: skip
         results = []
         for b, f in zip(pending, futures, strict=True):
             text, failed, summary = f.result()

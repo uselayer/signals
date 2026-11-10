@@ -110,10 +110,11 @@ def recording_notes(start: int, end: int) -> list[str]:
     return notes
 
 
-def trade_id(r: dict[str, Any]) -> str:
-    """A fill's stable id (the same fill always gets the same one), for linking a finding or a chart mark to it."""
-    key = f'{r.get("tx")}|{r.get("token")}|{r.get("ts")}|{r.get("action")}|{r.get("price")}|{r.get("size")}'
-    return "f_" + hashlib.sha1(key.encode()).hexdigest()[:12]
+def trade_id(tx: Any, asset: Any, action: Any, price: Any, size: Any, ts: Any) -> str:
+    """A fill's id, the same everywhere (docs/research-contract.md; Layer's window reader computes it too): the
+    first 12 hex characters of sha1("tx|asset|action|price to 4 dp|size to 6 dp|unix seconds")."""
+    key = f"{tx}|{asset}|{action}|{float(price or 0):.4f}|{float(size or 0):.6f}|{int(ts or 0)}"
+    return hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
 def _row(t: Any) -> dict[str, Any]:
@@ -182,7 +183,7 @@ class Reads:
             rows = [r for r in rows if (r["slug"] or "").startswith(slug_prefix)]
         rows.sort(key=lambda r: (r["ts"], r["tx"] or ""))
         for r in rows:
-            r["id"] = trade_id(r)
+            r["id"] = trade_id(r["tx"], r["token"], r["action"], r["price"], r["size"], r["ts"])
         out: dict[str, Any] = {
             "wallet": w, "start": a, "end": b, "slug_prefix": slug_prefix, "count": len(rows),
             "windows": len({r["slug"] for r in rows}), "complete": complete, "read_to": read_to, "source": source,

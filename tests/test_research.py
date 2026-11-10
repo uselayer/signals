@@ -101,7 +101,7 @@ def test_wallet_trades_rows_from_the_sdk() -> None:
                    slug=SLUG, event_slug=SLUG)  # fmt: skip
     out = D.Reads(Whales019([t])).wallet_trades(W, 0, 200)
     row = dict(out["trades"][0])
-    assert row.pop("id") == D.trade_id(row)
+    assert row.pop("id") == D.trade_id("0xt", "7", "sell", 0.6, 10.0, 100) == D.trade_id("0xt", "7", "sell", "0.60", 10, "100")
     assert row == {"ts": 100, "slug": SLUG, "condition_id": "0xc", "outcome": "Down", "outcome_index": 1,
                    "token": "7", "action": "sell", "price": 0.6, "size": 10.0, "usd": 6.0, "tx": "0xt"}  # fmt: skip
 
@@ -240,6 +240,118 @@ def test_times_parse() -> None:
         D.unix("yesterday")
 
 
+# ---- the case file: a window's replay, built by the server ----
+
+LATE = 1794290400  # 10 Nov 06:00 UTC: after Chainlink recording began
+LATE_SLUG = f"btc-updown-15m-{LATE}"
+
+
+def _recorded_read(start: int = LATE) -> dict[str, Any]:
+    from signals.research import recorded
+
+    j = json.loads(json.dumps(LAYER_WINDOW).replace("1794285", str(start)[:7]))
+    j["prices"] = [[(start + 2) * 1000, 0.40, 0.42, 0.57, 0.59], [(start + 10) * 1000, 0.60, 0.62, 0.37, 0.39]]
+    j["trades"] = [[start + 12, (start + 11) * 1000 + 500, "Up", "BUY", 0.62, 10, "0xother", "0xa"],
+                   [start + 14, (start + 3) * 1000, "Up", "BUY", 0.40, 5, "0xother", "0xb"]]  # fmt: skip
+    j["chainlink"] = [[start, 74719.5], [start + 1, 74720.0]]
+    s = recorded.shaped(j)
+    return {"slug": f"btc-updown-15m-{start}", "start": start, "end": start + 900, "title": "BTC", **s}
+
+
+def _wallet_fill(tx: str, ts: int, price: float, size: float, outcome: str = "Up", action: str = "buy") -> dict[str, Any]:
+    r = {"ts": ts, "slug": f"btc-updown-15m-{LATE}", "token": "1" if outcome == "Up" else "2", "outcome": outcome,
+         "action": action, "price": price, "size": size, "usd": round(price * size, 2), "tx": tx}  # fmt: skip
+    return r | {"id": D.trade_id(tx, r["token"], action, price, size, ts)}
+
+
+def test_a_window_replay_from_a_recording() -> None:
+    from signals.research import workspace as WS
+
+    fills = [_wallet_fill("0xa", LATE + 12, 0.62, 10), _wallet_fill("0xb", LATE + 14, 0.41, 5),
+             _wallet_fill("0xc", LATE + 20, 0.70, 4, action="sell"), _wallet_fill("0xd", LATE + 30, 0.38, 6, "Down")]  # fmt: skip
+    r = WS.ready(_recorded_read(), fills, None, {"jump": {"t": LATE + 10, "side": "Up"}})
+    assert r["window_id"] == LATE_SLUG and r["chainlink"] == [{"t": LATE, "p": 74719.5}, {"t": LATE + 1, "p": 74720.0}]
+    up = {p["t"]: p for p in r["up"]}
+    assert LATE + 1 not in up and up[LATE + 2]["ask"] == 0.42 and up[LATE + 9]["ask"] == 0.42 and up[LATE + 10]["ask"] == 0.62
+    assert r["minute_fallback"] is None and r["tags"]["jump"]["side"] == "Up"
+    t = {x["trade_id"]: x for x in r["trades"]}
+    assert t[fills[0]["id"]]["paid_ask"] is True  # 62¢ = the ask just before it reached the stream
+    assert t[fills[1]["id"]]["paid_ask"] is False  # 41¢ when the ask was 42¢: it rested
+    assert t[fills[2]["id"]]["paid_ask"] is None and t[fills[3]["id"]]["paid_ask"] is None  # a sell; not on the tape
+    assert r["position"] == [{"t": LATE + 12, "up": 10, "down": 0}, {"t": LATE + 14, "up": 15, "down": 0},
+                             {"t": LATE + 20, "up": 11, "down": 0}, {"t": LATE + 30, "up": 11, "down": 6}]  # fmt: skip
+    s = WS.summary(r)
+    assert s["entries"][0] == {"t": LATE + 12, "side": "Up", "action": "buy"} and s["first_entry_s"] == 12
+    assert s["result"] == "Down" and s["payout"] == 6 and s["cost"] == round(6.2 + 2.05 + 2.28, 2)
+    assert s["profit"] == round(6 + 2.8 - (6.2 + 2.05 + 2.28), 2) and s["coverage"]["chainlink"] == "full"
+
+
+def test_before_chainlink_recording_and_without_a_book() -> None:
+    from signals.research import workspace as WS
+
+    read = {"slug": SLUG, "start": 1794285000, "end": 1794285900, "price_to_beat": 74719.68, "result": "Down",
+            "prices": {"Up": [[1794285000, 0.5]], "Down": [[1794285000, 0.5]]}, "chainlink": [[1794285000, 1.0]],
+            "coverage": {"trades_read": 10, "trades_complete": True}}  # fmt: skip
+    r = WS.ready(read, [], [[1794285000, 74827.09]])
+    assert r["chainlink"] is None and r["coverage"]["chainlink"] == "start_and_result"  # before 10 Nov 05:27 UTC
+    assert r["up"] == [] and r["minute_fallback"]["up"] == [{"t": 1794285000, "p": 0.5}]
+    assert r["binance"] == [{"t": 1794285000, "p": 74827.09}] and not r["coverage"]["book"]
+    assert WS.summary(r)["profit"] == 0 and WS.totals([r["coverage"]])["chainlink"] == {"complete": 0, "total": 1}
+
+
+class FakeCaseReads:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def window(self, slug: str, condition_id: Any = None) -> dict[str, Any]:
+        self.calls.append("window")
+        return _recorded_read()
+
+    def outside_prices(self, *a: Any, **k: Any) -> dict[str, Any]:
+        self.calls.append("binance")
+        return {"available": True, "points": [[LATE, 1.0]]}
+
+    def wallet_trades(self, wallet: str, a: Any, b: Any, prefix: Any) -> dict[str, Any]:
+        self.calls.append(f"trades:{prefix}")
+        return {"trades": [_wallet_fill("0xa", LATE + 12, 0.62, 10)]}
+
+
+def test_build_reads_only_what_the_investigation_hasnt() -> None:
+    from signals.research import workspace as WS
+
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    reads = FakeCaseReads()
+    r = WS.build(store, reads, sid, LATE_SLUG)
+    assert reads.calls == ["window", f"trades:{LATE_SLUG}"]  # a recording brings its own Binance
+    assert r["trades"][0]["paid_ask"] is True and store.trade(sid, r["trades"][0]["trade_id"])["tx"] == "0xa"  # type: ignore[index]
+    WS.build(store, reads, sid, LATE_SLUG, {"x": 1})
+    assert reads.calls == ["window", f"trades:{LATE_SLUG}"] and store.window(sid, LATE_SLUG)["ready"]["tags"] == {"x": 1}
+    assert [s["window_id"] for s in store.summaries(sid)] == [LATE_SLUG]
+
+
+def test_window_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from signals.research import server
+
+    monkeypatch.setattr(server, "store", Store(os.path.join(tempfile.mkdtemp(), "s.db")))
+    monkeypatch.setattr(server, "_reads", FakeCaseReads())
+    server.app.dependency_overrides[server.auth.user_of] = lambda: "alice"
+    try:
+        c = TestClient(server.app)
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        assert c.get(f"/api/research/sessions/{sid}/windows/{LATE_SLUG}").status_code == 404  # no wallet yet
+        server.store.set_wallet(sid, W)
+        r = c.get(f"/api/research/sessions/{sid}/windows/{LATE_SLUG}").json()
+        assert r["window_id"] == LATE_SLUG and r["position"][0]["up"] == 10
+        tiles = c.get(f"/api/research/sessions/{sid}/windows").json()
+        assert tiles["windows"][0]["window_id"] == LATE_SLUG and tiles["coverage"]["book"] == {"complete": 1, "total": 1}
+    finally:
+        server.app.dependency_overrides.clear()
+
+
 # ---- tools ----
 
 
@@ -264,7 +376,8 @@ def test_every_data_tool_is_called_from_code_only() -> None:
 
 class FakeReads:
     def wallet_trades(self, w: str, a: Any, b: Any, prefix: Any) -> dict[str, Any]:
-        return {"count": 3, "windows": 2, "complete": True, "trades": [{"price": 0.42}]}
+        return {"wallet": W, "count": 3, "windows": 2, "complete": True,
+                "trades": [_wallet_fill("0xa", LATE + 12, 0.42, 1)]}  # fmt: skip
 
 
 class Model:

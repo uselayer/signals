@@ -154,20 +154,29 @@ def chart(inp: dict[str, Any], save: Callable[[str, dict[str, Any], str | None],
 
 
 def run(name: str, inp: dict[str, Any], reads: Reads,
-        save_chart: Callable[[str, dict[str, Any], str | None], str]) -> tuple[str, bool, dict[str, Any]]:  # fmt: skip
-    """Runs one tool: (the text the agent's code gets, whether it failed, a short summary for the event stream)."""
+        save_chart: Callable[[str, dict[str, Any], str | None], str], *,
+        store: Any = None, sid: str | None = None) -> tuple[str, bool, dict[str, Any]]:  # fmt: skip
+    """Runs one tool: (the text the agent's code gets, whether it failed, a short summary for the event stream).
+    With ``store``/``sid``, what it reads is kept on the investigation, so the case file draws from the same rows."""
     t0 = time.monotonic()
+    keep = store is not None and sid is not None
     try:
         if name == "wallet_trades":
             out = reads.wallet_trades(inp.get("wallet", ""), inp.get("start"), inp.get("end"),
                                       inp.get("slug_prefix", "btc-updown-15m-"))  # fmt: skip
-            summary = {k: out[k] for k in ("count", "windows", "complete")}
+            summary = {"rows": out["count"], "windows": out["windows"], "complete": out["complete"],
+                       "limit_hit": not out["complete"]}  # fmt: skip
+            if keep:
+                store.set_wallet(sid, out["wallet"])
+                store.add_trades(sid, out["trades"])
         elif name == "wallet_profile":
             out = reads.wallet_profile(inp.get("wallet", ""))
             summary = {"name": (out.get("record") or {}).get("name"), "missing": out.get("missing")}
         elif name == "window":
             out = reads.window(inp.get("slug"), inp.get("condition_id"))
             summary = {"slug": out.get("slug"), "result": out.get("result"), "coverage": out.get("coverage")}
+            if keep and out.get("slug"):
+                store.put_window(sid, out["slug"], read=out)
         elif name == "outside_prices":
             out = reads.outside_prices(inp.get("source", ""), inp.get("start"), inp.get("end"), inp.get("symbol") or "BTC")
             summary = {"source": out.get("source"), "available": out.get("available"), "points": len(out.get("points") or [])}

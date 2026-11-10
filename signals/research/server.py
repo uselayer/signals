@@ -34,6 +34,7 @@ if HOSTED and not auth.clerk_frontend_api(auth.CLERK_KEY):
 app = FastAPI(title="Signals research", docs_url=None, redoc_url=None)
 store = Store()
 _agent: Any = None
+_reads: Any = None  # the service's reads when no agent is running yet (tests set it)
 _running: dict[str, str] = {}  # session -> user, while a run is going
 _lock = threading.Lock()
 _changed = threading.Condition()
@@ -144,6 +145,36 @@ def events(sid: str, request: Request, after: int = -1, user: str = Depends(auth
 
     return StreamingResponse(follow(), media_type="text/event-stream",
                              headers={"cache-control": "no-store", "x-accel-buffering": "no"})  # fmt: skip
+
+
+@app.get("/api/research/sessions/{sid}/windows")
+def windows(sid: str, user: str = Depends(auth.user_of)) -> JSONResponse:
+    """The investigation's window tiles (``window.summary``) and its coverage per source."""
+    from signals.research import workspace
+
+    _own(sid, user)
+    tiles = store.summaries(sid)
+    covs = [c for c in (store.window(sid, t["window_id"])["ready"] or {} for t in tiles) if c]
+    return _private({"windows": tiles, "coverage": workspace.totals([r["coverage"] for r in covs])})
+
+
+@app.get("/api/research/sessions/{sid}/windows/{slug}")
+def window(sid: str, slug: str, user: str = Depends(auth.user_of)) -> JSONResponse:
+    """One window's full replay (``window.ready``): kept, else built now from what the investigation read."""
+    from signals.research import workspace
+
+    _own(sid, user)
+    kept = store.window(sid, slug)["ready"]
+    if kept is None:
+        if not (store.session_any(sid) or {}).get("wallet"):
+            raise HTTPException(404, detail="This investigation hasn't read a wallet yet.")
+        from signals.research.data import ReadError, reads
+
+        try:
+            kept = workspace.build(store, _reads or reads(), sid, slug)
+        except ReadError as e:
+            raise HTTPException(404, detail=str(e)) from e
+    return _private(kept)
 
 
 @app.get("/api/research/charts/{cid}")
