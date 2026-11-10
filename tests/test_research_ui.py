@@ -88,3 +88,21 @@ def test_sample_findings_have_the_contracts_fields() -> None:
             assert k in f, f"{f['finding_id']} has no {k}"
         assert set(f["evidence"]) == {"supporting_window_ids", "against_window_ids", "trade_ids"}
         assert "body" not in f, "findings have no body in the contract"
+
+
+def test_example_questions_teach_without_running_anything() -> None:
+    """The cards under the ask box (owner, 10 Nov): BTC 15-minute only, research wording, the sample trader by name
+    (never the full address on a card), and a click only fills the form: Break it down still shows the plan first."""
+    js = (STATIC / "js" / "app.js").read_text()
+    block = re.search(r"const EXAMPLES = \[(.*?)\n\];", js, re.S).group(1)
+    pairs = re.findall(r"\['([^']+)', '([^']+)'\]", block)
+    assert 4 <= len(pairs) <= 6
+    wallet = re.search(r"wallet: '(0x[0-9a-f]{40})'", js).group(1)
+    for label, question in pairs:
+        assert "BTC 15-minute" in question, question
+        for text in (label, question):
+            low = text.lower()
+            assert wallet not in low and not re.search(r"\bbets?\b|you could|worth following|\broi\b|\bedge\b", low), text
+    pick = re.search(r"const pick = (.*?);\n", js).group(1)
+    assert "start" not in pick and "ask(" not in pick and "create(" not in pick
+    assert "${!SAMPLE && html`<div class=\"examples\"" in js  # the locked sample plays one recorded question only

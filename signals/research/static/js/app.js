@@ -47,6 +47,19 @@ function App() {
     ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} />`)}`;
 }
 
+// Example questions under the ask box: they teach what to ask. A card fills the question (and the sample trader
+// when the wallet field is empty) and moves focus to Break it down; it never starts anything, so the plan and its
+// cost are still shown first. All BTC 15-minute, the only scope there is. The full address never shows on a card.
+const EXAMPLE_TRADER = { wallet: '0xb945945d5bcaf7b56834d4da8cdf8f8f94b2db68', name: 'l5Zn1bWoM8eTsK' };
+const EXAMPLES = [
+  ['How does this trader make money?', 'How does this trader make money on BTC 15-minute markets?'],
+  ['Does it buy both Up and Down in the same window?', 'In BTC 15-minute markets, does it buy both Up and Down in the same window?'],
+  ['Is the profit steady, or from a few big windows?', 'Is its profit on BTC 15-minute markets steady, or does it come from a few big windows?'],
+  ['When does it buy: before the open, or after BTC moves?', 'In BTC 15-minute markets, when does it buy: before the window opens, or after BTC moves?'],
+  ['Replay its worst window step by step', 'Replay its worst BTC 15-minute window step by step.'],
+  ['Compare today with yesterday', 'Compare its BTC 15-minute trades today with yesterday.'],
+];
+
 // Signed out: what a breakdown is, the recorded one to watch (no sign-in, no model run), and Sign in to ask your own.
 function Teaser() {
   return html`<main class="home teaser">
@@ -64,6 +77,10 @@ function Teaser() {
 function Home({ api }) {
   const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
+  const go = useRef(), focusGo = useRef(false);
+  useEffect(() => { if (focusGo.current && go.current) { focusGo.current = false; go.current.focus(); } });
+  const pick = question => { if (!wallet.trim()) setWallet(EXAMPLE_TRADER.wallet); setQ(question); focusGo.current = true; };
+  const onSample = !wallet.trim() || wallet.trim().toLowerCase() === EXAMPLE_TRADER.wallet;
   useEffect(() => { if (!SAMPLE) api.sessions().then(setList, e => setErr(e.message)); }, []);
   const start = async () => {
     if (!q.trim()) return; setBusy(true); setErr(null);
@@ -80,7 +97,10 @@ function Home({ api }) {
       <div class="compose-big">
         <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => setWallet(e.target.value)} />
         <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
-        <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
+        <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
+      ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
+        <p class="muted small">Not sure what to ask? Try one${onSample ? html` with <b>${EXAMPLE_TRADER.name}</b>, a trader active in BTC 15-minute markets` : ' about this wallet'}.</p>
+        <div class="ex-grid">${EXAMPLES.map(([label, question]) => html`<button type="button" class=${'ex' + (q === question ? ' on' : '')} onClick=${() => pick(question)}>${label}</button>`)}</div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
