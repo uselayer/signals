@@ -743,6 +743,73 @@ def test_start_builds_the_approved_scopes_tiles_without_waiting_for_the_agent() 
     assert "tiles_done" in usage["phases"] and "first_tile" in usage["phases"]
 
 
+def test_scope_times_read_the_words_a_plan_is_written_in() -> None:
+    now = LATE + 3 * 3600 + 17  # 10 Nov 09:00:17 UTC
+    assert D.scope_time("now", now) == now
+    assert D.scope_time("today 05:30 UTC", now) == LATE - 1800
+    assert D.scope_time("Yesterday at 22:00", now) == LATE - 8 * 3600
+    assert D.scope_time("2026-11-10T05:30:00Z", now) == D.scope_time(LATE - 1800, now) == LATE - 1800
+    with pytest.raises(D.ReadError):
+        D.scope_time("since breakfast", now)
+    with pytest.raises(D.ReadError):
+        D.scope_time("today 25:00 UTC", now)
+
+
+def test_a_plan_keeps_its_scope_as_times_start_can_read() -> None:
+    plan = {"title": "t", "scope": {"wallet": W, "from": "today 05:30 UTC", "to": "now"},
+            "steps": [{"id": "s", "title": "x", "source": "y"}]}  # fmt: skip
+    events, store, sid = _ask(_model(_turn(_direct("propose_plan", plan))))
+    scope = store.scope(sid)
+    assert scope["to"] == "now" and scope["from"].endswith("T05:30:00Z")  # type: ignore[index]
+    bad = {**plan, "scope": {"wallet": W, "from": "since breakfast", "to": "now"}}
+    model = _model(_turn(_direct("propose_plan", bad)), _answers("Observed: 3 trades."))
+    events, store, sid = _ask(model)
+    assert "plan.proposed" not in [e["type"] for e in events]
+    sent = model.requests[1]["messages"][-1]["content"][0]
+    assert sent["is_error"] and "ISO time" in sent["content"]
+
+
+def test_start_builds_the_tiles_of_a_scope_written_in_words() -> None:
+    plan = {"title": "t", "scope": {"wallet": W, "family": "btc-updown-15m", "from": "today 05:30 UTC", "to": "now"},
+            "steps": [{"id": "s", "title": "x", "source": "y"}]}  # fmt: skip
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    reads = FakeCaseReads()
+    model = _model(_turn(_direct("propose_plan", plan)), _answers("Observed: 3 trades."))
+    A.Agent(reads, store, model).ask(sid, "u1", "How?", lambda e: None)  # type: ignore[arg-type]
+    events: list[dict[str, Any]] = []
+    A.Agent(reads, store, model).ask(sid, "u1", "Start the plan.", events.append,  # type: ignore[arg-type]
+                                     context={"plan_id": "plan-1", "action": "approve"})
+    assert [e["window_id"] for e in events if e["type"] == "window.summary"] == [LATE_SLUG]
+    assert A.PREBUILD_NOTE.strip()[:30] in model.requests[1]["messages"][-1]["content"][-1]["text"]
+
+
+def test_a_scope_start_cant_read_leaves_the_tiles_to_the_agent() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    model = _model(_answers("Observed: 3 trades."))
+    store.set_scope(sid, {"wallet": W, "from": "since breakfast", "to": "now"})  # a plan saved before the check
+    A.Agent(FakeCaseReads(), store, model).ask(sid, "u1", "Start the plan.", lambda e: None,  # type: ignore[arg-type]
+                                               context={"plan_id": "plan-1", "action": "approve"})
+    assert A.PREBUILD_NOTE.strip()[:30] not in json.dumps(model.requests[0]["messages"])
+
+
+def test_windows_the_agent_read_but_never_showed_get_tiles_at_the_end() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    store.add_trades(sid, [_wallet_fill("0xa", LATE + 12, 0.62, 10)])
+    store.put_window(sid, LATE_SLUG, read=_recorded_read())  # read by the window tool, no tile
+    store.put_window(sid, "btc-updown-15m-1794291300", read=_recorded_read(1794291300))  # read, but no fills there
+    events: list[dict[str, Any]] = []
+    A.Agent(FakeCaseReads(), store, _model(_answers("Observed: 3 trades."))).ask(sid, "u1", "Go", events.append)  # type: ignore[arg-type]
+    kinds = [e["type"] for e in events]
+    assert [e["window_id"] for e in events if e["type"] == "window.summary"] == [LATE_SLUG]
+    assert kinds.index("window.summary") > kinds.index("answer.card") and kinds[-2:] == ["usage", "done"]
+    assert [c["window_id"] for c in events[kinds.index("coverage")]["windows"]] == [LATE_SLUG]
+    assert [s["window_id"] for s in store.summaries(sid)] == [LATE_SLUG] and store.unshown(sid) == ["btc-updown-15m-1794291300"]
+
+
 def test_usage_reports_the_phases() -> None:
     plan = {"title": "t", "scope": {"wallet": W}, "steps": [{"id": "s", "title": "x", "source": "y"}]}
     events, _, _ = _ask(_model(_turn(_direct("propose_plan", plan))))

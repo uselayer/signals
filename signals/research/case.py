@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from signals.research import trace, workspace
-from signals.research.data import ReadError
+from signals.research.data import ReadError, iso, scope_time
 from signals.research.tools import CALLER
 
 STAGES = ("windows", "window", "trades")
@@ -32,7 +32,8 @@ CASE_TOOLS: list[dict[str, Any]] = [
             "longer range, another wallet). After calling it, end your turn without more text. steps: what you'll "
             "do, each with a short id, a title in plain words, its source in plain words ('Polymarket trades', "
             "'Layer's recorded order books', 'Binance') and estimate_s. scope: {wallet, family "
-            "('btc-updown-15m'), from, to}. scope_options: choices the user can tick, e.g. "
+            "('btc-updown-15m'), from, to}, from and to as ISO times in UTC (2026-11-10T05:30:00Z), or to: 'now'. "
+            "scope_options: choices the user can tick, e.g. "
             "{id: 'october', text: 'Also look at October with 1-minute prices'}."
         ),
         "input_schema": {
@@ -223,7 +224,7 @@ def prebuild(store: Any, reads: Any, sid: str, scope: dict[str, Any], emit: Call
     if not (wallet and a and b):
         return 0
     family = str(scope.get("family") or "btc-updown-15m").rstrip("-") + "-"
-    got = reads.wallet_trades(wallet, a, b, family)
+    got = reads.wallet_trades(wallet, scope_time(a), scope_time(b), family)
     store.set_wallet(sid, str(got.get("wallet") or wallet).lower())
     store.add_trades(sid, got["trades"])
     slugs = sorted({t["slug"] for t in got["trades"] if t.get("slug")})
@@ -241,6 +242,43 @@ def prebuild(store: Any, reads: Any, sid: str, scope: dict[str, Any], emit: Call
     covs.sort(key=lambda c: c["window_id"] or "")
     emit({"type": "coverage", "per_source": workspace.totals(covs), "windows": covs})
     return len(covs)
+
+
+def scope_ok(scope: dict[str, Any] | None) -> bool:
+    """Whether Start can build this scope's tiles: a wallet and a range it can read."""
+    if not (scope and scope.get("wallet") and scope.get("from") and scope.get("to")):
+        return False
+    try:
+        return scope_time(scope["from"]) <= scope_time(scope["to"])
+    except ReadError:
+        return False
+
+
+MAX_FILL = 120  # tiles the end-of-run sweep builds at most
+
+
+def fill_tiles(store: Any, reads: Any, sid: str, emit: Callable[[dict[str, Any]], None]) -> int:
+    """At the end of a run: a tile for every window the agent read where the wallet traded but that has no tile yet
+    (Start's prebuild couldn't read the scope, or the agent read windows without show_windows), so the Windows tab
+    holds the windows the answer counts. Returns the number of tiles added."""
+    traded = {t["slug"] for t in store.trades(sid) if t.get("slug")}
+    slugs = [s for s in store.unshown(sid) if s in traded][:MAX_FILL]
+    added = 0
+    with ThreadPoolExecutor(max_workers=SHOW_AT_ONCE) as pool:
+        futures = {pool.submit(workspace.build, store, reads, sid, s): s for s in slugs}
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception as e:  # noqa: BLE001 - a window that can't be built leaves the others
+                print(f"research: tile {futures[fut]} failed: {type(e).__name__}: {e}", flush=True)
+                continue
+            emit({"type": "window.summary", **workspace.summary(r)})
+            added += 1
+    if added:  # the page's coverage is replaced whole: every tile's, not just the new ones
+        covs = [ready["coverage"] for s in store.summaries(sid)
+                if (ready := store.window(sid, s["window_id"])["ready"]) and ready.get("coverage")]  # fmt: skip
+        emit({"type": "coverage", "per_source": workspace.totals(covs), "windows": covs})
+    return added
 
 
 def _brief(s: dict[str, Any]) -> dict[str, Any]:
@@ -286,7 +324,15 @@ class Case:
                   "estimate_s": s.get("estimate_s")} for i, s in enumerate(inp.get("steps") or [])]  # fmt: skip
         if not steps:
             raise ReadError("A plan needs at least one step.")
-        scope = inp.get("scope") or {}
+        scope = dict(inp.get("scope") or {})
+        for k in ("from", "to"):  # kept as a time Start can read ("now" stays "now": it's read at Start)
+            v = scope.get(k)
+            if isinstance(v, str) and v.strip().lower() != "now":
+                try:
+                    scope[k] = iso(scope_time(v))
+                except ReadError as e:
+                    raise ReadError(f"scope.{k} {v!r} isn't a time: give an ISO time in UTC like "
+                                    "2026-11-10T05:30:00Z (or 'now' for to).") from e  # fmt: skip
         if scope.get("wallet"):
             self.store.set_wallet(self.sid, str(scope["wallet"]).lower())
         self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild)

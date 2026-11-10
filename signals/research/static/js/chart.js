@@ -116,14 +116,39 @@ function frameMarkup(G, w) {
   return f;
 }
 
-function annMarkup(G, anns, pin) {
-  const out = [];
-  for (const a of anns || []) {
-    if (a.kind === 'point') { const x = G.X(a.t0); out.push(html`<line class="ann" x1=${x} x2=${x} y1=${G.yB0} y2=${G.yB0 + G.hB} stroke-dasharray="4 3" /><text class="ann-t" x=${x + 4} y=${G.yB0 + 12}>${a.label}</text>`); }
-    if (a.kind === 'span') { const x0 = G.X(a.t0), x1 = G.X(a.t1), y = G.yB0 + (G.compact ? 10 : 20); out.push(html`<path class="ann" d=${`M${x0} ${y + 5}V${y}H${x1}V${y + 5}`} /><text class="ann-t" x=${(x0 + x1) / 2} y=${y - 4} text-anchor="middle">${a.label}</text>`); }
-    if (a.kind === 'region') { const x0 = G.X(a.t0), x1 = G.X(a.t1); out.push(html`<rect class="ann-rg" x=${x0} y=${G.yB0} width=${Math.max(2, x1 - x0)} height=${G.hB} /><text class="ann-t" x=${x0 + 4} y=${G.yB0 + G.hB - 8}>${a.label}</text>`); }
+// Labels along the top of the BTC panel (points, spans, the pin) each get a row: the first row they fit in without
+// touching another label, so a span's "85 fills" never sits on a point's "crosses price to beat". Each stays inside
+// the plot, never over the end labels on the right: a point label that would run past the edge goes on its left.
+const LABEL_W = 6.3, ROW = 13; // ~px per character at .ann-t's 11px semibold; one row's height
+export function placeLabels(items, L, R) {
+  const rows = [];
+  for (const it of items.slice().sort((a, b) => a.x - b.x)) {
+    const w = String(it.text).length * LABEL_W;
+    let a; // the label's left edge
+    if (it.align === 'middle') a = Math.max(L, Math.min(R - w, it.x - w / 2));
+    else a = it.x + it.gap + w <= R ? it.x + it.gap : Math.max(L, it.x - it.gap - w);
+    let r = 0; while ((rows[r] || []).some(([p, q]) => a < q + 6 && p < a + w + 6)) r++;
+    (rows[r] = rows[r] || []).push([a, a + w]);
+    Object.assign(it, { lx: a, lw: w, row: r });
   }
-  if (pin != null) { const x = G.X(pin); out.push(html`<line x1=${x} x2=${x} y1=${G.yB0} y2=${G.yQ0 + G.hQ} stroke="var(--fg)" stroke-dasharray="2 3" /><circle cx=${x} cy=${G.yB0 + 3} r="4" fill="var(--fg)" /><text class="ann-t" x=${x + 7} y=${G.yB0 + 12} style="fill:var(--fg)">${mmss(pin)}</text>`); }
+  return items;
+}
+
+function annMarkup(G, anns, pin) {
+  const out = [], L = G.ml + 2, R = G.W - G.mr - 2, top = [];
+  for (const a of anns || []) {
+    if (a.kind === 'point') { const x = G.X(a.t0); top.push({ kind: 'point', x, gap: 4, text: a.label }); }
+    if (a.kind === 'span') { const x0 = G.X(a.t0), x1 = G.X(a.t1); top.push({ kind: 'span', x: (x0 + x1) / 2, x0, x1, align: 'middle', text: a.label }); }
+    if (a.kind === 'region') { const x0 = G.X(a.t0), x1 = G.X(a.t1), w = String(a.label).length * LABEL_W; out.push(html`<rect class="ann-rg" x=${x0} y=${G.yB0} width=${Math.max(2, x1 - x0)} height=${G.hB} /><text class="ann-t" x=${Math.max(L, Math.min(R - w, x0 + 4))} y=${G.yB0 + G.hB - 8}>${a.label}</text>`); }
+  }
+  if (pin != null) top.push({ kind: 'pin', x: G.X(pin), gap: 7, text: mmss(pin) });
+  for (const it of placeLabels(top, L, R)) {
+    const y = G.yB0 + (G.compact ? 10 : 12) + it.row * ROW; // the label's baseline
+    if (it.kind === 'point') out.push(html`<line class="ann" x1=${it.x} x2=${it.x} y1=${G.yB0} y2=${G.yB0 + G.hB} stroke-dasharray="4 3" />`);
+    if (it.kind === 'span') out.push(html`<path class="ann" d=${`M${it.x0} ${y + 9}V${y + 4}H${it.x1}V${y + 9}`} />`);
+    if (it.kind === 'pin') out.push(html`<line x1=${it.x} x2=${it.x} y1=${G.yB0} y2=${G.yQ0 + G.hQ} stroke="var(--fg)" stroke-dasharray="2 3" /><circle cx=${it.x} cy=${G.yB0 + 3} r="4" fill="var(--fg)" />`);
+    out.push(html`<text class="ann-t" x=${it.lx} y=${y} style=${it.kind === 'pin' ? 'fill:var(--fg)' : null}>${it.text}</text>`);
+  }
   return out;
 }
 

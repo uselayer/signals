@@ -245,6 +245,7 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .waffle button { width: 14px; height: 14px; border-radius: 3px; padding: 0; border: 1.5px solid var(--accent); background: var(--accent); }
 .waffle button.no { background: transparent; border-color: var(--faint); }
 .acts2 { display: flex; gap: 12px; flex-wrap: wrap; }
+.acts2 .fchip { white-space: normal; max-width: 100%; min-width: 0; border-radius: 10px; line-height: 1.35; padding: 4px 10px; } /* a finding's title wraps inside the column */
 .check { font-size: 11.5px; color: var(--faint); }
 .flagnum { text-decoration: line-through; text-decoration-color: var(--ink); text-decoration-thickness: 2px; color: var(--muted); }
 .flagnote { font-size: 13px; color: var(--ink); background: var(--ink-soft); border-radius: 8px; padding: 7px 9px; }
