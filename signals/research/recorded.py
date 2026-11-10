@@ -16,10 +16,12 @@ import hmac
 import json
 import os
 import re
+import threading
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
+import brotli
 import httpx
 
 PREFIX = "derived/windows/btc-15m"
@@ -118,6 +120,104 @@ def shaped(j: dict[str, Any]) -> dict[str, Any]:
         "chainlink": j.get("chainlink") or [], "binance": j.get("binance") or [],
         "coverage": j.get("coverage") or {},
     }  # fmt: skip
+
+
+RAW_PREFIX = "raw/ticks/crypto"
+RAW_FILE = re.compile(r"polymarket-rtds-\d{4}-\d{2}-\d{2}T\d{2}-(\d{13})\.jsonl\.br$")
+RAW_FILE_S = 600  # the recorder starts a file about every 10 minutes (and on each restart)
+RAW_KEPT = 64  # decoded files kept in memory (windows next to each other share them)
+
+
+class RawCrypto:
+    """Chainlink (and Binance) prices by the second from Layer's raw recording of Polymarket's live-data feed
+    (layer#641: raw/ticks/crypto/YYYY/MM/DD/polymarket-rtds-<hour>-<start ms>.jsonl.br, brotli JSONL), for windows
+    whose derived file isn't built yet. A line is {"t", "c": "rt<n>" (live) | "rh<n>" (history), "m": the feed's
+    message}; a price is m.payload {symbol, timestamp (the price's own ms), value}, or for history m.payload {symbol,
+    data: [{timestamp, value}]}. Chainlink symbols have a "/" ("btc/usd"), Binance's don't ("btcusdt"). Keyed on the
+    price's own second; live wins over history for the same second."""
+
+    def __init__(self, r2: R2) -> None:
+        self.r2 = r2
+        self._files: dict[str, dict[str, dict[int, float]]] = {}  # key -> symbol -> second -> price
+        self._keys: dict[str, list[str]] = {}  # day prefix -> its file keys
+        self._lock = threading.Lock()
+
+    def _day_keys(self, day: str, fresh: bool) -> list[str]:
+        with self._lock:
+            if not fresh and day in self._keys:
+                return self._keys[day]
+        keys = self.r2.keys(f"{RAW_PREFIX}/{day}/", 1000)
+        with self._lock:
+            self._keys[day] = keys
+        return keys
+
+    def _file(self, key: str) -> dict[str, dict[int, float]]:
+        with self._lock:
+            if key in self._files:
+                return self._files[key]
+        live: dict[str, dict[int, float]] = {}
+        hist: dict[str, dict[int, float]] = {}
+        body = self.r2.get(key) or b""
+        for line in brotli.decompress(body).decode().splitlines() if body else []:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            p = ((e.get("m") or {}).get("payload")) or {}
+            sym = p.get("symbol")
+            if not sym:
+                continue
+            if str(e.get("c", "")).startswith("rh"):
+                for d in p.get("data") or []:
+                    if d.get("timestamp") is not None and d.get("value") is not None:
+                        hist.setdefault(sym, {})[int(d["timestamp"]) // 1000] = float(d["value"])
+            elif p.get("timestamp") is not None and p.get("value") is not None:
+                live.setdefault(sym, {})[int(p["timestamp"]) // 1000] = float(p["value"])
+        out = {s: {**hist.get(s, {}), **live.get(s, {})} for s in set(hist) | set(live)}  # live wins
+        with self._lock:
+            self._files[key] = out
+            while len(self._files) > RAW_KEPT:
+                self._files.pop(next(iter(self._files)))
+        return out
+
+    def prices(self, symbol: str, start: int, end: int) -> list[list[float]] | None:
+        """[[unix s, price]] for ``symbol`` ("btc/usd", "btcusdt") from ``start`` to ``end``, or None before the
+        recording began (OUTSIDE_FROM). Files are picked by the start time in their names."""
+        from signals.research.data import OUTSIDE_FROM
+
+        if end < OUTSIDE_FROM:
+            return None
+        days = sorted({datetime.fromtimestamp(t, UTC).strftime("%Y/%m/%d") for t in (start - RAW_FILE_S, end)})
+        recent = end > datetime.now(UTC).timestamp() - 2 * RAW_FILE_S  # new files may have landed since the last list
+        merged: dict[int, float] = {}
+        for day in days:
+            for key in self._day_keys(day, recent):
+                m = RAW_FILE.search(key)
+                if not m:
+                    continue
+                file_start = int(m.group(1)) // 1000
+                if file_start > end or file_start < start - 2 * RAW_FILE_S:
+                    continue
+                for t, p in self._file(key).get(symbol, {}).items():
+                    if start <= t <= end:
+                        merged[t] = p
+        return [[t, merged[t]] for t in sorted(merged)]
+
+
+def raw_crypto(r2: R2 | None) -> Any:
+    """``Reads``' ``chainlink(symbol, start, end)``: Layer's raw recording, or None without a token."""
+    if r2 is None:
+        return lambda symbol, start, end: None
+    raw = RawCrypto(r2)
+
+    def read(symbol: str, start: int, end: int) -> list[list[float]] | None:
+        try:
+            return raw.prices(symbol, start, end)
+        except httpx.HTTPError as e:
+            print(f"research: raw crypto prices {symbol} unreadable: {type(e).__name__}", flush=True)
+            return None
+
+    return read
 
 
 def reader(r2: R2 | None) -> Any:
