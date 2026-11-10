@@ -29,20 +29,28 @@ MULT = {"k": 1e3, "m": 1e6, "b": 1e9}
 SOURCE_NUM = re.compile(r"\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 
 
-def numbers(text: str) -> list[tuple[str, float, float]]:
-    """The numbers ``text`` states, each as (as written, value, how far rounding could have moved it)."""
-    text = SKIP.sub(" ", text)
+def located(text: str) -> list[tuple[str, float, float, int, int]]:
+    """The numbers ``text`` states: (as written, value, how far rounding could have moved it, start, end), with
+    start and end character offsets into ``text`` itself."""
+    blanked = SKIP.sub(lambda m: " " * len(m.group(0)), text)  # same length, so offsets hold
     out = []
-    for m in NUM.finditer(text):
-        raw = m.group(0).strip()
+    for m in NUM.finditer(blanked):
+        whole = m.group(0)
+        raw = whole.strip()
+        start = m.start() + (len(whole) - len(whole.lstrip()))
         digits = m["n"].replace(",", "")
         decimals = len(digits.split(".")[1]) if "." in digits else 0
         scale = MULT.get((m["mult"] or "").lower(), 1.0)
         value = float(digits) * scale
         # Rounded to its last digit; an integer with grouping commas or a k/M is at least that coarse.
         tol = 0.5 * 10**-decimals * scale + 1e-9
-        out.append((raw, value, tol))
+        out.append((raw, value, tol, start, start + len(raw)))
     return out
+
+
+def numbers(text: str) -> list[tuple[str, float, float]]:
+    """The numbers ``text`` states, each as (as written, value, how far rounding could have moved it)."""
+    return [(raw, value, tol) for raw, value, tol, _, _ in located(text)]
 
 
 class Sources:
@@ -69,6 +77,27 @@ class Sources:
             if i < len(self._values) and self._values[i] <= x + tol / (1 if x == abs(value) else 100):
                 return True
         return False
+
+
+    def nearest(self, value: float, within: float = 0.1) -> float | None:
+        """The data's value closest to ``value`` (as is, or as a share written ×100), when it's within ``within``
+        of it relatively: what the number probably meant to say. None when nothing is that close."""
+        best: tuple[float, float] | None = None
+        for x, k in ((abs(value), 1.0), (abs(value) / 100, 100.0)):
+            i = bisect.bisect_left(self._values, x)
+            for j in (i - 1, i):
+                if 0 <= j < len(self._values) and x:
+                    d = abs(self._values[j] - x) / x
+                    if d <= within and (best is None or d < best[0]):
+                        best = (d, self._values[j] * k)
+        return None if best is None else best[1]
+
+
+def flagged(text: str, sources: Sources) -> list[dict[str, Any]]:
+    """Each number in ``text`` that doesn't trace: {value_text, start, end, data_value} (offsets into ``text``;
+    ``data_value`` the closest value in the data, or None), for the page to strike it and show the data's."""
+    return [{"value_text": raw, "start": a, "end": b, "data_value": sources.nearest(value)}
+            for raw, value, tol, a, b in located(text) if not sources.has(value, tol)]  # fmt: skip
 
 
 def check(text: str, sources: Sources) -> dict[str, Any]:

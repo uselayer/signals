@@ -162,7 +162,9 @@ LAYER_WINDOW = {
     "book": [[1794285000, [[0.49, 100]], [[0.51, 80]], [[0.49, 90]], [[0.51, 70]]]],
     "trades": [[1794285010, 1794285008000, "Up", "BUY", 0.51, 20, W, "0xt"]],
     "chainlink": [[1794285000, 74719.5]], "binance": [[1794285000, 74827.09]],
-    "coverage": {"usable": True, "reasons": [], "book": {"secondsWithoutBook": 3, "of": 900}},
+    "coverage": {"usable": True, "reasons": [], "trades": {"dataApi": 364, "onStream": 246, "pct": 67.6},
+                 "book": {"secondsWithoutBook": 3, "of": 900, "lost": [  # as Layer's recording writes them
+                     {"from": "2026-11-09T04:45:14.181Z", "to": "2026-11-09T04:45:16.613Z", "why": "reconnected"}]}},
 }  # fmt: skip
 
 
@@ -254,6 +256,7 @@ def _recorded_read(start: int = LATE) -> dict[str, Any]:
     j["trades"] = [[start + 12, (start + 11) * 1000 + 500, "Up", "BUY", 0.62, 10, "0xother", "0xa"],
                    [start + 14, (start + 3) * 1000, "Up", "BUY", 0.40, 5, "0xother", "0xb"]]  # fmt: skip
     j["chainlink"] = [[start, 74719.5], [start + 1, 74720.0]]
+    j["binance"] = [[start - 300, 74800.0], [start, 74827.09]]  # recordings begin 5 minutes before the start
     s = recorded.shaped(j)
     return {"slug": f"btc-updown-15m-{start}", "start": start, "end": start + 900, "title": "BTC", **s}
 
@@ -284,6 +287,25 @@ def test_a_window_replay_from_a_recording() -> None:
     assert s["entries"][0] == {"t": LATE + 12, "side": "Up", "action": "buy"} and s["first_entry_s"] == 12
     assert s["result"] == "Down" and s["payout"] == 6 and s["cost"] == round(6.2 + 2.05 + 2.28, 2)
     assert s["profit"] == round(6 + 2.8 - (6.2 + 2.05 + 2.28), 2) and s["coverage"]["chainlink"] == "full"
+    cov = r["coverage"]
+    assert cov["missing_seconds"] == [[1794199514, 2.4]] and cov["lost"][0]["why"] == "reconnected"
+    assert cov["market_trades"] == {"recorded": 246, "polymarket": 364, "pct": 67.6}
+
+
+def test_fills_before_the_window_opens() -> None:
+    from signals.research import workspace as WS
+
+    early = _wallet_fill("0xe", LATE - 47, 0.48, 3)
+    r = WS.ready(_recorded_read(), [early, _wallet_fill("0xa", LATE + 12, 0.62, 10)], None)
+    assert r["axis"] == {"from": LATE - 47 - WS.PAD_S, "to": LATE + 900 + WS.AFTER_S}
+    assert [t["pre_open"] for t in r["trades"]] == [True, False]
+    assert r["coverage"]["pre_open_entries"] == {"fills": 1, "first_s_before": 47, "before_axis": 0}
+    assert any("before the recording of this window's book begins" in n for n in r["coverage"]["notes"])
+    assert r["up"][0]["t"] == LATE + 2  # the book exists from its first recorded change
+    way_early = _wallet_fill("0xf", LATE - 7_200, 0.45, 2)
+    r = WS.ready(_recorded_read(), [way_early], None)
+    assert r["axis"]["from"] == LATE - WS.PRE_OPEN_MAX_S - WS.PAD_S
+    assert r["coverage"]["pre_open_entries"]["before_axis"] == 1 and r["position"][0]["up"] == 2
 
 
 def test_before_chainlink_recording_and_without_a_book() -> None:

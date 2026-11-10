@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -45,25 +46,37 @@ class R2:
         return cls(env["R2_ACCOUNT_ID"], env["R2_ACCESS_KEY_ID"], env["R2_SECRET_ACCESS_KEY"],
                    env.get("R2_BUCKET", "layer-history"))  # fmt: skip
 
-    def get(self, key: str) -> bytes | None:
-        """The object's bytes, or None when it doesn't exist."""
+    def request(self, method: str, key: str = "", query: dict[str, str] | None = None, body: bytes = b"") -> httpx.Response:
+        """A signed request (S3 SigV4, region "auto") on the bucket, or on ``key`` in it."""
         t = self._now()
         amz, date = t.strftime("%Y%m%dT%H%M%SZ"), t.strftime("%Y%m%d")
-        path = "/" + quote(f"{self.bucket}/{key}")
-        payload = hashlib.sha256(b"").hexdigest()
+        path = "/" + quote(f"{self.bucket}/{key}" if key else self.bucket)
+        q = "&".join(f"{quote(k, safe='-_.~')}={quote(v, safe='-_.~')}" for k, v in sorted((query or {}).items()))
+        payload = hashlib.sha256(body).hexdigest()
         headers = {"host": self.host, "x-amz-content-sha256": payload, "x-amz-date": amz}
         signed = ";".join(sorted(headers))
-        canonical = "\n".join(["GET", path, "", *(f"{k}:{headers[k]}" for k in sorted(headers)), "", signed, payload])
+        canonical = "\n".join([method, path, q, *(f"{k}:{headers[k]}" for k in sorted(headers)), "", signed, payload])
         scope = f"{date}/auto/s3/aws4_request"
         to_sign = "\n".join(["AWS4-HMAC-SHA256", amz, scope, hashlib.sha256(canonical.encode()).hexdigest()])
         k = _sign(_sign(_sign(_sign(("AWS4" + self.secret).encode(), date), "auto"), "s3"), "aws4_request")
         sig = hmac.new(k, to_sign.encode(), hashlib.sha256).hexdigest()
         auth = f"AWS4-HMAC-SHA256 Credential={self.key_id}/{scope}, SignedHeaders={signed}, Signature={sig}"
-        r = self.web.get(f"https://{self.host}{path}", headers={**headers, "authorization": auth})
+        url = f"https://{self.host}{path}" + (f"?{q}" if q else "")
+        return self.web.request(method, url, headers={**headers, "authorization": auth}, content=body or None)
+
+    def get(self, key: str) -> bytes | None:
+        """The object's bytes, or None when it doesn't exist."""
+        r = self.request("GET", key)
         if r.status_code == 404:
             return None
         r.raise_for_status()
         return r.content
+
+    def keys(self, prefix: str, limit: int = 100) -> list[str]:
+        """Up to ``limit`` object keys under ``prefix``."""
+        r = self.request("GET", query={"list-type": "2", "prefix": prefix, "max-keys": str(limit)})
+        r.raise_for_status()
+        return re.findall(r"<Key>([^<]+)</Key>", r.text)
 
 
 def key_of(slug: str, start: int) -> str:

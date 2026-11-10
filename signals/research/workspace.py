@@ -8,11 +8,30 @@ Shapes are the UI-to-agent contract's (docs/research-contract.md): times in unix
 from __future__ import annotations
 
 import bisect
+from datetime import datetime
 from typing import Any
 
 from signals.research.data import OUTSIDE_FROM, UNUSABLE, trade_id
 
 SPARK_POINTS = 60  # a tile's line: one Binance point every 15 s of a 15-minute window
+PAD_S = 30  # the time axis starts this long before the earlier of the window's start and the first fill
+AFTER_S = 60  # and ends this long after the window's end
+PRE_OPEN_MAX_S = 1_800  # at most this long before the start: earlier fills count in the position, off the axis
+
+
+def axis(start: int, end: int, trades: list[dict[str, Any]]) -> tuple[int, int]:
+    """The replay's time span: from just before the window opens, or before the wallet's first fill when it
+    traded earlier (windows are listed about a day ahead; at most PRE_OPEN_MAX_S before), to a minute after."""
+    first = max(min((int(t["ts"]) for t in trades), default=start), start - PRE_OPEN_MAX_S)
+    return min(start, first) - PAD_S, end + AFTER_S
+
+
+def _secs(x: Any) -> float:
+    """Unix seconds from what Layer's recording writes: an ISO time ("2026-11-09T04:45:14.181Z"), ms or s."""
+    if isinstance(x, str) and not x.replace(".", "", 1).isdigit():
+        return datetime.fromisoformat(x.replace("Z", "+00:00")).timestamp()
+    v = float(x or 0)
+    return v / 1000 if v > 1e11 else v
 
 
 def _points(rows: list[list[float]] | None) -> list[dict[str, float]]:
@@ -57,7 +76,8 @@ def fills(trades: list[dict[str, Any]], window: dict[str, Any]) -> list[dict[str
         out.append({"trade_id": r.get("id") or trade_id(r.get("tx"), r.get("token"), r["action"], r["price"],
                                                         r["size"], r["ts"]),
                     "t": r["ts"], "side": r.get("outcome"), "action": r["action"], "shares": r["size"],
-                    "price": r["price"], "usd": r.get("usd"), "paid_ask": paid})  # fmt: skip
+                    "price": r["price"], "usd": r.get("usd"), "paid_ask": paid,
+                    "pre_open": int(r["ts"]) < int(window["start"])})  # fmt: skip
     return out
 
 
@@ -90,10 +110,13 @@ def coverage(window: dict[str, Any]) -> dict[str, Any]:
         "window_id": window.get("slug"), "source": window.get("source") or "Polymarket API",
         "chainlink": "full" if has_chainlink else "start_and_result",
         "book": bool(recorded and (window.get("book") or {}).get("available")),
-        "missing_seconds": [[int(x.get("from", 0)), int(x.get("to", 0)) - int(x.get("from", 0))]
+        "missing_seconds": [[round(_secs(x.get("from"))), round(_secs(x.get("to")) - _secs(x.get("from")), 1)]
                             for x in book.get("lost") or []] if recorded else None,
+        "lost": [{"from": round(_secs(x.get("from")), 1), "to": round(_secs(x.get("to")), 1), "why": x.get("why")}
+                 for x in book.get("lost") or []] if recorded else None,
         "seconds_without_book": book.get("secondsWithoutBook"),
-        "market_trades": {"recorded": trades.get("onStream"), "polymarket": trades.get("dataApi")} if recorded
+        "market_trades": {"recorded": trades.get("onStream"), "polymarket": trades.get("dataApi"),
+                          "pct": trades.get("pct")} if recorded
         else {"read": (window.get("coverage") or {}).get("trades_read"), "complete": (window.get("coverage") or {})
               .get("trades_complete")},
         "outage": bool(outage), "reasons": rec.get("reasons") or [] if recorded else [],
@@ -109,17 +132,28 @@ def ready(window: dict[str, Any], trades: list[dict[str, Any]], binance: list[li
     best = window.get("best_prices") or []
     fs = fills(trades, window)
     has_book = bool(best)
+    a, b = axis(start, end, trades)
+    cov = coverage(window)
+    pre = [f for f in fs if f["pre_open"]]
+    cov["pre_open_entries"] = {"fills": len(pre), "first_s_before": (start - pre[0]["t"]) if pre else None,
+                               "before_axis": sum(f["t"] < a for f in pre)}  # fmt: skip
+    if pre and best:
+        first_book = min(float(r.get("receive_ms") or 0) for r in best) / 1000
+        if first_book > pre[0]["t"]:
+            cov["notes"] = [*cov["notes"], f"Its first fill came {round(first_book - pre[0]['t'])} s before the "
+                            "recording of this window's book begins."]  # fmt: skip
     return {
-        "window_id": window.get("slug"), "start": start, "end": end, "title": window.get("title"),
+        "window_id": window.get("slug"), "start": start, "end": end, "axis": {"from": a, "to": b},
+        "title": window.get("title"),
         "price_to_beat": window.get("price_to_beat"), "final_price": window.get("final_price"),
         "result": window.get("result"),
         "binance": _points(window.get("binance") or binance),
         "chainlink": _points(window["chainlink"]) if window.get("chainlink") and start >= OUTSIDE_FROM else None,
-        "up": _per_second(best, "up", start - 300, end + 60) if has_book else [],
-        "down": _per_second(best, "down", start - 300, end + 60) if has_book else [],
+        "up": _per_second(best, "up", a, b) if has_book else [],
+        "down": _per_second(best, "down", a, b) if has_book else [],
         "minute_fallback": None if has_book else {"up": _points((window.get("prices") or {}).get("Up")),
                                                   "down": _points((window.get("prices") or {}).get("Down"))},
-        "trades": fs, "position": position(fs), "tags": tags or {}, "coverage": coverage(window),
+        "trades": fs, "position": position(fs), "tags": tags or {}, "coverage": cov,
     }  # fmt: skip
 
 
@@ -161,19 +195,26 @@ def build(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, Any] | No
         read = reads.window(slug)
         store.put_window(sid, slug, read=read)
     start, end = int(read["start"]), int(read["end"])
-    binance = None
-    if not read.get("binance"):
-        if read.get("_binance") is None:
-            got = reads.outside_prices("binance", start - 300, end + 60)
-            read["_binance"] = got.get("points") if got.get("available") else []
-            store.put_window(sid, slug, read=read)
-        binance = read["_binance"]
     trades = store.trades(sid, slug)
     wallet = (store.session_any(sid) or {}).get("wallet")
-    if not trades and wallet:  # not read for this window yet: its own short read
-        got = reads.wallet_trades(wallet, start - 3_600, end + 60, slug)
+    if not trades and wallet:  # not read for this window yet: its own read, from a day before (listed a day ahead)
+        got = reads.wallet_trades(wallet, start - 86_400, end + 60, slug)
         store.add_trades(sid, got["trades"])
         trades = [t for t in got["trades"] if t.get("slug") == slug]
+    a, b = axis(start, end, trades)
+    binance = None
+    recorded_from = min((p[0] for p in read.get("binance") or []), default=None)
+    if not read.get("binance") or (recorded_from is not None and recorded_from > a):
+        span = read.get("_binance_span")
+        if span is None or span[0] > a or span[1] < b:  # Binance for the whole axis, read once per span
+            got = reads.outside_prices("binance", a, b)
+            read["_binance"], read["_binance_span"] = (got.get("points") if got.get("available") else []), [a, b]
+            store.put_window(sid, slug, read=read)
+        binance = read["_binance"]
+        if read.get("binance"):  # the recording's own seconds win where it has them
+            rec = {int(t) for t, _ in read["binance"]}
+            binance = sorted([p for p in binance if int(p[0]) not in rec] + read["binance"])
+            read = {**read, "binance": None}
     r = ready(read, trades, binance, tags if tags is not None else (kept["ready"] or {}).get("tags"))
     store.put_window(sid, slug, ready=r, summary=summary(r))
     return r
