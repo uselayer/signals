@@ -16,6 +16,7 @@ import json
 import os
 import secrets
 import sqlite3
+import statistics
 import threading
 import time
 from datetime import UTC, datetime
@@ -48,7 +49,10 @@ CREATE TABLE IF NOT EXISTS findings (session TEXT NOT NULL, id TEXT NOT NULL, n 
 ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 0"),
          ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0"),
          ("sessions", "wallet TEXT"), ("sessions", "scope TEXT"),
-         ("inv_windows", "fills_complete INTEGER DEFAULT 0")]  # fmt: skip
+         ("inv_windows", "fills_complete INTEGER DEFAULT 0"), ("runs", "kind TEXT")]  # fmt: skip
+# A plan's cost line: the middle of what the latest Starts cost, once there are enough of them to say.
+START_COSTS_OF = 20
+START_COSTS_LEAST = 5
 
 
 def day(t: float | None = None) -> str:
@@ -266,6 +270,16 @@ class Store:
         if user is not None:
             sql, args = sql + " AND user = ?", (*args, user)
         return float(self._q(sql, args)[0][0])
+
+    def start_cost(self, of: int = START_COSTS_OF, least: int = START_COSTS_LEAST) -> float | None:
+        """What pressing Start usually costs: the median ``cost_usd`` of the latest ``of`` Start runs that ran to
+        their end (an answer, or the cost or time limit; not one cut off by a deploy or an error), in dollars to the
+        cent. None with fewer than ``least`` of them: the plan then shows no cost rather than a guess."""
+        rows = self._q("SELECT cost_usd FROM runs WHERE kind = 'start' AND ended IS NOT NULL AND cost_usd > 0 AND "
+                       "(error IS NULL OR error IN ('over_budget', 'over_time')) ORDER BY id DESC LIMIT ?", (of,))  # fmt: skip
+        if len(rows) < least:
+            return None
+        return round(statistics.median(float(r["cost_usd"]) for r in rows), 2)
 
     def runs(self, limit: int = 100) -> list[dict[str, Any]]:
         return [dict(r) for r in self._q("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,))]
