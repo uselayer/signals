@@ -34,6 +34,21 @@ def _secs(x: Any) -> float:
     return v / 1000 if v > 1e11 else v
 
 
+def _why(raw: Any) -> str:
+    """A recording gap's reason in plain words, for the chart's hatching ("connection pm0.157 reconnected" →
+    "The recorder's connection dropped and reconnected")."""
+    s = str(raw or "").lower()
+    if "reconnect" in s:
+        return "The recorder's connection dropped and reconnected"
+    if "overflow" in s or "backlog" in s:
+        return "The recorder fell behind and dropped data"
+    if "restart" in s or "deploy" in s:
+        return "The recorder restarted"
+    if "crossed" in s:
+        return "The book looked wrong (crossed) and was skipped"
+    return "No book was recorded here" if not s else str(raw)[:80]
+
+
 def _points(rows: list[list[float]] | None) -> list[dict[str, float]]:
     return [{"t": int(t), "p": float(p)} for t, p in rows or []]
 
@@ -66,17 +81,23 @@ def fills(trades: list[dict[str, Any]], window: dict[str, Any]) -> list[dict[str
     null when there's no recorded book or the trade isn't on the tape, and for sells."""
     best = sorted(window.get("best_prices") or [], key=lambda r: float(r.get("receive_ms") or 0))
     stream_ms = {r.get("tx"): r.get("stream_ms") for r in window.get("trades") or [] if r.get("stream_ms")}
+    gaps = [(_secs(x.get("from")), _secs(x.get("to"))) for x in ((window.get("coverage") or {}).get("book") or {})
+            .get("lost") or []]  # fmt: skip
     out = []
     for r in sorted(trades, key=lambda r: (r["ts"], r.get("tx") or "")):
         paid = None
         side = (r.get("outcome") or "").lower()
-        if best and r["action"] == "buy" and side in ("up", "down") and stream_ms.get(r.get("tx")):
-            ask = _ask_at(best, side, float(stream_ms[r["tx"]]))
+        at = float(stream_ms[r["tx"]]) if stream_ms.get(r.get("tx")) else None
+        in_gap = at is not None and any(a - 1 <= at / 1000 <= b for a, b in gaps)  # the book there isn't known
+        if best and r["action"] == "buy" and side in ("up", "down") and at is not None and not in_gap:
+            ask = _ask_at(best, side, at)
             paid = None if ask is None else float(r["price"]) >= float(ask) - 1e-9
         out.append({"trade_id": r.get("id") or trade_id(r.get("tx"), r.get("token"), r["action"], r["price"],
                                                         r["size"], r["ts"]),
                     "t": r["ts"], "side": r.get("outcome"), "action": r["action"], "shares": r["size"],
                     "price": r["price"], "usd": r.get("usd"), "paid_ask": paid,
+                    # paying the ask took liquidity; buying below it means its resting order was filled
+                    "liquidity": None if paid is None else ("taker" if paid else "maker"),
                     "pre_open": int(r["ts"]) < int(window["start"])})  # fmt: skip
     return out
 
@@ -112,7 +133,7 @@ def coverage(window: dict[str, Any]) -> dict[str, Any]:
         "book": bool(recorded and (window.get("book") or {}).get("available")),
         "missing_seconds": [[round(_secs(x.get("from"))), round(_secs(x.get("to")) - _secs(x.get("from")), 1)]
                             for x in book.get("lost") or []] if recorded else None,
-        "lost": [{"from": round(_secs(x.get("from")), 1), "to": round(_secs(x.get("to")), 1), "why": x.get("why")}
+        "lost": [{"from": round(_secs(x.get("from")), 1), "to": round(_secs(x.get("to")), 1), "why": _why(x.get("why"))}
                  for x in book.get("lost") or []] if recorded else None,
         "seconds_without_book": book.get("secondsWithoutBook"),
         "market_trades": {"recorded": trades.get("onStream"), "polymarket": trades.get("dataApi"),

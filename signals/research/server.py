@@ -20,6 +20,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from signals.research import auth
@@ -67,6 +68,15 @@ class Ask(BaseModel):
 @app.get("/api/research/health")
 def health() -> dict[str, Any]:
     return {"ok": True, "model_key": bool(os.environ.get("ANTHROPIC_API_KEY")), "running": len(_running)}
+
+
+@app.get("/api/research/config")
+def config() -> dict[str, Any]:
+    """What the research page needs before it draws: Clerk's publishable key (the engine's, same domain) and the
+    event version it speaks."""
+    from signals.research.agent import EVENT_VERSION
+
+    return {"clerk_key": auth.CLERK_KEY or None, "event_version": EVENT_VERSION}
 
 
 @app.post("/api/research/sessions")
@@ -200,6 +210,10 @@ def dev_page() -> HTMLResponse:
     if HOSTED:
         raise HTTPException(404)
     return HTMLResponse((Path(__file__).parent / "dev.html").read_text())
+
+
+# The research UI (signals/research/static/), at /research on usesignals.app through Vercel rewrites (README).
+app.mount("/research", StaticFiles(directory=Path(__file__).parent / "static", html=True), name="research")
 
 
 def main() -> None:

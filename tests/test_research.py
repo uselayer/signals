@@ -302,7 +302,9 @@ def test_a_window_replay_from_a_recording() -> None:
     assert s["result"] == "Down" and s["payout"] == 6 and s["cost"] == round(6.2 + 2.05 + 2.28, 2)
     assert s["profit"] == round(6 + 2.8 - (6.2 + 2.05 + 2.28), 2) and s["coverage"]["chainlink"] == "full"
     cov = r["coverage"]
-    assert cov["missing_seconds"] == [[1794199514, 2.4]] and cov["lost"][0]["why"] == "reconnected"
+    assert cov["missing_seconds"] == [[1794199514, 2.4]]
+    assert cov["lost"][0]["why"] == "The recorder's connection dropped and reconnected"
+    assert [t["liquidity"] for t in r["trades"]] == ["taker", "maker", None, None]
     assert cov["market_trades"] == {"recorded": 246, "polymarket": 364, "pct": 67.6}
 
 
