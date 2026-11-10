@@ -43,13 +43,19 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 ### Start and plan
 - `investigation.created` `{id, title, question, subject: {wallet|null, name|null}, scope: null, origin}`: the
   first question of an investigation.
-- `ask.started` `{ask_id, text, context}`: each question or Start.
+- `ask.started` `{ask_id, text, context, started_at, limit_s, typical_s}`: each question or Start. `started_at`
+  (unix seconds, the server's clock) is what the page's timer counts from, so a reload keeps counting; `limit_s` is
+  the run's time limit (`RESEARCH_MAX_SECONDS`); `typical_s` is how long runs of the same kind (a Start, or any other
+  question) usually take: the median seconds of the latest 20 that ran to their end, once there are 5
+  (`Store.typical_seconds`), else null. The page shows "about N min left" only from `typical_s`; past it, or without
+  one, it says when the limit stops the run (`runClock` in `static/js/store.js`).
 - `plan.proposed` `{plan_id, ask_id, title, scope: {wallet, family, from, to}, steps: [{id, title, source, estimate_s}],
-  scope_options: [{id, text}], estimate_usd, needs_approval: true}`. Every new investigation shows its plan and waits;
+  scope_options: [{id, text}], estimate_usd, estimate_s, needs_approval: true}`. Every new investigation shows its plan and waits;
   a follow-up that widens the scope (more windows, a longer range, another wallet) does too. The run ends after it.
   `estimate_usd` is the server's, never the agent's: the median `cost_usd` of the latest 20 Starts that ran to their
   end (an answer, or the cost or time limit), once there are 5 (`Store.start_cost`); null before, and the page then
-  shows only the time.
+  shows only the time. The plan's `estimate_s` is the same for time (`Store.typical_seconds` of Starts); null before,
+  and the page then sums the steps' own `estimate_s`.
 - `step.status` `{step_id, status: queued|running|done|warning|failed, progress: {done, total}|null, summary,
   warnings: [{kind, text, window_ids}]}`
 - `tool.call` `{id, tool, args, started_at}` and `tool.result` `{id, tool, ok, rows, limit_hit, ms, summary}`: the

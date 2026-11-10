@@ -471,7 +471,11 @@ class Agent:
                     emit({"type": "investigation.created", "id": sid, "title": short_title(question),
                           "question": question, "subject": {"wallet": w.group(0).lower() if w else None, "name": None},
                           "scope": None, "origin": origin})  # fmt: skip
-                emit({"type": "ask.started", "ask_id": run, "text": question, "context": context})
+                # When it started, its time limit and how long runs like it usually take: the page's timer and
+                # "about N min left" (typical_s is measured, None until there are enough runs to say).
+                emit({"type": "ask.started", "ask_id": run, "text": question, "context": context,
+                      "started_at": round(t0, 1), "limit_s": MAX_SECONDS,
+                      "typical_s": self.store.typical_seconds((context or {}).get("action") == "approve")})  # fmt: skip
                 if self.store.spent_today() >= DAILY_USD or self.store.spent_today(user) >= USER_DAILY_USD:
                     raise OverBudget("Research has reached today's limit. It resets at 00:00 UTC.")
                 said = question

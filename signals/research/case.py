@@ -354,6 +354,7 @@ class Case:
                 "title": inp.get("title"), "scope": scope, "steps": steps,
                 # the server's figure, never the model's guess: what recent Starts cost (None until there are enough)
                 "scope_options": inp.get("scope_options") or [], "estimate_usd": self.store.start_cost(),
+                "estimate_s": self.store.typical_seconds(start=True),  # likewise how long recent Starts took
                 "needs_approval": True}  # fmt: skip
         self.store.set_title(self.sid, str(inp.get("title") or "")[:120])
         self.emit(plan)
