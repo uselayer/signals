@@ -35,6 +35,13 @@ DAILY_USD = float(os.environ.get("RESEARCH_DAILY_USD", "30"))
 USER_DAILY_USD = float(os.environ.get("RESEARCH_USER_DAILY_USD", "10"))
 # Opus 5.5 list prices, dollars per million tokens: input, output, cache read, cache write (5 min).
 PRICE = {"input": 4.0, "output": 20.0, "cache_read": 0.20, "cache_write": 5.0}
+# Code execution is billed by execution time, 5 minutes at least, $0.05 an hour per container after the
+# organization's 1,550 free hours a month (counted here at the list rate, free hours ignored).
+CONTAINER_USD_PER_HOUR = 0.05
+CONTAINER_MIN_S = 300
+CONTAINER_MAX_AGE_S = 29 * 86_400  # containers expire 30 days after they're made: start a new one a day before
+REBUILT = ("The code sandbox from earlier in this investigation has expired, so its variables and files are gone. "
+           "Read again with the tools whatever you need from earlier turns before you answer.")  # fmt: skip
 BETAS = ["server-side-fallback-2026-07-01", "task-budgets-2026-03-13", "thinking-display-updates-2026-08-18"]
 STDOUT_SHOWN = 4_000  # characters of a code run's output put in its event
 
@@ -142,6 +149,15 @@ class OverBudget(Exception):
     pass
 
 
+class ContainerGone(Exception):
+    """The API refused the session's code container (expired or unknown)."""
+
+
+def _container_refused(e: Exception) -> bool:
+    """An API error saying the container named can't be used (a 400 or 404 about the container)."""
+    return getattr(e, "status_code", None) in (400, 404) and "container" in str(e).lower()
+
+
 class Agent:
     def __init__(self, reads: Reads, store: Store, client: Any = None, *, model: str = MODEL) -> None:
         if client is None:
@@ -160,8 +176,13 @@ class Agent:
         )  # fmt: skip
         if container:
             kw["container"] = container
-        with self.client.beta.messages.stream(**kw) as stream:
-            return _d(stream.get_final_message())  # type: ignore[no-any-return]
+        try:
+            with self.client.beta.messages.stream(**kw) as stream:
+                return _d(stream.get_final_message())  # type: ignore[no-any-return]
+        except Exception as e:
+            if container and _container_refused(e):
+                raise ContainerGone(str(e)) from e
+            raise
 
     def ask(self, sid: str, user: str, question: str, emit: Callable[[dict[str, Any]], None]) -> None:
         """Answers ``question`` in session ``sid``, calling ``emit`` with each event as it happens. Every event has
@@ -173,7 +194,8 @@ class Agent:
             out({**e, "v": EVENT_VERSION, "run": run})
 
         totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
-        state = {"rounds": 0, "tool_calls": 0, "cost": 0.0}
+        # container_from: when this question's code container was first in use (its time is billed from then).
+        state = {"rounds": 0, "tool_calls": 0, "cost": 0.0, "code_runs": 0, "container_from": None}
         emit({"type": "start", "question": question})
         try:
             if self.store.spent_today() >= DAILY_USD or self.store.spent_today(user) >= USER_DAILY_USD:
@@ -188,41 +210,79 @@ class Agent:
             emit({"type": "error", "message": "The investigation stopped on an error. Try again in a minute."})
             self.store.update_run(run, error=f"{type(e).__name__}: {e}"[:500])
         finally:
-            usage = {**totals, "cost_usd": round(state["cost"], 4), "rounds": state["rounds"],
+            # Container time: from its first use in this question to the end, at least the billed 5 minutes. An
+            # estimate (Anthropic bills execution time; a paused container waiting on our tools may count).
+            used = state["container_from"] is not None
+            container_s = max(CONTAINER_MIN_S, round(time.time() - state["container_from"])) if used else 0
+            container_usd = container_s / 3600 * CONTAINER_USD_PER_HOUR
+            usage = {**totals, "token_usd": round(state["cost"], 4), "code_runs": state["code_runs"],
+                     "container_s": container_s, "container_usd": round(container_usd, 4),
+                     "cost_usd": round(state["cost"] + container_usd, 4), "rounds": state["rounds"],
                      "tool_calls": state["tool_calls"]}  # fmt: skip
             emit({"type": "usage", **usage})
             self.store.update_run(
                 run, ended=time.time(), input_tokens=totals["input_tokens"], output_tokens=totals["output_tokens"],
                 cache_read=totals["cache_read_input_tokens"], cache_write=totals["cache_creation_input_tokens"],
-                cost_usd=state["cost"], rounds=state["rounds"], tool_calls=state["tool_calls"],
+                cost_usd=state["cost"] + container_usd, rounds=state["rounds"], tool_calls=state["tool_calls"],
+                code_runs=state["code_runs"], container_s=container_s, container_usd=container_usd,
             )  # fmt: skip
             print(f"research: run {run} session {sid} {json.dumps(usage)}", flush=True)
             emit({"type": "done"})
 
     def _ask(self, sid: str, question: str, emit: Callable[[dict[str, Any]], None],
              totals: dict[str, int], state: dict[str, Any]) -> bool:  # fmt: skip
-        session = self.store.session_any(sid)
-        container = session.get("container") if session else None
+        session = self.store.session_any(sid) or {}
+        container = session.get("container")
         messages = self.store.messages(sid)
         if not messages:
             self.store.set_title(sid, question[:120])
         user_msg = {"role": "user", "content": [{"type": "text", "text": question}]}
         messages.append(user_msg)
         self.store.add_message(sid, "user", user_msg["content"])
+
+        def rebuild() -> None:
+            """A new container: the old one expired. Say so, and tell the agent to read again what it needs."""
+            nonlocal container
+            container = None
+            self.store.set_container(sid, None)
+            emit({"type": "notice", "text": "This investigation's earlier working state had expired, so it's being "
+                                             "rebuilt from the data: earlier figures are read again."})  # fmt: skip
+            note = {"role": "system", "content": REBUILT}  # right after the question: a mid-conversation system message
+            messages.append(note)
+            self.store.add_message(sid, "system", REBUILT, hidden=True)
+
+        if container and time.time() - (session.get("container_at") or time.time()) > CONTAINER_MAX_AGE_S:
+            rebuild()
         retried = False
         while True:
             if state["rounds"] >= MAX_ROUNDS:
                 raise OverBudget(f"The investigation used its {MAX_ROUNDS} steps without finishing. Ask a narrower question.")
             if state["cost"] >= MAX_USD:
                 raise OverBudget(f"The investigation reached its ${MAX_USD:.2f} limit without finishing. Ask a narrower question.")
-            resp = self._request(messages, container)
+            try:
+                resp = self._request(messages, container)
+            except ContainerGone:
+                last = messages[-1]["content"]
+                if isinstance(last, list) and last and all(b.get("type") == "tool_result" for b in last):
+                    # Code was waiting on our tool results in it: that step can't be resumed anywhere else.
+                    container = None
+                    self.store.set_container(sid, None)
+                    raise
+                print(f"research: session {sid} container expired; starting a new one", flush=True)
+                rebuild()
+                continue
             state["rounds"] += 1
+            u = resp.get("usage") or {}
             for k in totals:
-                totals[k] += int((resp.get("usage") or {}).get(k) or 0)
+                totals[k] += int(u.get(k) or 0)
             state["cost"] = _cost(totals)
-            if (resp.get("container") or {}).get("id") and resp["container"]["id"] != container:
-                container = resp["container"]["id"]
-                self.store.set_container(sid, container)
+            state["code_runs"] += int((u.get("server_tool_use") or {}).get("code_execution_requests") or 0)
+            if (resp.get("container") or {}).get("id"):
+                if state["container_from"] is None:
+                    state["container_from"] = time.time()
+                if resp["container"]["id"] != container:
+                    container = resp["container"]["id"]
+                    self.store.set_container(sid, container)
             content = resp.get("content") or []
             messages.append({"role": "assistant", "content": content})
             self.store.add_message(sid, "assistant", content)

@@ -286,7 +286,14 @@ investigations are long and read a lot, and the engine keeps alerts first.
 
 Events have `type`, `v` (1) and `run`: `start`, `progress` (the agent's notes between steps), `code`, `tool_call`,
 `tool_result` (counts, coverage, errors), `code_result`, `chart` (`chart_id`, `spec`), `check`, `answer` (`text`,
-`unverified`), `usage` (tokens, `cost_usd`), `error`, `done`. Trades carry a stable `id`.
+`unverified`), `notice` (e.g. an expired working state being rebuilt), `usage` (tokens, `token_usd`, `code_runs`,
+`container_s`, `container_usd`, `cost_usd`), `error`, `done`. Trades carry a stable `id`.
+
+A follow-up reuses the investigation's code container (its variables). Containers expire 30 days after they're made:
+when the API refuses one (or it's 29 days old), the question runs in a new container, the page gets a `notice`, and
+the agent is told to read again what it needs. Container time is billed by execution time, at least 5 minutes a
+question ($0.05 an hour after 1,550 free hours a month); `container_s` is an estimate from when the container was
+first used to the end of the question.
 
 Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (required with `RESEARCH_HOSTED=1`),
 `RESEARCH_MAX_USD` per question (3), `RESEARCH_USER_DAILY_USD` (10), `RESEARCH_DAILY_USD` for everyone (30),

@@ -257,7 +257,11 @@ class Model:
 
     def _stream(self, **kw: Any) -> Any:
         self.requests.append(copy.deepcopy(kw))
-        return Model._Ctx(self.responses.pop(0))
+        r = self.responses.pop(0)
+        r = r(kw) if callable(r) else r
+        if isinstance(r, Exception):
+            raise r
+        return Model._Ctx(r)
 
     class _Ctx:  # what messages.stream returns: a context manager with get_final_message()
         def __init__(self, msg: dict[str, Any]) -> None:
@@ -280,8 +284,23 @@ def _model(*responses: dict[str, Any]) -> Model:
 USAGE = {"input_tokens": 1000, "output_tokens": 500, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
 
 
+class ApiError(Exception):
+    """What the anthropic SDK raises for a 4xx: it has ``status_code``."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status
+
+
+def _expired_if_old(kw: dict[str, Any]) -> Any:
+    if kw.get("container") == "cont_old":
+        return ApiError(400, "container cont_old has expired")
+    return _answers("Observed: 3 trades.")
+
+
 def _calls_tool() -> dict[str, Any]:
-    return {"stop_reason": "tool_use", "usage": USAGE, "container": {"id": "cont_1"}, "content": [
+    usage = {**USAGE, "server_tool_use": {"code_execution_requests": 1}}
+    return {"stop_reason": "tool_use", "usage": usage, "container": {"id": "cont_1"}, "content": [
         {"type": "thinking", "thinking": "Reading the wallet's trades.", "signature": "s"},
         {"type": "server_tool_use", "id": "srv_1", "name": "code_execution", "input": {"code": "await wallet_trades(...)"}},
         {"type": "tool_use", "id": "tu_1", "name": "wallet_trades", "input": {"wallet": W, "start": 0, "end": 9},
@@ -318,8 +337,12 @@ def test_a_tool_call_from_code_and_a_traced_answer() -> None:
     answer = events[kinds.index("answer")]
     assert answer["unverified"] == [] and events[kinds.index("check")]["ok"]
     run = store.runs()[0]
-    assert run["check_ok"] == 1 and run["rounds"] == 2 and run["tool_calls"] == 1
-    assert run["cost_usd"] == pytest.approx(2 * (1000 * 4 + 500 * 20) / 1e6)
+    assert run["check_ok"] == 1 and run["rounds"] == 2 and run["tool_calls"] == 1 and run["code_runs"] == 1
+    assert run["container_s"] == A.CONTAINER_MIN_S  # used: billed 5 minutes at least
+    tokens = 2 * (1000 * 4 + 500 * 20) / 1e6
+    assert run["cost_usd"] == pytest.approx(tokens + 300 / 3600 * 0.05)
+    usage = [e for e in events if e["type"] == "usage"][0]
+    assert usage["token_usd"] == pytest.approx(tokens) and usage["container_s"] == 300
     assert store.session(sid, "u1")["container"] == "cont_1"  # type: ignore[index]
     assert all(e["v"] == A.EVENT_VERSION and e["run"] == run["id"] for e in events)
 
@@ -331,6 +354,57 @@ def test_a_follow_up_replays_the_conversation_and_container() -> None:
     third = model.requests[2]
     assert third["container"] == "cont_1" and third["messages"][0]["content"][0]["text"] == "Analyze it"
     assert third["messages"][-1]["content"][0]["text"] == "And windows?"
+
+
+def _session_with_container(container_at: float | None = None) -> tuple[Store, str]:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.add_message(sid, "user", [{"type": "text", "text": "Analyze it"}])
+    store.add_message(sid, "assistant", [{"type": "text", "text": "Observed: 3 trades."}])
+    store.set_container(sid, "cont_old")
+    if container_at is not None:
+        store._q("UPDATE sessions SET container_at = ? WHERE id = ?", (container_at, sid))
+    return store, sid
+
+
+def test_an_expired_container_is_rebuilt_and_said() -> None:
+    store, sid = _session_with_container()
+    model = _model(_expired_if_old, _expired_if_old)
+    events: list[dict[str, Any]] = []
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "And the windows?", events.append)  # type: ignore[arg-type]
+    assert [r.get("container") for r in model.requests] == ["cont_old", None]
+    retry = model.requests[1]["messages"]
+    assert retry[-2]["content"][0]["text"] == "And the windows?" and retry[-1] == {"role": "system", "content": A.REBUILT}
+    assert [e["type"] for e in events if e["type"] in ("notice", "answer", "error")] == ["notice", "answer"]
+    assert store.session(sid, "u1")["container"] == "cont_1"  # type: ignore[index]
+    # the note stays in the conversation (hidden), so the next follow-up replays it in place
+    assert {"role": "system", "content": A.REBUILT} in store.messages(sid)
+
+
+def test_a_container_near_30_days_old_is_not_used() -> None:
+    import time as _time
+
+    store, sid = _session_with_container(container_at=_time.time() - 29.5 * 86_400)
+    model = _model(_answers("Observed: 3 trades."))
+    events: list[dict[str, Any]] = []
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "Again?", events.append)  # type: ignore[arg-type]
+    assert "container" not in model.requests[0] and any(e["type"] == "notice" for e in events)
+
+
+def test_a_container_lost_while_code_waits_on_a_tool_ends_the_step() -> None:
+    model = _model(_calls_tool(), ApiError(404, "container cont_1 not found"))
+    events, store, sid = _ask(model)
+    assert [e["message"] for e in events if e["type"] == "error"] == [
+        "The investigation stopped on an error. Try again in a minute."]  # fmt: skip
+    assert store.session(sid, "u1")["container"] is None  # type: ignore[index]  # the next question starts fresh
+
+
+def test_other_api_errors_are_not_mistaken_for_an_expired_container() -> None:
+    store, sid = _session_with_container()
+    model = _model(ApiError(400, "messages: text content blocks must be non-empty"))
+    events: list[dict[str, Any]] = []
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "Again?", events.append)  # type: ignore[arg-type]
+    assert len(model.requests) == 1 and not any(e["type"] == "notice" for e in events)
 
 
 def test_an_untraced_number_gets_one_retry() -> None:
@@ -412,7 +486,12 @@ def test_the_request_through_the_real_anthropic_sdk() -> None:
         return "".join(f"event: {name}\ndata: {json.dumps(body)}\n\n" for name, body in events)
 
     def handler(req: Any) -> Any:
-        sent["body"], sent["beta"] = json.loads(req.content), req.headers.get("anthropic-beta", "")
+        body = json.loads(req.content)
+        sent.setdefault("containers", []).append(body.get("container"))
+        if body.get("container") == "cont_old":  # what the API answers for an expired container
+            return httpx2.Response(400, json={"type": "error", "error": {
+                "type": "invalid_request_error", "message": "Container cont_old has expired."}})  # fmt: skip
+        sent["body"], sent["beta"] = body, req.headers.get("anthropic-beta", "")
         msg = {"id": "msg_1", "type": "message", "role": "assistant", "content": [], "model": "claude-opus-5-5",
                "stop_reason": None, "stop_sequence": None,
                "container": {"id": "cont_9", "expires_at": "2026-11-10T06:00:00Z"},
@@ -434,13 +513,16 @@ def test_the_request_through_the_real_anthropic_sdk() -> None:
     sid = store.new_session("u1")
     store.add_message(sid, "user", [{"type": "text", "text": "Analyze it."}])
     store.add_message(sid, "assistant", [{"type": "text", "text": "Done."}])
+    store.set_container(sid, "cont_old")
     events: list[dict[str, Any]] = []
     A.Agent(FakeReads(), store, client).ask(sid, "u1", "How many trades? 3?", events.append)  # type: ignore[arg-type]
+    assert sent["containers"] == ["cont_old", None]  # refused, then a new container
+    assert any(e["type"] == "notice" for e in events)
     b = sent["body"]
     assert b["model"] == "claude-opus-5-5" and b["thinking"] == {"type": "adaptive", "display": "updates"}
     assert b["output_config"]["task_budget"]["type"] == "tokens" and b["fallbacks"] == "default"
     assert b["tools"][0] == T.CODE_EXECUTION and b["tools"][1]["allowed_callers"] == [T.CALLER]
-    assert b["stream"] is True and len(b["messages"]) == 3
+    assert b["stream"] is True and [m["role"] for m in b["messages"]] == ["user", "assistant", "user", "system"]
     assert all(x in sent["beta"] for x in A.BETAS)
     assert [e for e in events if e["type"] == "answer"][0]["text"] == "Observed: 3 trades."
     assert store.session(sid, "u1")["container"] == "cont_9"  # type: ignore[index]

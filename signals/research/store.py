@@ -36,6 +36,10 @@ CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, session T
   cache_read INTEGER DEFAULT 0, cache_write INTEGER DEFAULT 0, cost_usd REAL DEFAULT 0, rounds INTEGER DEFAULT 0,
   tool_calls INTEGER DEFAULT 0, check_ok INTEGER, error TEXT);
 """
+# (table, column definition): when the session's container was made (they expire after 30 days), and per question
+# the code runs, the container's estimated seconds and their dollars (cost_usd includes them).
+ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 0"),
+         ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0")]  # fmt: skip
 
 
 def day(t: float | None = None) -> str:
@@ -54,6 +58,10 @@ class Store:
         with self._lock:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.executescript(SCHEMA)
+            for table, col in ADDED:  # columns added after a store was first made
+                have = {r[1] for r in self._db.execute(f"PRAGMA table_info({table})")}
+                if col.split()[0] not in have:
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
 
     def _q(self, sql: str, args: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
         with self._lock:
@@ -81,7 +89,9 @@ class Store:
             "SELECT id, created, title FROM sessions WHERE user = ? ORDER BY created DESC LIMIT ?", (user, limit))]  # fmt: skip
 
     def set_container(self, sid: str, container: str | None) -> None:
-        self._q("UPDATE sessions SET container = ? WHERE id = ?", (container, sid))
+        """The session's code container, and when it was first given (None: none, a new one next time)."""
+        self._q("UPDATE sessions SET container = ?, container_at = ? WHERE id = ?",
+                (container, time.time() if container else None, sid))  # fmt: skip
 
     def set_title(self, sid: str, title: str) -> None:
         self._q("UPDATE sessions SET title = COALESCE(title, ?) WHERE id = ?", (title, sid))
