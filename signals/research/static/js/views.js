@@ -4,10 +4,14 @@ import { Chart, Spark } from './chart.js';
 import { money, signedMoney, cents, shares, btc, signedBtc, mmss, clock, windowLabel, hm, day, plural } from './format.js';
 import { posText, fmtWhen } from './windowdata.js';
 import { splitFlagged, flagsFor } from './store.js';
+import { RunClock } from './clock.js';
 
 const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------- plan
+// How long Start usually takes: the server's measure of recent Starts (estimate_s) once it has one, else the sum of
+// the plan's own step guesses.
+const planMinutes = p => Math.max(1, Math.round((p.estimate_s ?? p.steps.reduce((s, x) => s + (x.est || 0), 0)) / 60));
 const MARK = { queued: '', running: '…', done: '✓', warning: '!', failed: '×' };
 export function PlanStage({ inv, act }) {
   const p = inv.plans[inv.planOrder[0]];
@@ -15,7 +19,8 @@ export function PlanStage({ inv, act }) {
   return html`<div class="plan">
     <div style="display:flex;gap:12px;align-items:flex-start"><span class=${'dot ' + (p.status === 'approved' && inv.running ? 'live' : p.status === 'done' ? 'ok' : '')} style="margin-top:6px"></span>
       <div><h3>${p.status === 'proposed' ? 'Here is my plan' : p.status === 'done' || inv.done ? 'What I did' : 'Working on it'}</h3>
-      <p class="muted small">${p.title}${p.estimate_usd != null && p.status === 'proposed' ? ` · about ${money(p.estimate_usd)} of model time` : ''}${p.status === 'proposed' ? `, about ${Math.max(1, Math.round(p.steps.reduce((s, x) => s + (x.est || 0), 0) / 60))} min. Nothing runs until you press Start.` : '. If you leave, the results stay here.'}</p></div></div>
+      <p class="muted small">${p.title}${p.estimate_usd != null && p.status === 'proposed' ? ` · about ${money(p.estimate_usd)} of model time` : ''}${p.status === 'proposed' ? `, about ${planMinutes(p)} min. Nothing runs until you press Start.` : '. If you leave, the results stay here.'}</p>
+      ${inv.running && p.status !== 'proposed' && html`<p class="muted small"><${RunClock} inv=${inv} bar=${false} /></p>`}</div></div>
     <ol>${p.steps.map((s, i) => html`<li class=${'ps ' + s.status}><span class="mk">${MARK[s.status] || i + 1}</span><div>
       <div class="ti">${s.title}</div>${s.source && html`<div class="src">${s.source}</div>`}
       ${s.summary && s.status !== 'queued' && html`<div class="sum">${s.summary}</div>`}

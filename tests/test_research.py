@@ -852,6 +852,44 @@ def test_a_start_is_marked_as_one_for_the_cost_line() -> None:
     assert [r["kind"] for r in store.runs()] == ["start"]
 
 
+def test_a_run_says_when_it_started_its_limit_and_how_long_runs_like_it_take() -> None:
+    """Beta feedback (Drew, 10 Nov): a breakdown should show how long it will take. The page's timer counts from the
+    run's own start time, and "about N min left" comes only from how long recent runs of the same kind took."""
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    events, _, _ = _ask(_model(_answers("Observed: 3 trades.")), store=store)
+    started = next(e for e in events if e["type"] == "ask.started")
+    assert started["typical_s"] is None and started["limit_s"] == A.MAX_SECONDS  # too few runs: no estimate
+    assert abs(started["started_at"] - time.time()) < 60
+
+    def run(seconds: float, kind: str | None = "start", error: str | None = None, ended: bool = True) -> None:
+        r = store.start_run("s0", "u9")
+        t = time.time()
+        store._q("UPDATE runs SET started = ? WHERE id = ?", (t - seconds, r))
+        store.update_run(r, kind=kind, ended=t if ended else None, error=error)
+
+    for s in (150, 290, 240, 400, 180):
+        run(s)
+    run(20, error="interrupted")  # cut off by a deploy: not how long a Start takes
+    run(5, ended=False)  # still going
+    run(600, error="over_time")  # stopped at the time limit: it did take that long
+    assert store.typical_seconds(start=True) == 265  # median of 150, 180, 240, 290, 400, 600
+    assert store.typical_seconds(start=False) is None  # one question so far (the first ask above): Starts don't count
+    for s in (30, 40, 50, 60):
+        run(s, kind=None)
+    assert store.typical_seconds(start=False) == 40  # median of the 5 questions: that first one, 30, 40, 50, 60
+
+    sid = store.new_session("u1")
+    got: list[dict[str, Any]] = []
+    A.Agent(FakeReads(), store, _model(_answers("Observed: 3 trades."))).ask(  # type: ignore[arg-type]
+        sid, "u1", "Start the plan.", got.append, context={"plan_id": "plan-1", "action": "approve"})
+    assert next(e for e in got if e["type"] == "ask.started")["typical_s"] == 265  # a Start: what Starts take
+
+    plan = {"title": "t", "scope": {"wallet": W}, "steps": [{"id": "s", "title": "x", "source": "y", "estimate_s": 9}]}
+    events, _, _ = _ask(_model(_turn(_direct("propose_plan", plan))), store=store)
+    p = next(e for e in events if e["type"] == "plan.proposed")
+    assert p["estimate_s"] == store.typical_seconds(start=True) and p["steps"][0]["estimate_s"] == 9
+
+
 def test_a_plan_keeps_its_scope_as_times_start_can_read() -> None:
     plan = {"title": "t", "scope": {"wallet": W, "from": "today 05:30 UTC", "to": "now"},
             "steps": [{"id": "s", "title": "x", "source": "y"}]}  # fmt: skip

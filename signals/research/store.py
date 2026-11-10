@@ -53,6 +53,8 @@ ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 
 # A plan's cost line: the middle of what the latest Starts cost, once there are enough of them to say.
 START_COSTS_OF = 20
 START_COSTS_LEAST = 5
+# A run that ran to its end: an answer, or the cost or time limit; not one cut off by a deploy or an error.
+RAN_TO_END = "ended IS NOT NULL AND (error IS NULL OR error IN ('over_budget', 'over_time'))"
 
 
 def day(t: float | None = None) -> str:
@@ -275,11 +277,23 @@ class Store:
         """What pressing Start usually costs: the median ``cost_usd`` of the latest ``of`` Start runs that ran to
         their end (an answer, or the cost or time limit; not one cut off by a deploy or an error), in dollars to the
         cent. None with fewer than ``least`` of them: the plan then shows no cost rather than a guess."""
-        rows = self._q("SELECT cost_usd FROM runs WHERE kind = 'start' AND ended IS NOT NULL AND cost_usd > 0 AND "
-                       "(error IS NULL OR error IN ('over_budget', 'over_time')) ORDER BY id DESC LIMIT ?", (of,))  # fmt: skip
+        rows = self._q("SELECT cost_usd FROM runs WHERE kind = 'start' AND " + RAN_TO_END + " AND cost_usd > 0 "
+                       "ORDER BY id DESC LIMIT ?", (of,))  # fmt: skip
         if len(rows) < least:
             return None
         return round(statistics.median(float(r["cost_usd"]) for r in rows), 2)
+
+    def typical_seconds(self, start: bool, of: int = START_COSTS_OF, least: int = START_COSTS_LEAST) -> int | None:
+        """How long a run like this one usually takes, for the page's "about N min left": the median seconds of the
+        latest ``of`` runs of the same kind (a Start, or anything else: a question, a follow-up) that ran to their
+        end, as ``start_cost`` counts them. None with fewer than ``least``: the page then shows only the time so far
+        and the time limit, never a guess."""
+        kind = "kind = 'start'" if start else "kind IS NOT 'start'"
+        rows = self._q(f"SELECT ended - started AS s FROM runs WHERE {kind} AND {RAN_TO_END} AND ended > started "
+                       "ORDER BY id DESC LIMIT ?", (of,))  # fmt: skip
+        if len(rows) < least:
+            return None
+        return round(statistics.median(float(r["s"]) for r in rows))
 
     def runs(self, limit: int = 100) -> list[dict[str, Any]]:
         return [dict(r) for r in self._q("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,))]

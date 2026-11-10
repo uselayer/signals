@@ -67,6 +67,8 @@ export function apply(s, e, ui) {
     case 'start': case 'ask.started': { // v1 'start', v2 'ask.started' (a question, or a plan's Start)
       const text = e.context && e.context.plan_id ? 'Start the plan' : e.context && e.context.proposal_id ? `Yes: ${e.text ?? ''}` : (e.text ?? e.question);
       s.running = true; s.done = false; if (!s.question) s.question = text;
+      // the run's clock: the server's start time (a reload keeps counting from it), its limit, how long runs like it usually take
+      s.clock = { start: e.started_at ?? Date.now() / 1000, limit: e.limit_s ?? null, typical: e.typical_s ?? null };
       feedPush(s, { type: 'ask', text, ctx: e.context ? (e.context.label || ctxLabel(e.context)) : null, ask_id: e.ask_id });
       break;
     }
@@ -140,6 +142,23 @@ export function apply(s, e, ui) {
     case 'done': closeWork(s); s.running = false; s.done = true; for (const p of Object.values(s.plans)) if (p.status === 'approved') p.status = 'done'; break;
     default: break;
   }
+}
+
+// While a run works: its time so far ("1:42"), what's left in words, and how far along the bar is (0–1). "About N
+// min left" only from the server's measured typical_s (recent runs of the same kind); past it, or without one, the
+// time limit is the only promise. Never 100% until it's done.
+export function runClock(s, now = Date.now() / 1000) {
+  if (!s.running || !s.clock) return null;
+  const { start, limit, typical } = s.clock;
+  const e = Math.max(0, now - start), m = Math.floor(e / 60);
+  const elapsed = `${m}:${String(Math.floor(e % 60)).padStart(2, '0')}`;
+  const cap = limit ? `it stops by ${Math.round(limit / 60)} min` : '';
+  let left, frac;
+  // with a typical time the bar fills to 80% by then, and creeps on to 95% by the limit (never backwards)
+  if (typical && e < typical) { left = `about ${Math.max(1, Math.ceil((typical - e) / 60))} min left`; frac = 0.8 * e / typical; }
+  else if (typical) { left = `taking longer than usual${cap ? `, ${cap}` : ''}`; frac = 0.8 + (limit > typical ? 0.15 * (e - typical) / (limit - typical) : 0.15); }
+  else { left = cap ? `${cap} at the latest` : ''; frac = limit ? e / limit : 0; }
+  return { elapsed, left, frac: limit || typical ? Math.min(0.95, Math.max(0.02, frac)) : null }; // no bar with nothing to measure against
 }
 
 // Every number in a text, split around the ones the check flagged ({value_text, start, end}): so a card can strike
