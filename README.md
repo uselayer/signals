@@ -275,7 +275,7 @@ investigations are long and read a lot, and the engine keeps alerts first.
 - **Kept** (`store.py`, SQLite in `RESEARCH_STORE_DIR`): investigations, the conversation, every event, charts, and
   per question its tokens and cost (`/api/research/runs`, the owner's).
 
-The case file (the research page at `/research`, `signals/research/static/`) is driven by the agent through
+The case file (the research page at `/breakdowns`, `signals/research/static/`) is driven by the agent through
 events: a plan that waits for Start, step progress, window tiles and replays the server builds from the data,
 walkthroughs, evidence cards (findings) and answer cards. Every route, event and shape is in
 [docs/research-contract.md](docs/research-contract.md), the single source of truth (events version 2).
@@ -292,7 +292,7 @@ Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (require
 `RESEARCH_METRICS_KEY`, and for Layer's recorded windows a read-only R2 token on `layer-history`: `R2_ACCOUNT_ID`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_BUCKET`, default layer-history).
 
-**The page** (`signals/research/static/`, served by the service at `/research`; the main site's nav links to it as
+**The page** (`signals/research/static/`, served by the service at `/research`, public at `/breakdowns`; the main site's nav links to it as
 Breakdowns, and its ask bar opens it with `?q=`). A breakdown (an investigation in the code) is a saved case file: the plan waits for
 Start; the agent's events fill a workspace (tiles of every window, one window's replay with steps, its fills) and a
 column of findings, answers and proposals; you can point at a fill or a moment and ask about it. The replay draws
@@ -334,14 +334,15 @@ Each step only when the owner asks (AGENTS.md, "Deploying"). Done on 10 Nov 2026
    Then check that https://signals-research-production.up.railway.app/openapi.json is titled "Signals research" (not
    "Signals"), `/api/research/health` says `"ok": true, "model_key": true`, and a `POST /api/research/sessions`
    without a sign-in gets 401.
-6. **Vercel rewrites** in `web/vercel.json`, above the catch-all, then `vercel deploy --prod` inside `web/` (a
-   routing change on usesignals.app):
-   ```json
-   { "source": "/research", "destination": "https://signals-research-production.up.railway.app/research/" },
-   { "source": "/research/:path*", "destination": "https://signals-research-production.up.railway.app/research/:path*" },
-   { "source": "/api/research/:path*", "destination": "https://signals-research-production.up.railway.app/api/research/:path*" },
-   ```
-   Check https://usesignals.app/api/research/health and https://usesignals.app/research/ load.
+6. **Vercel routing** in `web/vercel.json`, then `vercel deploy --prod` inside `web/` (a routing change on
+   usesignals.app). The public URL is **usesignals.app/breakdowns**: `/breakdowns` redirects to `/breakdowns/` (the
+   page's `./js/…` and `./research.css` are relative, so a bare `/breakdowns` would load them from the site root
+   and 404), and the old `/research` and `/research/` redirect there too. Rewrites, above the catch-all:
+   `/breakdowns/(.*)` and `/research/(.*)` (assets for tabs still open on the old URL) to the service's
+   `/research/$1`, and `/api/research/(.*)` to its `/api/research/$1`.
+   Check https://usesignals.app/api/research/health and https://usesignals.app/breakdowns load.
+   A shared link shows the Breakdowns card (`og:*` tags in `signals/research/static/index.html`, image
+   `static/og.png`, drawn from `signals/research/og-card.html`); X caches a card, so check a new one in a fresh post.
 7. **Show it**: `SIGNALS_RESEARCH=1` on the engine service (`signals`): the Breakdowns tab, ask bar and phone tab
    appear (`/api/config.research`). Off again by removing it.
 

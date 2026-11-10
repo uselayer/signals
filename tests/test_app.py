@@ -304,11 +304,13 @@ def test_signals_reads_polymarket_only_unless_kalshi_is_switched_on(
 
 
 def test_breakdowns_stay_hidden_until_research_is_switched_on(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    # The tab, the ask bar and the phone tab open /research, which 404s until the research service and its Vercel
-    # rewrites are live: hidden by default, shown by the page only when /api/config says research (SIGNALS_RESEARCH=1).
+    # The tab, the ask bar and the phone tab open /breakdowns (the research service, through Vercel), which 404s until
+    # the service and its rewrites are live: hidden by default, shown by the page only when /api/config says research
+    # (SIGNALS_RESEARCH=1).
     assert api.get("/api/config").json()["research"] is False
     page = api.get("/").text
-    links = re.findall(r"<(?:a|form)\b[^>]*/research/[^>]*>", page)
+    assert 'href="/research/"' not in page and 'action="/research/"' not in page
+    links = re.findall(r"<(?:a|form)\b[^>]*/breakdowns/[^>]*>", page)
     assert len(links) == 3 and all("data-research" in t and " hidden" in t for t in links), links
     assert "[data-research][hidden] { display: none !important; }" in page
     assert 'if (c.research) document.querySelectorAll("[data-research]")' in page
