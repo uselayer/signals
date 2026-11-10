@@ -275,19 +275,10 @@ investigations are long and read a lot, and the engine keeps alerts first.
 - **Kept** (`store.py`, SQLite in `RESEARCH_STORE_DIR`): investigations, the conversation, every event, charts, and
   per question its tokens and cost (`/api/research/runs`, the owner's).
 
-| Route | |
-|---|---|
-| `POST /api/research/sessions` | a new investigation |
-| `GET /api/research/sessions` | yours |
-| `GET /api/research/sessions/{id}` | one, with every event so far |
-| `POST /api/research/sessions/{id}/ask` `{question}` | starts answering (202), one at a time per person |
-| `GET /api/research/sessions/{id}/events?after=N` | server-sent events from N on, live until `done` |
-| `GET /api/research/charts/{id}` | a chart's spec |
-
-Events have `type`, `v` (1) and `run`: `start`, `progress` (the agent's notes between steps), `code`, `tool_call`,
-`tool_result` (counts, coverage, errors), `code_result`, `chart` (`chart_id`, `spec`), `check`, `answer` (`text`,
-`unverified`), `notice` (e.g. an expired working state being rebuilt), `usage` (tokens, `token_usd`, `code_runs`,
-`container_s`, `container_usd`, `cost_usd`), `error`, `done`. Trades carry a stable `id`.
+The case file (the research page at `/research`, `signals/research/static/`) is driven by the agent through
+events: a plan that waits for Start, step progress, window tiles and replays the server builds from the data,
+walkthroughs, evidence cards (findings) and answer cards. Every route, event and shape is in
+[docs/research-contract.md](docs/research-contract.md), the single source of truth (events version 2).
 
 A follow-up reuses the investigation's code container (its variables). Containers expire 30 days after they're made:
 when the API refuses one (or it's 29 days old), the question runs in a new container, the page gets a `notice`, and
@@ -301,8 +292,19 @@ Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (require
 `RESEARCH_METRICS_KEY`, and for Layer's recorded windows a read-only R2 token on `layer-history`: `R2_ACCOUNT_ID`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_BUCKET`, default layer-history).
 
-Locally: `ANTHROPIC_API_KEY=… uv run signals-research`, then http://127.0.0.1:8791/api/research/dev (a bare page
-for trying it; the Research tab waits on its design).
+**The page** (`signals/research/static/`, served by the service at `/research`; the main site's nav links to it as
+Breakdowns, and its ask bar opens it with `?q=`). A breakdown (an investigation in the code) is a saved case file: the plan waits for
+Start; the agent's events fill a workspace (tiles of every window, one window's replay with steps, its fills) and a
+column of findings, answers and proposals; you can point at a fill or a moment and ask about it. The replay draws
+Binance BTCUSDT, Chainlink BTC/USD (when recorded), the price to beat, the Up and Down prices, the wallet's fills and
+its position on one time axis, with the pre-open band, recording gaps hatched and once-a-minute prices dotted. Preact
+and htm (one pinned, vendored file, no build step) and hand-drawn SVG, so every fill is an element to point at. The
+shapes it reads are `docs/research-contract.md`. Re-runs, alerts and "+ New view" show as later.
+
+Locally: `uv run signals-research`, then http://127.0.0.1:8791/research/ (with `ANTHROPIC_API_KEY` to ask), or
+http://127.0.0.1:8791/research/?fixtures for the page against recorded windows and a sample event log, with no key
+and no sign-in. `uv run python tests/research_sample.py` rewrites that sample from the fixtures (a test checks it's
+current). http://127.0.0.1:8791/api/research/dev is the bare page for trying the agent.
 
 Hosting it (owner): a Railway service in the `signals` project from this repo with config `railway.research.json`,
 a volume at `/research`, and its variables; then a rewrite in `web/vercel.json` above the catch-all,

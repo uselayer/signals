@@ -26,33 +26,45 @@ SKIP = re.compile(
 # A number as written: sign, currency, digits with commas, decimals, then k/M/B, % or ¢.
 NUM = re.compile(r"(?P<neg>[-−])?\$?(?P<n>\d[\d,]*(?:\.\d+)?)(?:\s?(?P<mult>[kKmMbB])\b)?\s?(?P<unit>%|¢)?")
 MULT = {"k": 1e3, "m": 1e6, "b": 1e9}
-SOURCE_NUM = re.compile(r"\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
+# A value in the data: a whole number token, never digits inside a hash, an id or a word ("0x21f4c1a1", "15m").
+SOURCE_NUM = re.compile(r"(?<![0-9A-Za-z_.])\d+(?:\.\d+)?(?:[eE][-+]?\d+)?(?![0-9A-Za-z_])")
 
 
-def numbers(text: str) -> list[tuple[str, float, float]]:
-    """The numbers ``text`` states, each as (as written, value, how far rounding could have moved it)."""
-    text = SKIP.sub(" ", text)
+def located(text: str) -> list[tuple[str, float, float, int, int]]:
+    """The numbers ``text`` states: (as written, value, how far rounding could have moved it, start, end), with
+    start and end character offsets into ``text`` itself."""
+    blanked = SKIP.sub(lambda m: " " * len(m.group(0)), text)  # same length, so offsets hold
     out = []
-    for m in NUM.finditer(text):
-        raw = m.group(0).strip()
+    for m in NUM.finditer(blanked):
+        whole = m.group(0)
+        raw = whole.strip()
+        start = m.start() + (len(whole) - len(whole.lstrip()))
         digits = m["n"].replace(",", "")
         decimals = len(digits.split(".")[1]) if "." in digits else 0
         scale = MULT.get((m["mult"] or "").lower(), 1.0)
         value = float(digits) * scale
         # Rounded to its last digit; an integer with grouping commas or a k/M is at least that coarse.
         tol = 0.5 * 10**-decimals * scale + 1e-9
-        out.append((raw, value, tol))
+        out.append((raw, value, tol, start, start + len(raw)))
     return out
+
+
+def numbers(text: str) -> list[tuple[str, float, float]]:
+    """The numbers ``text`` states, each as (as written, value, how far rounding could have moved it)."""
+    return [(raw, value, tol) for raw, value, tol, _, _ in located(text)]
 
 
 class Sources:
     """Every value the agent was shown or printed, for looking numbers up."""
 
-    def __init__(self, texts: Iterable[str] = ()) -> None:
+    def __init__(self, texts: Iterable[str] = (), *, data: bool = True) -> None:
         self._values: list[float] = []
-        self.add(*texts)
+        self._data: list[float] = []  # values from the data only (tool results, printed output), for ``nearest``
+        self.add(*texts, data=data)
 
-    def add(self, *texts: str) -> None:
+    def add(self, *texts: str, data: bool = True) -> None:
+        """Values a number may trace to. ``data`` false for the instructions and the user's words: they let a number
+        pass but are never offered as what the data says."""
         vals = []
         for t in texts:
             for s in SOURCE_NUM.findall(t or ""):
@@ -61,18 +73,48 @@ class Sources:
                 except ValueError:
                     continue
         self._values = sorted(set(self._values).union(vals))
+        if data:
+            self._data = sorted(set(self._data).union(vals))
 
-    def has(self, value: float, tol: float) -> bool:
-        """A value within ``tol`` of ``value``, as is or as a share/price written in percent or cents (×100)."""
-        for x in (abs(value), abs(value) / 100):
-            i = bisect.bisect_left(self._values, x - tol / (1 if x == abs(value) else 100))
-            if i < len(self._values) and self._values[i] <= x + tol / (1 if x == abs(value) else 100):
+    def has(self, value: float, tol: float, scaled: bool = True) -> bool:
+        """A value within ``tol`` of ``value``: as is, or (``scaled``: not written in dollars) as a share or a
+        price written in percent or cents (×100)."""
+        for k in (1, 100) if scaled else (1,):
+            x, t = abs(value) / k, tol / k
+            i = bisect.bisect_left(self._values, x - t)
+            if i < len(self._values) and self._values[i] <= x + t:
                 return True
         return False
+
+    def nearest(self, value: float, within: float = 0.1, scaled: bool = True) -> float | None:
+        """The data's value closest to ``value`` (as is, or a share written ×100 when ``scaled``), when it's within
+        ``within`` of it relatively: what the number probably meant to say. None when nothing is that close."""
+        best: tuple[float, float] | None = None
+        vals = self._data
+        for x, k in ((abs(value), 1.0), (abs(value) / 100, 100.0)) if scaled else ((abs(value), 1.0),):
+            i = bisect.bisect_left(vals, x)
+            for j in (i - 1, i):
+                if 0 <= j < len(vals) and x:
+                    d = abs(vals[j] - x) / x
+                    if d <= within and (best is None or d < best[0]):
+                        best = (d, vals[j] * k)
+        return None if best is None else best[1]
+
+
+def flagged(text: str, sources: Sources) -> list[dict[str, Any]]:
+    """Each number in ``text`` that doesn't trace: {value_text, start, end, data_value} (offsets into ``text``;
+    ``data_value`` the closest value in the data, or None), for the page to strike it and show the data's."""
+    return [{"value_text": raw, "start": a, "end": b, "data_value": sources.nearest(value, scaled=_scaled(raw))}
+            for raw, value, tol, a, b in located(text) if not sources.has(value, tol, _scaled(raw))]  # fmt: skip
+
+
+def _scaled(raw: str) -> bool:
+    """A dollar amount is never a share or a price ×100: "$98" isn't 0.98."""
+    return "$" not in raw
 
 
 def check(text: str, sources: Sources) -> dict[str, Any]:
     """Which of ``text``'s numbers trace to ``sources``: ``unmatched`` lists the ones that don't, as written."""
     found = numbers(text)
-    unmatched = [raw for raw, value, tol in found if not sources.has(value, tol)]
+    unmatched = [raw for raw, value, tol in found if not sources.has(value, tol, _scaled(raw))]
     return {"ok": not unmatched, "checked": len(found), "unmatched": list(dict.fromkeys(unmatched))}

@@ -77,11 +77,14 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "outside_prices",
         "description": (
-            "Prices outside Polymarket between start and end. source 'binance': Binance spot candles' close "
-            "(BTCUSDT), 1-second steps for up to an hour, 1-minute steps up to 2 days. source 'chainlink': Chainlink "
-            "BTC/USD (what windows settle on) where Layer recorded it. JSON: {source, symbol, start, end, available, "
-            "why (when not available), step, points: [[ts unix s, price]]}. Binance is a different market from "
-            "Chainlink: never call one the other."
+            "Prices outside Polymarket between start and end. source 'binance': BTC priced in USDT (Tether) on "
+            "Binance spot, candle close, 1-second steps for up to an hour, 1-minute steps up to 2 days. source "
+            "'chainlink': Chainlink BTC/USD (US dollars: what windows settle on, and the price to beat is its "
+            "60-second average) where Layer recorded it, from 10 Nov 2026 05:27 UTC. JSON: {source, symbol, unit, "
+            "start, end, available, why (when not available), step, points: [[ts unix s, price]]}. Different units: "
+            "Binance usually sits about 0.1% from Chainlink, so never compare a Binance price to the price to beat. "
+            "To judge 'BTC above the start', use Chainlink where recorded; otherwise measure Binance against its own "
+            "value at the window's start, and say so."
         ),
         "input_schema": {
             "type": "object",
@@ -154,20 +157,29 @@ def chart(inp: dict[str, Any], save: Callable[[str, dict[str, Any], str | None],
 
 
 def run(name: str, inp: dict[str, Any], reads: Reads,
-        save_chart: Callable[[str, dict[str, Any], str | None], str]) -> tuple[str, bool, dict[str, Any]]:  # fmt: skip
-    """Runs one tool: (the text the agent's code gets, whether it failed, a short summary for the event stream)."""
+        save_chart: Callable[[str, dict[str, Any], str | None], str], *,
+        store: Any = None, sid: str | None = None) -> tuple[str, bool, dict[str, Any]]:  # fmt: skip
+    """Runs one tool: (the text the agent's code gets, whether it failed, a short summary for the event stream).
+    With ``store``/``sid``, what it reads is kept on the investigation, so the case file draws from the same rows."""
     t0 = time.monotonic()
+    keep = store is not None and sid is not None
     try:
         if name == "wallet_trades":
             out = reads.wallet_trades(inp.get("wallet", ""), inp.get("start"), inp.get("end"),
                                       inp.get("slug_prefix", "btc-updown-15m-"))  # fmt: skip
-            summary = {k: out[k] for k in ("count", "windows", "complete")}
+            summary = {"rows": out["count"], "windows": out["windows"], "complete": out["complete"],
+                       "limit_hit": not out["complete"]}  # fmt: skip
+            if keep:
+                store.set_wallet(sid, out["wallet"])
+                store.add_trades(sid, out["trades"])
         elif name == "wallet_profile":
             out = reads.wallet_profile(inp.get("wallet", ""))
             summary = {"name": (out.get("record") or {}).get("name"), "missing": out.get("missing")}
         elif name == "window":
             out = reads.window(inp.get("slug"), inp.get("condition_id"))
             summary = {"slug": out.get("slug"), "result": out.get("result"), "coverage": out.get("coverage")}
+            if keep and out.get("slug"):
+                store.put_window(sid, out["slug"], read=out)
         elif name == "outside_prices":
             out = reads.outside_prices(inp.get("source", ""), inp.get("start"), inp.get("end"), inp.get("symbol") or "BTC")
             summary = {"source": out.get("source"), "available": out.get("available"), "points": len(out.get("points") or [])}

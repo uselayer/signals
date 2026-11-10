@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Breakdowns · Signals</title>
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="./research.css">
+<script>
+  // the theme the main site saved (light/dark), before anything draws
+  try { const t = localStorage.getItem("signals.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+  // dark unless the main site's switch chose light
+</script>
+</head>
+<body>
+<div id="root"></div>
+<noscript><p style="padding:24px">Breakdowns need JavaScript.</p></noscript>
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>

@@ -110,10 +110,11 @@ def recording_notes(start: int, end: int) -> list[str]:
     return notes
 
 
-def trade_id(r: dict[str, Any]) -> str:
-    """A fill's stable id (the same fill always gets the same one), for linking a finding or a chart mark to it."""
-    key = f'{r.get("tx")}|{r.get("token")}|{r.get("ts")}|{r.get("action")}|{r.get("price")}|{r.get("size")}'
-    return "f_" + hashlib.sha1(key.encode()).hexdigest()[:12]
+def trade_id(tx: Any, asset: Any, action: Any, price: Any, size: Any, ts: Any) -> str:
+    """A fill's id, the same everywhere (docs/research-contract.md; Layer's window reader computes it too): the
+    first 12 hex characters of sha1("tx|asset|action|price to 4 dp|size to 6 dp|unix seconds")."""
+    key = f"{tx}|{asset}|{action}|{float(price or 0):.4f}|{float(size or 0):.6f}|{int(ts or 0)}"
+    return hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
 def _row(t: Any) -> dict[str, Any]:
@@ -156,7 +157,8 @@ class Reads:
             # trades in one second; 0.19.1: stopped at the limit with more listed): kept, and the read is partial.
             with _sdk_warnings() as caught:
                 rows = [_row(t) for t in self.whales.trades_between(w, at, b, limit=PAGE)]
-            sdk_warnings.extend(caught)
+            # "stopped at the limit" (0.19.1) is this loop's own cue to read on, handled below; the rest lose trades.
+            sdk_warnings.extend(m for m in caught if "stopped at the limit" not in m)
             return rows
 
         source = "Polymarket activity via uselayer whales.trades_between"
@@ -182,7 +184,7 @@ class Reads:
             rows = [r for r in rows if (r["slug"] or "").startswith(slug_prefix)]
         rows.sort(key=lambda r: (r["ts"], r["tx"] or ""))
         for r in rows:
-            r["id"] = trade_id(r)
+            r["id"] = trade_id(r["tx"], r["token"], r["action"], r["price"], r["size"], r["ts"])
         out: dict[str, Any] = {
             "wallet": w, "start": a, "end": b, "slug_prefix": slug_prefix, "count": len(rows),
             "windows": len({r["slug"] for r in rows}), "complete": complete, "read_to": read_to, "source": source,
@@ -229,7 +231,10 @@ class Reads:
             raise ReadError(f"Polymarket has no market {slug or condition_id}.")
         return found[0]
 
-    def window(self, slug: str | None = None, condition_id: str | None = None) -> dict[str, Any]:
+    def window(self, slug: str | None = None, condition_id: str | None = None, *,
+               with_trades: bool = True) -> dict[str, Any]:  # fmt: skip
+        """One window. ``with_trades`` false skips everyone's trades in it (the case file's replay doesn't use them on
+        the API path: a tile costs three reads instead of five or more)."""
         if not slug and not condition_id:
             raise ReadError("Give the window's slug (like btc-updown-15m-1794285000) or its condition_id.")
         recorded = self.recorded_window(slug) if slug else None
@@ -255,8 +260,10 @@ class Reads:
             "tokens": dict(zip(outcomes, tokens, strict=False)),
         }  # fmt: skip
         if recorded:  # Layer's window reader: books, trades, Chainlink and Binance, and its own coverage
-            return out | {k: v for k, v in recorded.items() if v is not None} | {
-                "recording_notes": recording_notes(start, end)}  # fmt: skip
+            merged = out | {k: v for k, v in recorded.items() if v is not None}
+            # coverage has the same keys whichever path read it (the agent's code relies on coverage.source)
+            merged["coverage"] = {"source": recorded.get("source"), **(recorded.get("coverage") or {})}
+            return merged | {"recording_notes": recording_notes(start, end)}
         out["prices"] = {}
         for name, token in out["tokens"].items():  # Polymarket's CLOB history, about 1 point a minute
             pts = self.whales.price_history(token, start - 60, end + 60)
@@ -265,7 +272,7 @@ class Reads:
             {"ts": int(r.get("timestamp") or 0), "wallet": r.get("proxyWallet"), "outcome": r.get("outcome"),
              "action": "sell" if str(r.get("side")).upper() == "SELL" else "buy", "price": float(r.get("price") or 0),
              "size": float(r.get("size") or 0), "tx": r.get("transactionHash")}
-            for r in self.whales._poly.market_trades(cid, limit=MARKET_TRADES)
+            for r in (self.whales._poly.market_trades(cid, limit=MARKET_TRADES) if with_trades else [])
         ]  # fmt: skip
         trades.sort(key=lambda r: r["ts"])
         gaps = [b[0] - a[0] for pts in out["prices"].values() for a, b in zip(pts, pts[1:], strict=False)]
@@ -277,7 +284,8 @@ class Reads:
             "price_step_s": sorted(gaps)[len(gaps) // 2] if gaps else None,  # measured (median), not assumed
             "price_points": {k: len(v) for k, v in out["prices"].items()},
             "largest_price_gap_s": max(gaps) if gaps else None,
-            "trades_read": len(trades), "trades_complete": len(trades) < MARKET_TRADES,
+            "trades_read": len(trades) if with_trades else None,
+            "trades_complete": len(trades) < MARKET_TRADES if with_trades else None,
         }  # fmt: skip
         if len(trades) >= MARKET_TRADES:
             out["coverage"]["note"] = f"Only the latest {MARKET_TRADES} trades in this market were read."
@@ -300,7 +308,7 @@ class Reads:
                 return {"source": "chainlink", "symbol": f"{sym}/USD", "start": a, "end": b, "available": False,
                         "why": why + " For a window, its start price (price_to_beat) and final price come from "
                                      "Polymarket (window tool)."}  # fmt: skip
-            return {"source": "chainlink (Layer recording of Polymarket's live data feed)", "symbol": f"{sym}/USD",
+            return {"source": "chainlink (Layer recording of Polymarket's live data feed)", "symbol": f"{sym}/USD", "unit": "USD",
                     "start": a, "end": b, "available": True, "step": "1 second", "points": pts}  # fmt: skip
         if source != "binance":
             raise ReadError('source must be "binance" or "chainlink".')
@@ -326,7 +334,7 @@ class Reads:
             if len(rows) < 1000:
                 break
             at = rows[-1][0] + step_s * 1000
-        return {"source": "binance spot (data-api.binance.vision)", "symbol": f"{sym}USDT", "start": a, "end": b,
+        return {"source": "binance spot (data-api.binance.vision)", "symbol": f"{sym}USDT", "unit": "USDT (Tether), not USD", "start": a, "end": b,
                 "available": True, "step": f"{step_s} second{'s' if step_s > 1 else ''}", "price": "candle close",
                 "points": pts}  # fmt: skip
 

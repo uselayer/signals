@@ -35,11 +35,19 @@ CREATE TABLE IF NOT EXISTS runs (id INTEGER PRIMARY KEY AUTOINCREMENT, session T
   started REAL NOT NULL, ended REAL, day TEXT NOT NULL, input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
   cache_read INTEGER DEFAULT 0, cache_write INTEGER DEFAULT 0, cost_usd REAL DEFAULT 0, rounds INTEGER DEFAULT 0,
   tool_calls INTEGER DEFAULT 0, check_ok INTEGER, error TEXT);
+CREATE TABLE IF NOT EXISTS inv_trades (session TEXT NOT NULL, trade_id TEXT NOT NULL, ts INTEGER NOT NULL,
+  slug TEXT, row TEXT NOT NULL, PRIMARY KEY (session, trade_id));
+CREATE INDEX IF NOT EXISTS inv_trades_slug ON inv_trades(session, slug, ts);
+CREATE TABLE IF NOT EXISTS inv_windows (session TEXT NOT NULL, slug TEXT NOT NULL, updated REAL NOT NULL,
+  read TEXT, ready TEXT, summary TEXT, PRIMARY KEY (session, slug));
+CREATE TABLE IF NOT EXISTS findings (session TEXT NOT NULL, id TEXT NOT NULL, n INTEGER NOT NULL, updated REAL NOT NULL,
+  data TEXT NOT NULL, PRIMARY KEY (session, id));
 """
 # (table, column definition): when the session's container was made (they expire after 30 days), and per question
 # the code runs, the container's estimated seconds and their dollars (cost_usd includes them).
 ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 0"),
-         ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0")]  # fmt: skip
+         ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0"),
+         ("sessions", "wallet TEXT"), ("sessions", "scope TEXT")]  # fmt: skip
 
 
 def day(t: float | None = None) -> str:
@@ -107,6 +115,11 @@ class Store:
             seq = self._db.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE session = ?", (sid,)).fetchone()[0]
             self._db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", (sid, seq, role, json.dumps(content), int(hidden)))
 
+    def replace_last_message(self, sid: str, content: Any) -> None:
+        """The conversation's last message, with new content (the user's words joining a tool's result)."""
+        self._q("UPDATE messages SET content = ? WHERE session = ? AND seq = "
+                "(SELECT MAX(seq) FROM messages WHERE session = ?)", (json.dumps(content), sid, sid))  # fmt: skip
+
     # ---- events ----
 
     def add_event(self, sid: str, event: dict[str, Any]) -> int:
@@ -133,6 +146,77 @@ class Store:
             return None
         r = dict(rows[0])
         return r | {"spec": json.loads(r["spec"])}
+
+    # ---- what the investigation read: the wallet's fills and its windows (the case file draws from these) ----
+
+    def set_scope(self, sid: str, scope: dict[str, Any]) -> None:
+        """The scope of the plan last proposed ({wallet, family, from, to}): what Start builds tiles for."""
+        self._q("UPDATE sessions SET scope = ? WHERE id = ?", (json.dumps(scope), sid))
+
+    def scope(self, sid: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT scope FROM sessions WHERE id = ?", (sid,))
+        return json.loads(rows[0]["scope"]) if rows and rows[0]["scope"] else None
+
+    def set_wallet(self, sid: str, wallet: str) -> None:
+        self._q("UPDATE sessions SET wallet = COALESCE(wallet, ?) WHERE id = ?", (wallet, sid))
+
+    def add_trades(self, sid: str, rows: list[dict[str, Any]]) -> None:
+        with self._lock:
+            self._db.executemany("INSERT OR REPLACE INTO inv_trades VALUES (?, ?, ?, ?, ?)",
+                                 [(sid, r["id"], r["ts"], r.get("slug"), json.dumps(r)) for r in rows])  # fmt: skip
+
+    def trades(self, sid: str, slug: str | None = None) -> list[dict[str, Any]]:
+        sql, args = "SELECT row FROM inv_trades WHERE session = ?", (sid,)
+        if slug is not None:
+            sql, args = sql + " AND slug = ?", (sid, slug)
+        return [json.loads(r["row"]) for r in self._q(sql + " ORDER BY ts", args)]
+
+    def trade(self, sid: str, trade_id: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT row FROM inv_trades WHERE session = ? AND trade_id = ?", (sid, trade_id))
+        return json.loads(rows[0]["row"]) if rows else None
+
+    def put_window(self, sid: str, slug: str, **parts: Any) -> None:
+        """Keeps any of ``read`` (the window tool's answer), ``ready`` and ``summary``; the others stay."""
+        with self._lock:
+            self._db.execute("INSERT OR IGNORE INTO inv_windows (session, slug, updated) VALUES (?, ?, ?)",
+                             (sid, slug, time.time()))  # fmt: skip
+            for k, v in parts.items():
+                if k in ("read", "ready", "summary"):
+                    self._db.execute(f"UPDATE inv_windows SET {k} = ?, updated = ? WHERE session = ? AND slug = ?",  # noqa: S608
+                                     (json.dumps(v), time.time(), sid, slug))  # fmt: skip
+
+    def window(self, sid: str, slug: str) -> dict[str, Any]:
+        """{read, ready, summary} kept for this window (each None when not yet)."""
+        rows = self._q("SELECT read, ready, summary FROM inv_windows WHERE session = ? AND slug = ?", (sid, slug))
+        if not rows:
+            return {"read": None, "ready": None, "summary": None}
+        return {k: json.loads(rows[0][k]) if rows[0][k] else None for k in ("read", "ready", "summary")}
+
+    def summaries(self, sid: str) -> list[dict[str, Any]]:
+        return [json.loads(r["summary"]) for r in self._q(
+            "SELECT summary FROM inv_windows WHERE session = ? AND summary IS NOT NULL ORDER BY slug", (sid,))]  # fmt: skip
+
+    # ---- findings: the evidence cards, each with the versions it had ----
+
+    def add_finding(self, sid: str, data: dict[str, Any]) -> str:
+        """A new finding, F<n> in this investigation; returns its id."""
+        with self._lock:
+            n = self._db.execute("SELECT COALESCE(MAX(n), 0) + 1 FROM findings WHERE session = ?", (sid,)).fetchone()[0]
+            fid = f"F{n}"
+            self._db.execute("INSERT INTO findings VALUES (?, ?, ?, ?, ?)",
+                             (sid, fid, n, time.time(), json.dumps({**data, "finding_id": fid})))  # fmt: skip
+        return fid
+
+    def update_finding(self, sid: str, fid: str, data: dict[str, Any]) -> None:
+        self._q("UPDATE findings SET data = ?, updated = ? WHERE session = ? AND id = ?",
+                (json.dumps({**data, "finding_id": fid}), time.time(), sid, fid))  # fmt: skip
+
+    def finding(self, sid: str, fid: str) -> dict[str, Any] | None:
+        rows = self._q("SELECT data FROM findings WHERE session = ? AND id = ?", (sid, fid))
+        return json.loads(rows[0]["data"]) if rows else None
+
+    def findings(self, sid: str) -> list[dict[str, Any]]:
+        return [json.loads(r["data"]) for r in self._q("SELECT data FROM findings WHERE session = ? ORDER BY n", (sid,))]
 
     # ---- costs ----
 

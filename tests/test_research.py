@@ -101,7 +101,7 @@ def test_wallet_trades_rows_from_the_sdk() -> None:
                    slug=SLUG, event_slug=SLUG)  # fmt: skip
     out = D.Reads(Whales019([t])).wallet_trades(W, 0, 200)
     row = dict(out["trades"][0])
-    assert row.pop("id") == D.trade_id(row)
+    assert row.pop("id") == D.trade_id("0xt", "7", "sell", 0.6, 10.0, 100) == D.trade_id("0xt", "7", "sell", "0.60", 10, "100")
     assert row == {"ts": 100, "slug": SLUG, "condition_id": "0xc", "outcome": "Down", "outcome_index": 1,
                    "token": "7", "action": "sell", "price": 0.6, "size": 10.0, "usd": 6.0, "tx": "0xt"}  # fmt: skip
 
@@ -114,6 +114,20 @@ def test_an_sdk_warning_marks_the_history_cut_short() -> None:
             logging.getLogger("uselayer").warning("uselayer: %s has over 5,000 trades at %d; the rest are skipped", w, a)
             return super().trades_between(w, a, b, limit=limit)
 
+    class FullPage(Whales019):  # 0.19.1 warns on every full page; reading on handles it
+        def trades_between(self, w: str, a: int, b: int, *, limit: int) -> list[Any]:
+            got = super().trades_between(w, a, b, limit=limit)
+            if len(got) == limit:
+                logging.getLogger("uselayer").warning("uselayer: stopped at the limit of %d trades for %s", limit, w)
+            return got
+
+    old = D.PAGE
+    D.PAGE = 2
+    try:
+        full = D.Reads(FullPage([_trade(100 + i, tx=f"0x{i}") for i in range(5)])).wallet_trades(W, 100, 200)
+    finally:
+        D.PAGE = old
+    assert full["complete"] and full["count"] == 5 and "sdk_warnings" not in full
     out = D.Reads(Warns([_trade(100)])).wallet_trades(W, 100, 200)
     assert not out["complete"] and "cut short" in out["note"]
     assert out["sdk_warnings"] == [f"uselayer: {W} has over 5,000 trades at 100; the rest are skipped"]
@@ -162,7 +176,9 @@ LAYER_WINDOW = {
     "book": [[1794285000, [[0.49, 100]], [[0.51, 80]], [[0.49, 90]], [[0.51, 70]]]],
     "trades": [[1794285010, 1794285008000, "Up", "BUY", 0.51, 20, W, "0xt"]],
     "chainlink": [[1794285000, 74719.5]], "binance": [[1794285000, 74827.09]],
-    "coverage": {"usable": True, "reasons": [], "book": {"secondsWithoutBook": 3, "of": 900}},
+    "coverage": {"usable": True, "reasons": [], "trades": {"dataApi": 364, "onStream": 246, "pct": 67.6},
+                 "book": {"secondsWithoutBook": 3, "of": 900, "lost": [  # as Layer's recording writes them
+                     {"from": "2026-11-09T04:45:14.181Z", "to": "2026-11-09T04:45:16.613Z", "why": "reconnected"}]}},
 }  # fmt: skip
 
 
@@ -240,6 +256,143 @@ def test_times_parse() -> None:
         D.unix("yesterday")
 
 
+# ---- the case file: a window's replay, built by the server ----
+
+LATE = 1794290400  # 10 Nov 06:00 UTC: after Chainlink recording began
+LATE_SLUG = f"btc-updown-15m-{LATE}"
+
+
+def _recorded_read(start: int = LATE) -> dict[str, Any]:
+    from signals.research import recorded
+
+    j = json.loads(json.dumps(LAYER_WINDOW).replace("1794285", str(start)[:7]))
+    j["prices"] = [[(start + 2) * 1000, 0.40, 0.42, 0.57, 0.59], [(start + 10) * 1000, 0.60, 0.62, 0.37, 0.39]]
+    j["trades"] = [[start + 12, (start + 11) * 1000 + 500, "Up", "BUY", 0.62, 10, "0xother", "0xa"],
+                   [start + 14, (start + 3) * 1000, "Up", "BUY", 0.40, 5, "0xother", "0xb"]]  # fmt: skip
+    j["chainlink"] = [[start, 74719.5], [start + 1, 74720.0]]
+    j["binance"] = [[start - 300, 74800.0], [start, 74827.09]]  # recordings begin 5 minutes before the start
+    s = recorded.shaped(j)
+    return {"slug": f"btc-updown-15m-{start}", "start": start, "end": start + 900, "title": "BTC", **s}
+
+
+def _wallet_fill(tx: str, ts: int, price: float, size: float, outcome: str = "Up", action: str = "buy") -> dict[str, Any]:
+    r = {"ts": ts, "slug": f"btc-updown-15m-{LATE}", "token": "1" if outcome == "Up" else "2", "outcome": outcome,
+         "action": action, "price": price, "size": size, "usd": round(price * size, 2), "tx": tx}  # fmt: skip
+    return r | {"id": D.trade_id(tx, r["token"], action, price, size, ts)}
+
+
+def test_a_window_replay_from_a_recording() -> None:
+    from signals.research import workspace as WS
+
+    fills = [_wallet_fill("0xa", LATE + 12, 0.62, 10), _wallet_fill("0xb", LATE + 14, 0.41, 5),
+             _wallet_fill("0xc", LATE + 20, 0.70, 4, action="sell"), _wallet_fill("0xd", LATE + 30, 0.38, 6, "Down")]  # fmt: skip
+    r = WS.ready(_recorded_read(), fills, None, {"jump": {"t": LATE + 10, "side": "Up"}})
+    assert r["window_id"] == LATE_SLUG and r["chainlink"] == [{"t": LATE, "p": 74719.5}, {"t": LATE + 1, "p": 74720.0}]
+    up = {p["t"]: p for p in r["up"]}
+    assert LATE + 1 not in up and up[LATE + 2]["ask"] == 0.42 and up[LATE + 9]["ask"] == 0.42 and up[LATE + 10]["ask"] == 0.62
+    assert r["minute_fallback"] is None and r["tags"]["jump"]["side"] == "Up"
+    t = {x["trade_id"]: x for x in r["trades"]}
+    assert t[fills[0]["id"]]["paid_ask"] is True  # 62¢ = the ask just before it reached the stream
+    assert t[fills[1]["id"]]["paid_ask"] is False  # 41¢ when the ask was 42¢: it rested
+    assert t[fills[2]["id"]]["paid_ask"] is None and t[fills[3]["id"]]["paid_ask"] is None  # a sell; not on the tape
+    assert r["position"] == [{"t": LATE + 12, "up": 10, "down": 0}, {"t": LATE + 14, "up": 15, "down": 0},
+                             {"t": LATE + 20, "up": 11, "down": 0}, {"t": LATE + 30, "up": 11, "down": 6}]  # fmt: skip
+    s = WS.summary(r)
+    assert s["entries"][0] == {"t": LATE + 12, "side": "Up", "action": "buy"} and s["first_entry_s"] == 12
+    assert s["result"] == "Down" and s["payout"] == 6 and s["cost"] == round(6.2 + 2.05 + 2.28, 2)
+    assert s["profit"] == round(6 + 2.8 - (6.2 + 2.05 + 2.28), 2) and s["coverage"]["chainlink"] == "full"
+    # cost is what the fills say was paid (Polymarket's usd), not shares × the rounded price
+    r["trades"][0]["usd"] = 6.31
+    assert WS.summary(r)["cost"] == round(6.31 + 2.05 + 2.28, 2)
+    cov = r["coverage"]
+    assert cov["missing_seconds"] == [[1794199514, 2.4]]
+    assert cov["lost"][0]["why"] == "The recorder's connection dropped and reconnected"
+    assert [t["liquidity"] for t in r["trades"]] == ["taker", "maker", None, None]
+    assert cov["market_trades"] == {"recorded": 246, "polymarket": 364, "pct": 67.6}
+
+
+def test_fills_before_the_window_opens() -> None:
+    from signals.research import workspace as WS
+
+    early = _wallet_fill("0xe", LATE - 47, 0.48, 3)
+    r = WS.ready(_recorded_read(), [early, _wallet_fill("0xa", LATE + 12, 0.62, 10)], None)
+    assert r["axis"] == {"from": LATE - 47 - WS.PAD_S, "to": LATE + 900 + WS.AFTER_S}
+    assert [t["pre_open"] for t in r["trades"]] == [True, False]
+    assert r["coverage"]["pre_open_entries"] == {"fills": 1, "first_s_before": 47, "before_axis": 0}
+    assert any("before the recording of this window's book begins" in n for n in r["coverage"]["notes"])
+    assert r["up"][0]["t"] == LATE + 2  # the book exists from its first recorded change
+    way_early = _wallet_fill("0xf", LATE - 7_200, 0.45, 2)
+    r = WS.ready(_recorded_read(), [way_early], None)
+    assert r["axis"]["from"] == LATE - WS.PRE_OPEN_MAX_S - WS.PAD_S
+    assert r["coverage"]["pre_open_entries"]["before_axis"] == 1 and r["position"][0]["up"] == 2
+
+
+def test_before_chainlink_recording_and_without_a_book() -> None:
+    from signals.research import workspace as WS
+
+    read = {"slug": SLUG, "start": 1794285000, "end": 1794285900, "price_to_beat": 74719.68, "result": "Down",
+            "prices": {"Up": [[1794285000, 0.5]], "Down": [[1794285000, 0.5]]}, "chainlink": [[1794285000, 1.0]],
+            "coverage": {"trades_read": 10, "trades_complete": True}}  # fmt: skip
+    r = WS.ready(read, [], [[1794285000, 74827.09]])
+    assert r["chainlink"] is None and r["coverage"]["chainlink"] == "start_and_result"  # before 10 Nov 05:27 UTC
+    assert r["up"] == [] and r["minute_fallback"]["up"] == [{"t": 1794285000, "p": 0.5}]
+    assert r["binance"] == [{"t": 1794285000, "p": 74827.09}] and not r["coverage"]["book"]
+    assert WS.summary(r)["profit"] == 0 and WS.totals([r["coverage"]])["chainlink"] == {"complete": 0, "total": 1}
+
+
+class FakeCaseReads:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def window(self, slug: str, condition_id: Any = None, **kw: Any) -> dict[str, Any]:
+        self.calls.append("window")
+        return _recorded_read()
+
+    def outside_prices(self, *a: Any, **k: Any) -> dict[str, Any]:
+        self.calls.append("binance")
+        return {"available": True, "points": [[LATE, 1.0]]}
+
+    def wallet_trades(self, wallet: str, a: Any, b: Any, prefix: Any) -> dict[str, Any]:
+        self.calls.append(f"trades:{prefix}")
+        return {"trades": [_wallet_fill("0xa", LATE + 12, 0.62, 10)]}
+
+
+def test_build_reads_only_what_the_investigation_hasnt() -> None:
+    from signals.research import workspace as WS
+
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    reads = FakeCaseReads()
+    r = WS.build(store, reads, sid, LATE_SLUG)
+    assert reads.calls == ["window", f"trades:{LATE_SLUG}"]  # a recording brings its own Binance
+    assert r["trades"][0]["paid_ask"] is True and store.trade(sid, r["trades"][0]["trade_id"])["tx"] == "0xa"  # type: ignore[index]
+    WS.build(store, reads, sid, LATE_SLUG, {"x": 1})
+    assert reads.calls == ["window", f"trades:{LATE_SLUG}"] and store.window(sid, LATE_SLUG)["ready"]["tags"] == {"x": 1}
+    assert [s["window_id"] for s in store.summaries(sid)] == [LATE_SLUG]
+
+
+def test_window_routes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from signals.research import server
+
+    monkeypatch.setattr(server, "store", Store(os.path.join(tempfile.mkdtemp(), "s.db")))
+    monkeypatch.setattr(server, "_reads", FakeCaseReads())
+    server.app.dependency_overrides[server.auth.user_of] = lambda: "alice"
+    try:
+        c = TestClient(server.app)
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        assert c.get(f"/api/research/sessions/{sid}/windows/{LATE_SLUG}").status_code == 404  # no wallet yet
+        server.store.set_wallet(sid, W)
+        r = c.get(f"/api/research/sessions/{sid}/windows/{LATE_SLUG}").json()
+        assert r["window_id"] == LATE_SLUG and r["position"][0]["up"] == 10
+        tiles = c.get(f"/api/research/sessions/{sid}/windows").json()
+        assert tiles["windows"][0]["window_id"] == LATE_SLUG and tiles["coverage"]["book"] == {"complete": 1, "total": 1}
+    finally:
+        server.app.dependency_overrides.clear()
+
+
 # ---- tools ----
 
 
@@ -264,7 +417,8 @@ def test_every_data_tool_is_called_from_code_only() -> None:
 
 class FakeReads:
     def wallet_trades(self, w: str, a: Any, b: Any, prefix: Any) -> dict[str, Any]:
-        return {"count": 3, "windows": 2, "complete": True, "trades": [{"price": 0.42}]}
+        return {"wallet": W, "count": 3, "windows": 2, "complete": True,
+                "trades": [_wallet_fill("0xa", LATE + 12, 0.42, 1)]}  # fmt: skip
 
 
 class Model:
@@ -347,14 +501,20 @@ def test_a_tool_call_from_code_and_a_traced_answer() -> None:
     model = _model(_calls_tool(), _answers("Observed: 3 trades in 2 windows at 42¢ on average."))
     events, store, sid = _ask(model)
     kinds = [e["type"] for e in events]
-    assert kinds == ["start", "progress", "code", "tool_call", "tool_result", "code_result", "check", "answer", "usage", "done"]
+    assert kinds == ["investigation.created", "ask.started", "answer.progress", "tool.call", "tool.call", "tool.result",
+                     "tool.result", "answer.card", "usage", "done"]  # fmt: skip
+    created = events[0]
+    assert created["subject"] == {"wallet": None, "name": None} and created["question"] == "Analyze it"
+    code_call, data_call = events[3], events[4]
+    assert code_call["tool"] == "code" and data_call["tool"] == "wallet_trades"
+    data_result = [e for e in events if e["type"] == "tool.result" and e["tool"] == "wallet_trades"][0]
+    assert data_result["rows"] == 3 and data_result["limit_hit"] is False
     second = model.requests[1]
     assert second["container"] == "cont_1"  # the paused code's container
     assert [b["type"] for b in second["messages"][-1]["content"]] == ["tool_result"]  # only tool results
     assert json.loads(second["messages"][-1]["content"][0]["content"])["count"] == 3
     assert model.requests[0]["tools"][0] == T.CODE_EXECUTION and model.requests[0]["fallbacks"] == "default"
-    answer = events[kinds.index("answer")]
-    assert answer["unverified"] == [] and events[kinds.index("check")]["ok"]
+    assert events[kinds.index("answer.card")]["number_check"] == {"passed": True, "flagged": {}}
     run = store.runs()[0]
     assert run["check_ok"] == 1 and run["rounds"] == 2 and run["tool_calls"] == 1 and run["code_runs"] == 1
     assert run["container_s"] == A.CONTAINER_MIN_S  # used: billed 5 minutes at least
@@ -394,7 +554,7 @@ def test_an_expired_container_is_rebuilt_and_said() -> None:
     assert [r.get("container") for r in model.requests] == ["cont_old", None]
     retry = model.requests[1]["messages"]
     assert retry[-2]["content"][0]["text"] == "And the windows?" and retry[-1] == {"role": "system", "content": A.REBUILT}
-    assert [e["type"] for e in events if e["type"] in ("notice", "answer", "error")] == ["notice", "answer"]
+    assert [e["type"] for e in events if e["type"] in ("notice", "answer.card", "error")] == ["notice", "answer.card"]
     assert store.session(sid, "u1")["container"] == "cont_1"  # type: ignore[index]
     # the note stays in the conversation (hidden), so the next follow-up replays it in place
     assert {"role": "system", "content": A.REBUILT} in store.messages(sid)
@@ -414,7 +574,7 @@ def test_a_container_lost_while_code_waits_on_a_tool_ends_the_step() -> None:
     model = _model(_calls_tool(), ApiError(404, "container cont_1 not found"))
     events, store, sid = _ask(model)
     assert [e["message"] for e in events if e["type"] == "error"] == [
-        "The investigation stopped on an error. Try again in a minute."]  # fmt: skip
+        "The breakdown stopped on an error. Try again in a minute."]  # fmt: skip
     assert store.session(sid, "u1")["container"] is None  # type: ignore[index]  # the next question starts fresh
 
 
@@ -429,17 +589,25 @@ def test_other_api_errors_are_not_mistaken_for_an_expired_container() -> None:
 def test_an_untraced_number_gets_one_retry() -> None:
     model = _model(_calls_tool(), _answers("It made $99.99."), _answers("Observed: 3 trades."))
     events, _, _ = _ask(model)
-    checks = [e for e in events if e["type"] == "check"]
-    assert checks[0]["unmatched"] == ["$99.99"] and checks[0]["retrying"] and checks[1]["ok"]
     assert "$99.99" in model.requests[2]["messages"][-1]["content"][0]["text"]
-    assert [e for e in events if e["type"] == "answer"][0]["text"] == "Observed: 3 trades."
+    cards = [e for e in events if e["type"] == "answer.card"]
+    assert len(cards) == 1 and cards[0]["text"] == "Observed: 3 trades." and cards[0]["number_check"]["passed"]
+
+
+def test_repeating_the_same_untraced_number_doesnt_make_it_trace() -> None:
+    model = _model(_calls_tool(), _answers("It made $99.99."), _answers("It made $99.99."))
+    events, _, _ = _ask(model)
+    card = [e for e in events if e["type"] == "answer.card"][0]
+    assert not card["number_check"]["passed"]  # the check's note quoted $99.99; that never makes it data
 
 
 def test_still_untraced_after_the_retry_is_shown_flagged() -> None:
     model = _model(_calls_tool(), _answers("It made $99.99."), _answers("It made $98.00."))
     events, store, _ = _ask(model)
-    answer = [e for e in events if e["type"] == "answer"][0]
-    assert answer["unverified"] == ["$98.00"] and store.runs()[0]["check_ok"] == 0
+    card = [e for e in events if e["type"] == "answer.card"][0]
+    assert card["number_check"] == {"passed": False, "flagged": {"text": [
+        {"value_text": "$98.00", "start": 8, "end": 14, "data_value": None}]}}  # fmt: skip
+    assert store.runs()[0]["check_ok"] == 0
 
 
 def test_the_per_question_budget_stops_a_long_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -456,9 +624,197 @@ def test_the_daily_limit_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert model.requests == [] and "today's limit" in [e for e in events if e["type"] == "error"][0]["message"]
 
 
+def test_near_the_time_limit_the_agent_is_told_to_answer_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(A, "WRAP_AT", 0.0)  # from the first step
+    model = _model(_calls_tool(), _answers("Observed: 3 trades."))
+    _ask(model)
+    notes = [m for m in model.requests[0]["messages"] if m["role"] == "system"]
+    assert notes == [{"role": "system", "content": A.WRAP_UP}]
+    # the second request answers the code's paused call: only tool results there, and the note isn't repeated
+    second = model.requests[1]["messages"]
+    assert second[-1]["role"] == "user" and sum(m["role"] == "system" for m in second) == 1
+
+
+def test_a_stop_with_findings_ends_on_an_answer_not_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(A, "MAX_USD", 0.001)
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.add_finding(sid, {"label": "observed", "title": "Two-sided in 93 of 94 windows", "counts": True,
+                            "stat": {"text": "93 of 94 windows"}})  # fmt: skip
+    store.add_finding(sid, {"label": "observed", "title": "Made-up", "counts": False})
+    events: list[dict[str, Any]] = []
+    A.Agent(FakeReads(), store, _model(_calls_tool(), _calls_tool())).ask(sid, "u1", "Go", events.append)  # type: ignore[arg-type]
+    kinds = [e["type"] for e in events]
+    assert "error" not in kinds and kinds[-4:] == ["answer.card", "notice", "usage", "done"]
+    card = events[kinds.index("answer.card")]
+    assert card["partial"] and card["observed"] == ["Two-sided in 93 of 94 windows: 93 of 94 windows"]
+    assert card["finding_ids"] == ["F1"]  # the flagged one isn't in it
+    assert "limit" in events[kinds.index("notice")]["text"]
+
+
+def test_start_builds_the_approved_scopes_tiles_without_waiting_for_the_agent() -> None:
+    plan = {"title": "t", "scope": {"wallet": W, "family": "btc-updown-15m", "from": LATE - 60, "to": LATE + 900},
+            "steps": [{"id": "s", "title": "x", "source": "y"}]}  # fmt: skip
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    reads = FakeCaseReads()
+    model = _model(_turn(_direct("propose_plan", plan)), _answers("Observed: 3 trades."))
+    A.Agent(reads, store, model).ask(sid, "u1", "How?", lambda e: None)  # type: ignore[arg-type]
+    assert store.scope(sid)["from"] == LATE - 60  # type: ignore[index]
+    events: list[dict[str, Any]] = []
+    A.Agent(reads, store, model).ask(sid, "u1", "Start the plan.", events.append,  # type: ignore[arg-type]
+                                     context={"plan_id": "plan-1", "action": "approve"})
+    kinds = [e["type"] for e in events]
+    assert "window.summary" in kinds and "coverage" in kinds
+    assert [e for e in events if e["type"] == "window.summary"][0]["window_id"] == LATE_SLUG
+    assert "trades:btc-updown-15m-" in reads.calls  # the scope's trades, read by the server
+    assert A.PREBUILD_NOTE.strip()[:30] in model.requests[1]["messages"][-1]["content"][-1]["text"]
+    usage = [e for e in events if e["type"] == "usage"][0]
+    assert "tiles_done" in usage["phases"] and "first_tile" in usage["phases"]
+
+
+def test_usage_reports_the_phases() -> None:
+    plan = {"title": "t", "scope": {"wallet": W}, "steps": [{"id": "s", "title": "x", "source": "y"}]}
+    events, _, _ = _ask(_model(_turn(_direct("propose_plan", plan))))
+    usage = [e for e in events if e["type"] == "usage"][0]
+    assert set(usage["phases"]) == {"plan"} and usage["phases"]["plan"] >= 0 and usage["seconds"] >= 0
+
+
 def test_a_refusal_ends_with_a_sentence() -> None:
     events, _, _ = _ask(_model({"stop_reason": "refusal", "usage": USAGE, "content": []}))
     assert [e["message"] for e in events if e["type"] == "error"] == ["The model declined this request."]
+
+
+# ---- the case file's tools ----
+
+
+def _direct(name: str, inp: dict[str, Any], tid: str = "tu_d") -> dict[str, Any]:
+    return {"type": "tool_use", "id": tid, "name": name, "input": inp, "caller": {"type": "direct"}}
+
+
+def _turn(*blocks: dict[str, Any], stop: str = "tool_use") -> dict[str, Any]:
+    return {"stop_reason": stop, "usage": USAGE, "content": list(blocks)}
+
+
+def test_a_plan_waits_for_start_and_start_continues_the_same_turn() -> None:
+    plan = {"title": "How it trades BTC 15m", "scope": {"wallet": W, "family": "btc-updown-15m"},
+            "steps": [{"id": "trades", "title": "Read its trades", "source": "Polymarket trades", "estimate_s": 20}]}  # fmt: skip
+    model = _model(_turn(_direct("propose_plan", plan)), _answers("Observed: 3 trades."))
+    events, store, sid = _ask(model, f"How does {W} trade?")
+    assert len(model.requests) == 1  # the run ended on the plan
+    p = [e for e in events if e["type"] == "plan.proposed"][0]
+    assert p["needs_approval"] and p["steps"][0]["id"] == "trades" and p["ask_id"] == events[0]["run"]
+    assert events[0]["type"] == "investigation.created" and events[0]["subject"]["wallet"] == W
+    assert store.session_any(sid)["wallet"] == W  # type: ignore[index]
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "Start", lambda e: None)  # type: ignore[arg-type]
+    last = model.requests[1]["messages"][-1]
+    assert [b["type"] for b in last["content"]] == ["tool_result", "text"] and last["content"][1]["text"] == "Start"
+
+
+def test_a_walkthrough_with_an_untraced_number_fails_once_then_shows_it_flagged() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    fill = _wallet_fill("0xa", LATE + 12, 0.62, 10)
+    store.add_trades(sid, [fill])
+    store.put_window(sid, LATE_SLUG, read=_recorded_read())
+    step = {"t": LATE + 12, "title": "It buys Up", "observed": "It bought 10 shares at 62¢, 12 s in.",
+            "inferred": None, "trade_ids": [fill["id"]]}  # fmt: skip
+    bad = {**step, "observed": "It bought 10 shares at 64¢, 12 s in."}
+    events: list[dict[str, Any]] = []
+    src = trace.Sources(['{"shares": 10, "price": 0.62, "s_in": 12}'])
+    case = __import__("signals.research.case", fromlist=["Case"]).Case(sid, 1, store, FakeCaseReads(), events.append, lambda: src)
+    text, failed, _ = case.handle("walkthrough", {"window_id": LATE_SLUG, "steps": [bad]})
+    assert failed and "64¢" in text and "closest in the data: 62" in text and not events
+    text, failed, _ = case.handle("walkthrough", {"window_id": LATE_SLUG, "steps": [bad]})
+    wt = [e for e in events if e["type"] == "walkthrough.ready"][0]
+    flag = wt["steps"][0]["number_check"]["flagged"]["observed"][0]
+    at = bad["observed"].index("64¢")
+    assert flag == {"value_text": "64¢", "start": at, "end": at + 3, "data_value": 62.0}
+    assert bad["observed"][flag["start"]:flag["end"]] == "64¢"
+    assert [e["type"] for e in events] == ["window.ready", "walkthrough.ready"]  # the replay first, once
+    text, failed, _ = case.handle("walkthrough", {"window_id": LATE_SLUG, "steps": [{**step, "trade_ids": ["nope"]}]})
+    assert failed and "aren't the wallet's fills" in text
+
+
+def test_show_windows_and_focus() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    events: list[dict[str, Any]] = []
+    from signals.research.case import Case
+
+    case = Case(sid, 1, store, FakeCaseReads(), events.append, lambda: trace.Sources())
+    text, failed, summary = case.handle("show_windows", {"window_ids": [LATE_SLUG], "tags": {LATE_SLUG: {"jump": 1}}})
+    out = json.loads(text)
+    assert not failed and out["windows"][0]["fills"] == 1 and "spark" not in out["windows"][0] and summary["rows"] == 1
+    assert [e["type"] for e in events] == ["window.summary", "coverage"]
+    assert events[0]["entries"] == [{"t": LATE + 12, "side": "Up", "action": "buy"}]
+    case.handle("focus", {"stage": "window", "window_id": LATE_SLUG, "step_index": 0, "label": "The clearest one"})
+    case.handle("focus", {"stage": "window", "window_id": LATE_SLUG, "step_index": 1})
+    kinds = [e["type"] for e in events[2:]]
+    assert kinds == ["window.ready", "view.focus", "view.focus"] and events[2]["tags"] == {"jump": 1}
+    assert events[3]["step_index"] == 0 and events[3]["label"] == "The clearest one"
+    assert case.handle("focus", {"stage": "nowhere"})[1]
+    assert case.handle("step_status", {"step_id": "trades", "status": "done", "summary": "94 windows"})[0] == "ok"
+    assert json.loads(case.handle("propose", {"text": "Next, I'd look at the losing windows"})[0])["proposal_id"] == "P1"
+
+
+def _case_with_fill() -> tuple[Any, Store, str, dict[str, Any], list[dict[str, Any]]]:
+    from signals.research.case import Case
+
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    fill = _wallet_fill("0xa", LATE + 12, 0.62, 10)
+    store.add_trades(sid, [fill])
+    store.put_window(sid, LATE_SLUG, read=_recorded_read())
+    events: list[dict[str, Any]] = []
+    src = trace.Sources(['{"windows": 94, "heavier_lost": 65, "pairs_under_1": 83, "median_pair": 0.929}'])
+    return Case(sid, 7, store, FakeCaseReads(), events.append, lambda: src), store, sid, fill, events
+
+
+def test_findings_observed_inferred_flagged_and_fixed() -> None:
+    case, store, sid, fill, events = _case_with_fill()
+    obs = {"label": "observed", "kind": "pattern", "title": "Extra shares end on the losing side",
+           "stat": {"count": 65, "out_of": 94, "unit": "windows", "text": "65 of 94 windows"},
+           "rule": "The side with more shares at the end lost.",
+           "evidence": {"supporting_window_ids": [LATE_SLUG], "trade_ids": [fill["id"]]}}  # fmt: skip
+    text, failed, _ = case.handle("finding", obs)
+    assert not failed and json.loads(text)["finding_id"] == "F1"
+    added = events[-1]
+    assert added["type"] == "finding.added" and added["counts"] and added["number_check"]["passed"]
+    # a made-up count fails once, then shows flagged and doesn't count
+    bad = {**obs, "title": "Pairs cost under $1", "stat": {"count": 88, "out_of": 94, "text": "88 of 94 windows"}}
+    assert case.handle("finding", bad)[1]
+    case.handle("finding", bad)
+    f2 = events[-1]
+    assert f2["finding_id"] == "F2" and not f2["counts"] and f2["number_check"]["flagged"]["stat"][0]["value_text"] == "88"
+    # nothing rests on a flagged finding; an inferred one needs based_on
+    read = {"label": "inferred", "title": "Resting orders on both sides", "would_change_mind": "maker flags"}
+    assert "needs based_on" in case.handle("finding", read)[0]
+    assert "didn't check out" in case.handle("finding", {**read, "based_on": ["F2"]})[0]
+    assert not case.handle("finding", {**read, "based_on": ["F1"]})[1] and events[-1]["label"] == "inferred"
+    # fixing F2 keeps the earlier version
+    case.handle("finding", {**bad, "finding_id": "F2", "stat": {"count": 83, "out_of": 94, "text": "83 of 94 windows"}})
+    upd = events[-1]
+    assert upd["type"] == "finding.updated" and upd["counts"] and upd["previous"]["stat"]["count"] == 88
+    assert store.finding(sid, "F2")["history"][0]["stat"]["count"] == 88  # type: ignore[index]
+    assert "aren't the wallet's fills" in case.handle("finding", {**obs, "evidence": {"trade_ids": ["x"]}})[0]
+    assert "weren't read" in case.handle("finding", {**obs, "evidence": {"supporting_window_ids": ["btc-updown-15m-1"]}})[0]
+
+
+def test_the_answer_card_and_the_run_ends_on_it() -> None:
+    card = {"label": "Why it lost here", "observed": ["Its heavier side lost in 65 of 94 windows."],
+            "inferred": ["Resting orders fill more on the side that's falling."], "finding_ids": ["F1"]}  # fmt: skip
+    model = _model(_calls_tool(), _turn(_direct("answer", card, "a1")), _turn(_direct("answer", card, "a2")),
+                   _answers("never asked"))  # fmt: skip
+    events, store, sid = _ask(model, "Why does it lose?")
+    assert "65" in model.requests[2]["messages"][-1]["content"][0]["content"]  # the first card bounced, naming 65
+    assert len(model.requests) == 3  # the second is shown flagged, and the run ends on it: no extra call
+    cards = [e for e in events if e["type"] == "answer.card"]
+    assert len(cards) == 1 and cards[0]["label"] == "Why it lost here" and cards[0]["number_check"]["passed"] is False
+    assert cards[0]["number_check"]["flagged"]["observed 1"][0]["value_text"] == "65"  # the fake data has no 65
 
 
 # ---- the server ----
@@ -472,7 +828,9 @@ def test_server_sessions_are_their_owners(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(server, "store", Store(os.path.join(tempfile.mkdtemp(), "s.db")))
 
     class Fake:
-        def ask(self, sid: str, user: str, q: str, emit: Any) -> None:
+        reads = None
+
+        def ask(self, sid: str, user: str, q: str, emit: Any, **kw: Any) -> None:
             emit({"type": "answer", "text": "ok", "unverified": []})
             emit({"type": "done"})
 
@@ -492,6 +850,128 @@ def test_server_sessions_are_their_owners(monkeypatch: pytest.MonkeyPatch) -> No
         assert c.get(f"/api/research/sessions/{sid}/events").status_code == 404
     finally:
         server.app.dependency_overrides.clear()
+
+
+class Recorder:
+    """A stand-in agent that keeps what each run was asked."""
+
+    reads = None
+
+    def __init__(self) -> None:
+        self.asked: list[dict[str, Any]] = []
+
+    def ask(self, sid: str, user: str, q: str, emit: Any, **kw: Any) -> None:
+        self.asked.append({"text": q, **kw})
+        emit({"type": "done"})
+
+
+def _client(monkeypatch: pytest.MonkeyPatch, agent: Any) -> tuple[Any, Any]:
+    from fastapi.testclient import TestClient
+
+    from signals.research import server
+
+    monkeypatch.setattr(server, "store", Store(os.path.join(tempfile.mkdtemp(), "s.db")))
+    monkeypatch.setattr(server, "_agent", agent)
+    monkeypatch.setattr(server, "_reads", FakeCaseReads())
+    server.app.dependency_overrides[server.auth.user_of] = lambda: "alice"
+    return TestClient(server.app), server
+
+
+def _settle(server: Any) -> None:
+    import time as _time
+
+    for _ in range(100):
+        if not server._running:
+            return
+        _time.sleep(0.01)
+
+
+def test_plan_start_and_edit(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = Recorder()
+    c, server = _client(monkeypatch, rec)
+    try:
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        server.store.add_event(sid, {"type": "plan.proposed", "plan_id": "plan-1", "steps": [],
+                                     "scope_options": [{"id": "oct", "text": "Also October, 1-minute prices"}]})  # fmt: skip
+        assert c.post(f"/api/research/sessions/{sid}/plan", json={"plan_id": "plan-9", "action": "approve"}).status_code == 404
+        r = c.post(f"/api/research/sessions/{sid}/plan",
+                   json={"plan_id": "plan-1", "action": "approve", "scope_option_ids": ["oct"]})  # fmt: skip
+        assert r.status_code == 202
+        _settle(server)
+        assert rec.asked[0]["text"] == "Start the plan.\nAlso: Also October, 1-minute prices"
+        assert rec.asked[0]["context"] == {"plan_id": "plan-1", "action": "approve"}
+        assert c.post(f"/api/research/sessions/{sid}/plan", json={"plan_id": "plan-1", "action": "approve"}).status_code == 409
+        server.store.add_event(sid, {"type": "plan.proposed", "plan_id": "plan-2", "steps": []})
+        assert c.post(f"/api/research/sessions/{sid}/plan", json={"plan_id": "plan-2", "action": "edit"}).status_code == 400
+        assert c.post(f"/api/research/sessions/{sid}/plan",
+                      json={"plan_id": "plan-2", "action": "edit", "text": "Only Nov 9"}).status_code == 202  # fmt: skip
+        _settle(server)
+        assert rec.asked[1]["text"] == "Change the plan: Only Nov 9"
+        answered = [e for e in server.store.events(sid) if e["type"] == "plan.answered"]
+        assert [(e["plan_id"], e["action"]) for e in answered] == [("plan-1", "approve"), ("plan-2", "edit")]
+    finally:
+        server.app.dependency_overrides.clear()
+
+
+def test_proposals_accept_or_decline(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = Recorder()
+    c, server = _client(monkeypatch, rec)
+    try:
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        server.store.add_event(sid, {"type": "proposal", "proposal_id": "P1", "text": "Look at the losing windows"})
+        server.store.add_event(sid, {"type": "proposal", "proposal_id": "P2", "text": "Compare with Nov 8"})
+        r = c.post(f"/api/research/sessions/{sid}/proposals/P2", json={"action": "decline"})
+        assert r.json() == {"started": False} and rec.asked == []
+        assert c.post(f"/api/research/sessions/{sid}/proposals/P2", json={"action": "accept"}).status_code == 409
+        assert c.post(f"/api/research/sessions/{sid}/proposals/P1", json={"action": "accept"}).status_code == 202
+        _settle(server)
+        assert rec.asked[0]["text"] == "Yes, go ahead: Look at the losing windows"
+    finally:
+        server.app.dependency_overrides.clear()
+
+
+def test_asking_about_a_trade_or_a_moment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from signals.research import workspace as WS
+
+    rec = Recorder()
+    c, server = _client(monkeypatch, rec)
+    try:
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        server.store.set_wallet(sid, W)
+        fill = _wallet_fill("0xa", LATE + 12, 0.62, 10)
+        server.store.add_trades(sid, [fill])
+        server.store.put_window(sid, LATE_SLUG, read=_recorded_read())
+        WS.build(server.store, FakeCaseReads(), sid, LATE_SLUG)
+        bad = c.post(f"/api/research/sessions/{sid}/ask", json={"question": "Why?", "context": {"trade_id": "nope"}})
+        assert bad.status_code == 404 and rec.asked == []
+        r = c.post(f"/api/research/sessions/{sid}/ask", json={"question": "Why here?", "context": {"trade_id": fill["id"]}})
+        assert r.status_code == 202
+        _settle(server)
+        f = rec.asked[0]["facts"]
+        assert f["kind"] == "trade" and f["trade"]["tx"] == "0xa" and f["seconds_after_start"] == 12
+        assert f["as_drawn"]["liquidity"] == "taker" and rec.asked[0]["context"] == {"trade_id": fill["id"]}
+        c.post(f"/api/research/sessions/{sid}/ask", json={"question": "This burst?", "context": {"trade_ids": [fill["id"]]}})
+        _settle(server)
+        burst = rec.asked.pop()["facts"]
+        assert burst["kind"] == "trades" and burst["count"] == 1 and burst["window_id"] == LATE_SLUG
+        c.post(f"/api/research/sessions/{sid}/ask", json={"question": "What happened here?",
+                                                          "context": {"window_id": LATE_SLUG, "t": LATE + 11}})  # fmt: skip
+        _settle(server)
+        m = rec.asked[1]["facts"]
+        assert m["kind"] == "moment" and m["seconds_after_start"] == 11 and m["up"] == {"t": LATE + 11, "bid": 0.6, "ask": 0.62}
+        assert [x["trade_id"] for x in m["fills_within_10s"]] == [fill["id"]]
+    finally:
+        server.app.dependency_overrides.clear()
+
+
+def test_pointed_at_facts_reach_the_model() -> None:
+    model = _model(_answers("Observed: 3 trades."))
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "Why here?", lambda e: None,  # type: ignore[arg-type]
+                                           context={"trade_id": "abc"}, facts={"kind": "trade", "price": 0.62})
+    said = model.requests[0]["messages"][-1]["content"][0]["text"]
+    assert said.startswith("Why here?") and '"price": 0.62' in said
 
 
 def test_the_request_through_the_real_anthropic_sdk() -> None:
@@ -543,5 +1023,5 @@ def test_the_request_through_the_real_anthropic_sdk() -> None:
     assert b["tools"][0] == T.CODE_EXECUTION and b["tools"][1]["allowed_callers"] == [T.CALLER]
     assert b["stream"] is True and [m["role"] for m in b["messages"]] == ["user", "assistant", "user", "system"]
     assert all(x in sent["beta"] for x in A.BETAS)
-    assert [e for e in events if e["type"] == "answer"][0]["text"] == "Observed: 3 trades."
+    assert [e for e in events if e["type"] == "answer.card"][0]["text"] == "Observed: 3 trades."
     assert store.session(sid, "u1")["container"] == "cont_9"  # type: ignore[index]
