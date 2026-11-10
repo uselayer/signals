@@ -102,13 +102,13 @@ function Home({ api }) {
   };
   return html`<main class="home">
     <div style="display:flex;flex-direction:column;gap:10px"><h1>What do you want to find out?</h1>
-      <p class="muted">${SAMPLE ? 'This is a sample: a breakdown recorded from a real run, with its question filled in. Press Break it down to watch it plan, read and chart the trades. Sign in to ask your own.' : 'Paste a wallet or name a trader, then ask in your own words. The agent shows its plan before it reads anything. Polymarket only; research, no trading.'}</p>
+      <p class="muted">${SAMPLE ? 'This is a sample: a breakdown recorded from a real run, with its question filled in. Press Break it down to watch it plan, read and chart the trades. Sign in to ask your own.' : 'Polymarket only. Research, no trading.'}</p>
       <div class="compose-big">
         <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => onWallet(e.target.value)} />
         <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
-        <p class="muted small">${!isSample(wallet) ? 'Try asking' : html`Try asking about <b>${SAMPLE_TRADERS[0].name}</b> or <b>${SAMPLE_TRADERS[1].name}</b>, two traders active in BTC 15-minute markets, or paste a wallet above`}</p>
+        <p class="muted small">Try asking</p>
         <div class="ex-grid">${EXAMPLES.map(([, label, question], i) => html`<button type="button" class=${'ex' + (q === question(whoOf(wallet, i)) ? ' on' : '')} onClick=${() => pick(i)}>${label(whoOf(wallet, i))}</button>`)}</div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
