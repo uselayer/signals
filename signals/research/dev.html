@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Research (local)</title>
+<script src="https://cdn.jsdelivr.net/npm/vega@5.30.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@5.21.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@6.26.0"></script>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; max-width: 1100px; margin: 24px auto; padding: 0 16px; color: #1b2420; background: #fff; }
+  form { display: flex; gap: 8px; margin-bottom: 16px; }
+  textarea { flex: 1; font: inherit; padding: 8px; min-height: 60px; }
+  button { font: inherit; padding: 8px 16px; }
+  .ev { border-left: 3px solid #dde3df; padding: 4px 10px; margin: 6px 0; white-space: pre-wrap; }
+  .progress { color: #5b6862; } .code, .code_result { font: 12px/1.4 ui-monospace, monospace; background: #f6f7f6; max-height: 260px; overflow: auto; }
+  .tool_call, .tool_result { color: #0f6b5f; font-size: 13px; } .answer { border-color: #0f6b5f; font-size: 16px; }
+  .error { border-color: #a3322a; color: #a3322a; } .check { font-size: 13px; } .usage { font-size: 12px; color: #5b6862; }
+  .chart { border-color: #0f6b5f; overflow-x: auto; }
+</style>
+</head>
+<body>
+<h1>Research, local</h1>
+<p>Not the Research tab: a bare page for trying the agent. Follow-ups stay in the same investigation; <button id="new" type="button">New investigation</button></p>
+<form id="f"><textarea id="q" placeholder="Analyze 0x… BTC 15-minute trades since Nov 8: when it enters, what it pays, and its strategy."></textarea><button>Ask</button></form>
+<div id="log"></div>
+<script>
+let sid = null, after = -1;
+const log = document.getElementById('log');
+const post = (u, b) => fetch(u, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(b)});
+function add(cls, text) { const d = document.createElement('div'); d.className = 'ev ' + cls; d.textContent = text; log.append(d); d.scrollIntoView({block: 'nearest'}); return d; }
+function show(e) {
+  if (e.type === 'start') add('answer', 'Q: ' + e.question);
+  else if (e.type === 'progress') add('progress', e.text);
+  else if (e.type === 'code') add('code', e.code);
+  else if (e.type === 'code_result') add('code_result', (e.stdout || '') + (e.stderr ? '\nstderr: ' + e.stderr : ''));
+  else if (e.type === 'tool_call') add('tool_call', '→ ' + e.name + ' ' + JSON.stringify(e.input));
+  else if (e.type === 'tool_result') add('tool_result', '← ' + e.name + ' ' + JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !['type', 'id', 'name', 'seq'].includes(k)))));
+  else if (e.type === 'chart') { const d = add('chart', e.title + (e.caption ? ' · ' + e.caption : '')); const c = document.createElement('div'); d.append(c); vegaEmbed(c, e.spec, {actions: false}).catch(err => c.textContent = String(err)); }
+  else if (e.type === 'check') add('check', e.ok ? `Numbers checked: all ${e.checked} trace to data.` : `Numbers not found in the data: ${e.unmatched.join(', ')}` + (e.retrying ? ' (asking the agent to fix them)' : ''));
+  else if (e.type === 'answer') add('answer', e.text + (e.unverified.length ? '\n\nUnverified: ' + e.unverified.join(', ') : ''));
+  else if (e.type === 'usage') add('usage', `${e.rounds} model calls · ${e.tool_calls} tool calls · ${e.input_tokens} in + ${e.cache_read_input_tokens} cached + ${e.output_tokens} out tokens · $${e.cost_usd}`);
+  else if (e.type === 'error') add('error', e.message);
+}
+function follow() {
+  const es = new EventSource(`/api/research/sessions/${sid}/events?after=${after}`);
+  es.onmessage = m => { const e = JSON.parse(m.data); after = e.seq; show(e); if (e.type === 'done') es.close(); };
+  es.onerror = () => es.close();
+}
+document.getElementById('new').onclick = () => { sid = null; after = -1; log.textContent = ''; };
+document.getElementById('f').onsubmit = async ev => {
+  ev.preventDefault();
+  const q = document.getElementById('q').value.trim(); if (!q) return;
+  if (!sid) sid = (await (await post('/api/research/sessions', {})).json()).id;
+  const r = await post(`/api/research/sessions/${sid}/ask`, {question: q});
+  const body = await r.json();
+  if (!r.ok) { add('error', body.detail || 'Failed'); return; }
+  after = body.after; follow();
+};
+</script>
+</body>
+</html>

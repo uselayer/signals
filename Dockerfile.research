@@ -1,0 +1,16 @@
+# Signals' research agent (signals/research): its own Railway service, never inside the engine.
+# Investigations are kept on a volume mounted at /research. Keys (ANTHROPIC_API_KEY, CLERK_PUBLISHABLE_KEY) come
+# from the service's variables, set by the owner.
+FROM python:3.14-slim
+
+WORKDIR /app
+RUN pip install --no-cache-dir uv==0.12.21
+COPY pyproject.toml uv.lock ./
+COPY signals ./signals
+RUN uv sync --frozen --no-dev
+
+ENV RESEARCH_HOSTED=1 \
+    RESEARCH_STORE_DIR=/research \
+    PYTHONUNBUFFERED=1
+# One worker: running investigations and their event streams live in its memory. No access log (visitors' IPs).
+CMD ["sh", "-c", "exec .venv/bin/uvicorn signals.research.server:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --proxy-headers --forwarded-allow-ips='*' --no-access-log"]

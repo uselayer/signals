@@ -332,6 +332,23 @@ behind Vercel (see README, "Hosting").
     either way is "Price moved away" (a big drop means the market turned against them, not a bargain).
 - Pull requests: sessions never merge. Only the owner merges, when they say "merge #N".
 
+## Research agent (`signals/research`, README "Research agent")
+
+- Its own service, never inside the engine (`app.py`): no agent run, model call or research read in the engine's
+  process. Its Polymarket reads go through the SDK on its own budget (`Budget(…, name="research")`).
+- Every number it shows traces to data (`trace.py`): a figure that doesn't match a tool result or its code's printed
+  output is never shown as fact (one retry, then flagged `unverified`). Don't loosen the check to make answers pass.
+- Wording (proposed 10 Nov, for the owner to confirm): findings are marked Observed (in the data, with its numbers)
+  or Inferred (a reading of why; intent is always a guess, with what would confirm it). It says what the data
+  doesn't cover (partial trades, coverage gaps, no order book, no Chainlink) and never fills a gap with a guess.
+  The consumer rules hold here too: "trade" never "bet", no advice or predictions, nothing implying copying makes
+  money, no orders. Other wallets only shortened (0x91…76); the wallet asked about may be shown in full.
+- Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
+  Layer's recordings.
+- Signed in only, and an investigation, its events and charts are only ever its owner's. Costs are capped per
+  question, per person and per day (`RESEARCH_*_USD`); raising them is the owner's call.
+- Keys (`ANTHROPIC_API_KEY`) are set by the owner in the service's variables, never by a session.
+
 ## Deploying (only when the owner asks)
 
 - **Engine** (Railway project and service `signals`): `railway up --service signals` from the repo root. It
