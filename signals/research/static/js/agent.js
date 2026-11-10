@@ -60,7 +60,13 @@ function Finding({ f, inv, act }) {
   return html`<article class=${'card ' + (isFlagged ? 'flagged' : inferred ? 'inferred' : '')}>
     <div class="top2">${isFlagged ? html`<span class="tag flag">Number not verified</span>` : f.kind === 'data' ? html`<span class="tag plain">What's missing</span>` : f.kind === 'unsure' ? html`<span class="tag plain">Not sure yet</span>` : html`<span class=${'tag ' + (inferred ? 'inferred' : 'observed')}>${inferred ? 'Inferred' : 'Observed'}</span>`}<span class="k">${f.kind === 'read' ? 'My reading' : f.finding_id}</span></div>
     <h4>${flagged(f.title, flagsFor(nc, 'title'))}</h4>
-    ${f.stat && html`<div class="statrow"><button class="stat" onClick=${() => act.highlight(f)} title="Show these windows">${flagged(f.stat.text, flagsFor(nc, 'stat'))}</button>${prev && html`<span class="was">was ${prev}</span>`}</div>`}
+    ${f.stat && (() => {
+      // the count is the headline; the agent's own sentence about it reads below at reading size
+      const head = f.stat.count != null && f.stat.out_of != null ? `${f.stat.count.toLocaleString('en-US')} of ${f.stat.out_of.toLocaleString('en-US')}${f.stat.unit ? ' ' + f.stat.unit : ''}` : null;
+      const short = !head && (f.stat.text || '').length <= 40;
+      return html`<div class="statrow"><button class="stat" onClick=${() => act.highlight(f)} title="Show these windows">${head || (short ? flagged(f.stat.text, flagsFor(nc, 'stat')) : 'Show these windows')}</button>${prev && html`<span class="was">was ${prev}</span>`}</div>
+        ${!short && f.stat.text && f.stat.text !== head && html`<p>${flagged(f.stat.text, flagsFor(nc, 'stat'))}</p>`}`;
+    })()}
     ${order.length > 0 && html`<div class="waffle">${order.map(id => html`<button class=${sup.has(id) ? '' : 'no'} title=${id} aria-label=${id} onClick=${() => act.openWin(id)}></button>`)}</div>`}
     ${f.body && html`<p>${f.body}</p>`}
     ${ruleLines.length > 0 && (f.kind === 'data'

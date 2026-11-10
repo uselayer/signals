@@ -22,3 +22,6 @@ export const windowLabel = (start, end) => `${day(start)}, ${hm(start)}–${hm(e
 export const traderName = s => (s && s.name) ? s.name : s && s.wallet ? `Trader ${s.wallet.slice(0, 4)}…${s.wallet.slice(-2)}` : 'this wallet';
 export const plural = (n, one, many) => `${count(n)} ${n === 1 ? one : (many || one + 's')}`;
 export const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// a full wallet address in a title reads shortened ("No wallet addresses on screen"; the question keeps what was typed)
+export const shortWallets = t => String(t || '').replace(/0x[0-9a-fA-F]{40}/g, a => `${a.slice(0, 6)}…${a.slice(-4)}`);

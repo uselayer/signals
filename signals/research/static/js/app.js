@@ -9,7 +9,7 @@ import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
 import { Hatch } from './chart.js';
-import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural } from './format.js';
+import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets } from './format.js';
 
 const LOGO = html`<svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1" /><rect x="8.5" y="7" width="3" height="10" rx="1" /><rect x="14" y="3" width="3" height="14" rx="1" /></svg>`;
 const params = new URLSearchParams(location.search);
@@ -68,7 +68,7 @@ function Home({ api }) {
       ${err && html`<div class="banner err">${err}</div>`}</div>
     <div style="display:flex;flex-direction:column;gap:10px"><h3>Your investigations</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
-        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${s.title || 'Untitled investigation'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div><span class="r">Saved</span></a>`)}</div>`}</div>
+        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled investigation'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div><span class="r">Saved</span></a>`)}</div>`}</div>
     <p class="muted small">Later: re-running an investigation when the wallet trades again, with Telegram alerts, comes after the first version.</p>
   </main>`;
 }
@@ -83,7 +83,7 @@ function Investigation({ api, id }) {
   const startFollow = () => {
     if (follow.current) return;
     const ac = new AbortController(); follow.current = ac;
-    api.follow(id, inv.lastSeq, onEvent, ac.signal).catch(err => { inv.error = err.message; redraw(); }).finally(() => { if (follow.current === ac) follow.current = null; });
+    api.follow(id, inv.lastSeq, onEvent, ac.signal).catch(err => { inv.loadError = err.message; redraw(); }).finally(() => { if (follow.current === ac) follow.current = null; });
   };
   useEffect(() => {
     (async () => {
@@ -96,7 +96,7 @@ function Investigation({ api, id }) {
         if (inv.done && api.windows) { const w = await api.windows(id).catch(() => null); if (w) for (const x of w.windows) apply(inv, { type: 'window.summary', ...x }, null); }
         if (ui.win) loadWin(ui.win);
         redraw();
-      } catch (e) { inv.error = e.message; redraw(); }
+      } catch (e) { inv.loadError = e.message; redraw(); }
     })();
     return () => { if (follow.current) follow.current.abort(); };
   }, [id]);
@@ -153,7 +153,7 @@ function Investigation({ api, id }) {
     <section class="main" aria-label="Workspace">
       <div class="head">
         <div class="muted small"><a href="#/">Investigations</a> /</div>
-        <h1>${inv.title || 'Investigation'}</h1>
+        <h1>${shortWallets(inv.title) || 'Investigation'}</h1>
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}<span>BTC Up or Down 15m</span>
           ${inv.summaries.length > 0 && html`<span>· ${plural(inv.summaries.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
@@ -163,7 +163,7 @@ function Investigation({ api, id }) {
           <p class="muted small">For now the investigation is saved: reopen it any time from Investigations.</p><button class="btn sm" onClick=${() => { ui.laterOpen = false; redraw(); }}>OK</button></div>`}
       </div>
       ${FIXTURES && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
-      ${inv.error && html`<div class="banner err">${inv.error}</div>`}
+      ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
       <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}
         <button class=${'later ' + (ui.stage === 'later' ? 'on' : '')} onClick=${() => act.stage('later')}>+ New view</button></div>
       ${ui.stage === 'plan' && html`<${PlanStage} inv=${inv} act=${act} />`}
