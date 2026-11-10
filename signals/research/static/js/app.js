@@ -47,14 +47,16 @@ function App() {
     ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} />`)}`;
 }
 
-// Example questions under the ask box (owner, 10 Nov: four, small, one row): each names "this wallet", so it reads as
-// a question about the wallet in the field above. A card fills the question only and moves focus to Break it down; it
-// never starts anything, so the plan and its cost are still shown first. All BTC 15-minute, the only scope there is.
+// Example questions under the ask box (owner, 10 Nov: four, small, one row, and each must say WHICH wallet): every card
+// names its wallet. With the wallet field empty that's a sample trader (SAMPLE_TRADER, active in BTC 15-minute markets)
+// and a click fills both fields; with a wallet typed, the cards name that one (shortened) and fill the question only.
+// A click never starts anything: Break it down still shows the plan and its cost first. BTC 15-minute only.
+const SAMPLE_TRADER = { wallet: '0xb945945d5bcaf7b56834d4da8cdf8f8f94b2db68', name: 'l5Zn1bWoM8eTsK' };
 const EXAMPLES = [
-  ['How does this wallet make money?', 'How does this wallet make money on BTC 15-minute markets?'],
-  ['Does this wallet buy both Up and Down?', 'In BTC 15-minute markets, does this wallet buy both Up and Down in the same window?'],
-  ['When does this wallet buy in a window?', 'In BTC 15-minute markets, when does this wallet buy: before the window opens, or after BTC moves?'],
-  ["Is this wallet's profit steady?", "Is this wallet's profit on BTC 15-minute markets steady, or does it come from a few big windows?"],
+  [w => `How does ${w} make money?`, w => `How does ${w} make money on BTC 15-minute markets?`],
+  [w => `Does ${w} buy both Up and Down?`, w => `In BTC 15-minute markets, does ${w} buy both Up and Down in the same window?`],
+  [w => `When does ${w} buy in a window?`, w => `In BTC 15-minute markets, when does ${w} buy: before the window opens, or after BTC moves?`],
+  [w => `Is ${w}'s profit steady?`, w => `Is ${w}'s profit on BTC 15-minute markets steady, or does it come from a few big windows?`],
 ];
 
 // Signed out: what a breakdown is, the recorded one to watch (no sign-in, no model run), and Sign in to ask your own.
@@ -74,10 +76,15 @@ function Teaser() {
 function Home({ api }) {
   const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
-  // after a card: focus Break it down, or the wallet field while it's empty (the card asks about "this wallet")
-  const go = useRef(), walletEl = useRef(), focusNext = useRef(null);
+  // after a card: focus Break it down
+  const go = useRef(), focusNext = useRef(null);
   useEffect(() => { const el = focusNext.current; focusNext.current = null; if (el && el.current) el.current.focus(); });
-  const pick = question => { setQ(question); focusNext.current = wallet.trim() ? go : walletEl; };
+  // whom the cards name: the sample trader by name (also once a card filled its address in), else the wallet typed
+  const whoOf = w => (!w.trim() || w.trim().toLowerCase() === SAMPLE_TRADER.wallet ? SAMPLE_TRADER.name : shortWallets(w.trim()));
+  const who = whoOf(wallet);
+  const pick = question => { if (!wallet.trim()) setWallet(SAMPLE_TRADER.wallet); setQ(question); focusNext.current = go; };
+  // a card's question follows the wallet field, so it never names one trader while the field holds another
+  const onWallet = w => { setWallet(w); const i = EXAMPLES.findIndex(([, question]) => question(who) === q); if (i >= 0) setQ(EXAMPLES[i][1](whoOf(w))); };
   useEffect(() => { if (!SAMPLE) api.sessions().then(setList, e => setErr(e.message)); }, []);
   const start = async () => {
     if (!q.trim()) return; setBusy(true); setErr(null);
@@ -92,12 +99,12 @@ function Home({ api }) {
     <div style="display:flex;flex-direction:column;gap:10px"><h1>What do you want to find out?</h1>
       <p class="muted">${SAMPLE ? 'This is a sample: a breakdown recorded from a real run, with its question filled in. Press Break it down to watch it plan, read and chart the trades. Sign in to ask your own.' : 'Paste a wallet or name a trader, then ask in your own words. The agent shows its plan before it reads anything. Polymarket only; research, no trading.'}</p>
       <div class="compose-big">
-        <input id="wallet" ref=${walletEl} aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => setWallet(e.target.value)} />
+        <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => onWallet(e.target.value)} />
         <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
-        <p class="muted small">Try asking</p>
-        <div class="ex-grid">${EXAMPLES.map(([label, question]) => html`<button type="button" class=${'ex' + (q === question ? ' on' : '')} onClick=${() => pick(question)}>${label}</button>`)}</div></div>`}
+        <p class="muted small">${wallet.trim() ? 'Try asking' : html`Try asking about <b>${SAMPLE_TRADER.name}</b>, a trader active in BTC 15-minute markets, or paste a wallet above`}</p>
+        <div class="ex-grid">${EXAMPLES.map(([label, question]) => html`<button type="button" class=${'ex' + (q === question(who) ? ' on' : '')} onClick=${() => pick(question(who))}>${label(who)}</button>`)}</div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
