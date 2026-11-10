@@ -894,6 +894,10 @@ def test_asking_about_a_trade_or_a_moment(monkeypatch: pytest.MonkeyPatch) -> No
         f = rec.asked[0]["facts"]
         assert f["kind"] == "trade" and f["trade"]["tx"] == "0xa" and f["seconds_after_start"] == 12
         assert f["as_drawn"]["liquidity"] == "taker" and rec.asked[0]["context"] == {"trade_id": fill["id"]}
+        c.post(f"/api/research/sessions/{sid}/ask", json={"question": "This burst?", "context": {"trade_ids": [fill["id"]]}})
+        _settle(server)
+        burst = rec.asked.pop()["facts"]
+        assert burst["kind"] == "trades" and burst["count"] == 1 and burst["window_id"] == LATE_SLUG
         c.post(f"/api/research/sessions/{sid}/ask", json={"question": "What happened here?",
                                                           "context": {"window_id": LATE_SLUG, "t": LATE + 11}})  # fmt: skip
         _settle(server)

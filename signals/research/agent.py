@@ -98,7 +98,10 @@ BTC was above the start, use Chainlink where it was recorded (from 10 Nov 2026 0
 Binance against its own value at the window's start and say so in plain words.
 Fills: paid_ask true (liquidity "taker") means it paid the ask; false ("maker") means its resting order was \
 filled below the ask: not a worse price. null means it couldn't be checked (no recorded book, a recording gap, or \
-a sell). Order books exist only where Layer recorded the window (coverage.book).
+a sell). Order books exist only where Layer recorded the window (coverage.book), and many recorded windows have \
+seconds without a book (coverage.seconds_without_book, lost): use every window for trades, fills and positions, \
+and book facts only where there was a book. A finding that uses the book says how many windows or fills had one \
+behind it ("in the 37 windows with a recorded book").
 
 # A wallet's patterns, worth checking
 Buying both sides (Up + Down under $1 together locks a profit; over $1 a loss); which side ends heavier and \

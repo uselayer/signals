@@ -176,6 +176,11 @@ def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | 
     window, or a finding. None for no context; ReadError when it doesn't exist in this investigation."""
     if not context:
         return None
+    if context.get("trade_ids"):  # a burst of fills clicked together
+        ids = [str(t) for t in context["trade_ids"]][:50]
+        each = [resolve_context(store, reads, sid, {"trade_id": t}) for t in ids]
+        return {"kind": "trades", "window_id": each[0]["window_id"] if each else None,
+                "trades": [e["trade"] for e in each if e], "count": len(each)}  # fmt: skip
     if context.get("trade_id"):
         fill = store.trade(sid, str(context["trade_id"]))
         if not fill:
