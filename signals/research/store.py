@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS findings (session TEXT NOT NULL, id TEXT NOT NULL, n 
 # the code runs, the container's estimated seconds and their dollars (cost_usd includes them).
 ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 0"),
          ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0"),
-         ("sessions", "wallet TEXT"), ("sessions", "scope TEXT")]  # fmt: skip
+         ("sessions", "wallet TEXT"), ("sessions", "scope TEXT"),
+         ("inv_windows", "fills_complete INTEGER DEFAULT 0")]  # fmt: skip
 
 
 def day(t: float | None = None) -> str:
@@ -185,12 +186,23 @@ class Store:
                     self._db.execute(f"UPDATE inv_windows SET {k} = ?, updated = ? WHERE session = ? AND slug = ?",  # noqa: S608
                                      (json.dumps(v), time.time(), sid, slug))  # fmt: skip
 
+    def mark_complete(self, sid: str, slugs: set[str] | list[str]) -> None:
+        """These windows' fills are all kept (``data.complete_slugs``): a tile can count them as the whole window."""
+        with self._lock:
+            for slug in slugs:
+                self._db.execute("INSERT OR IGNORE INTO inv_windows (session, slug, updated) VALUES (?, ?, ?)",
+                                 (sid, slug, time.time()))  # fmt: skip
+                self._db.execute("UPDATE inv_windows SET fills_complete = 1 WHERE session = ? AND slug = ?", (sid, slug))
+
     def window(self, sid: str, slug: str) -> dict[str, Any]:
-        """{read, ready, summary} kept for this window (each None when not yet)."""
-        rows = self._q("SELECT read, ready, summary FROM inv_windows WHERE session = ? AND slug = ?", (sid, slug))
+        """{read, ready, summary} kept for this window (each None when not yet), and ``complete``: whether its fills
+        are all kept (a read covered the whole window), or only some (a range that cut through it)."""
+        rows = self._q("SELECT read, ready, summary, fills_complete FROM inv_windows WHERE session = ? AND slug = ?",
+                       (sid, slug))  # fmt: skip
         if not rows:
-            return {"read": None, "ready": None, "summary": None}
-        return {k: json.loads(rows[0][k]) if rows[0][k] else None for k in ("read", "ready", "summary")}
+            return {"read": None, "ready": None, "summary": None, "complete": False}
+        out = {k: json.loads(rows[0][k]) if rows[0][k] else None for k in ("read", "ready", "summary")}
+        return out | {"complete": bool(rows[0]["fills_complete"])}
 
     def unshown(self, sid: str) -> list[str]:
         """Windows read in this investigation that have no tile (summary) yet."""

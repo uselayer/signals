@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from signals.research.data import ReadError, Reads
+from signals.research.data import ReadError, Reads, complete_slugs, unix
 
 CALLER = "code_execution_20260120"
 CODE_EXECUTION = {"type": CALLER, "name": "code_execution"}
@@ -172,6 +172,8 @@ def run(name: str, inp: dict[str, Any], reads: Reads,
             if keep:
                 store.set_wallet(sid, out["wallet"])
                 store.add_trades(sid, out["trades"])
+                # windows this range covered whole; one it cut through is read again before it gets a tile
+                store.mark_complete(sid, complete_slugs(out, unix(inp.get("start")), unix(inp.get("end"))))
         elif name == "wallet_profile":
             out = reads.wallet_profile(inp.get("wallet", ""))
             summary = {"name": (out.get("record") or {}).get("name"), "missing": out.get("missing")}

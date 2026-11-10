@@ -15,7 +15,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from signals.research import trace, workspace
-from signals.research.data import ReadError, iso, scope_time
+from signals.research.data import (
+    PRE_OPEN_READ_S,
+    ReadError,
+    complete_slugs,
+    in_scope,
+    iso,
+    scope_time,
+    window_length,
+)
 from signals.research.tools import CALLER
 
 STAGES = ("windows", "window", "trades")
@@ -216,18 +224,25 @@ def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | 
 
 
 def prebuild(store: Any, reads: Any, sid: str, scope: dict[str, Any], emit: Callable[[dict[str, Any]], None]) -> int:
-    """On Start, the approved scope's tiles before the agent asks for them: the wallet's trades in the range, then
-    every window they're in, built SHOW_AT_ONCE at a time, each window.summary sent as soon as it's built, then the
-    coverage. Everything is kept, so the agent's own show_windows (and the page's GETs) find it ready. Returns the
+    """On Start, the approved scope's tiles before the agent asks for them: every window that starts in the range
+    and the wallet traded, with all its fills (``in_scope``), built SHOW_AT_ONCE at a time, each window.summary sent
+    as soon as it's built, then the coverage. Everything is kept, so the agent's own show_windows (and the page's GETs) find it ready. Returns the
     number of windows shown; 0 when the scope doesn't name a wallet and a range."""
     wallet, a, b = scope.get("wallet"), scope.get("from"), scope.get("to")
     if not (wallet and a and b):
         return 0
     family = str(scope.get("family") or "btc-updown-15m").rstrip("-") + "-"
-    got = reads.wallet_trades(wallet, scope_time(a), scope_time(b), family)
+    # The scope's windows are the ones that start in it, each with all its fills: read from PRE_OPEN_READ_S before
+    # the range (a first window's pre-open buys) to just after its last window closes. A read of the range alone
+    # cut both ends: it left out a buy 2 s before 05:30 and tiled the 06:45 window from 2 early fills (10 Nov).
+    a_s, b_s = scope_time(a), scope_time(b)
+    lo, hi = a_s - PRE_OPEN_READ_S, b_s + window_length(family.rstrip("-")) + 60
+    got = reads.wallet_trades(wallet, lo, hi, family)
+    mine = [t for t in got["trades"] if in_scope(t.get("slug"), a_s, b_s)]
     store.set_wallet(sid, str(got.get("wallet") or wallet).lower())
-    store.add_trades(sid, got["trades"])
-    slugs = sorted({t["slug"] for t in got["trades"] if t.get("slug")})
+    store.add_trades(sid, mine)
+    store.mark_complete(sid, complete_slugs({**got, "trades": mine}, lo, hi))
+    slugs = sorted({t["slug"] for t in mine if t.get("slug")})
     covs = []
     with ThreadPoolExecutor(max_workers=SHOW_AT_ONCE) as pool:
         futures = {pool.submit(workspace.build, store, reads, sid, s): s for s in slugs}
