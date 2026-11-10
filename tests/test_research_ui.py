@@ -88,3 +88,24 @@ def test_sample_findings_have_the_contracts_fields() -> None:
             assert k in f, f"{f['finding_id']} has no {k}"
         assert set(f["evidence"]) == {"supporting_window_ids", "against_window_ids", "trade_ids"}
         assert "body" not in f, "findings have no body in the contract"
+
+
+def test_example_questions_teach_without_running_anything() -> None:
+    """The cards under the ask box (owner, 10 Nov): four, each naming its wallet (the sample trader, or the wallet typed
+    above), BTC 15-minute only, research wording, and a click only fills the form: Break it down still shows the plan
+    first. The sample trader's full address is never on a card."""
+    js = (STATIC / "js" / "app.js").read_text()
+    block = re.search(r"const EXAMPLES = \[(.*?)\n\];", js, re.S).group(1)
+    pairs = re.findall(r"\[w => `([^`]+)`, w => `([^`]+)`\]", block)
+    assert len(pairs) == 4
+    for label, question in pairs:
+        assert "${w}" in label and "${w}" in question and "BTC 15-minute" in question, (label, question)
+        for text in (label, question):
+            low = text.lower()
+            assert not re.search(r"this wallet|0x[0-9a-f]{6}|\bbets?\b|you could|worth following|\broi\b|\bedge\b", low), text
+    assert "SAMPLE_TRADER.name : shortWallets(w.trim())" in js  # a card names a name or a short wallet, never a full one
+    assert "onInput=${e => onWallet(e.target.value)}" in js  # a picked question follows the wallet field
+    pick = re.search(r"const pick = (.*?);\n", js).group(1)
+    assert "start" not in pick and "ask(" not in pick and "create(" not in pick
+    assert "if (!wallet.trim()) setWallet(SAMPLE_TRADER.wallet)" in pick  # a typed wallet is kept
+    assert "${!SAMPLE && html`<div class=\"examples\"" in js  # the locked sample plays one recorded question only
