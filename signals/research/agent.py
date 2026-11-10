@@ -7,7 +7,7 @@ what the agent read and printed (``trace``); a miss gets one chance to fix it, t
 shown flagged, never silently.
 
 Limits (env): ``RESEARCH_MAX_USD`` per question (default 3), ``RESEARCH_DAILY_USD`` for everyone per UTC day
-(default 30), ``RESEARCH_USER_DAILY_USD`` per person (default 10), ``RESEARCH_MAX_ROUNDS`` model calls per question
+(default 30), ``RESEARCH_USER_DAILY_USD`` per person (default 10), ``RESEARCH_MAX_ROUNDS`` model calls per question (default 100; each tool call from code is one)
 (default 40). Costs are list prices for Opus 5.5 (code execution's container time isn't included).
 """
 
@@ -32,7 +32,7 @@ MODEL = os.environ.get("RESEARCH_MODEL", "claude-opus-5-5")
 EFFORT = os.environ.get("RESEARCH_EFFORT", "high")
 TASK_BUDGET = int(os.environ.get("RESEARCH_TASK_TOKENS", "400000"))  # Opus paces itself to this per question
 MAX_TOKENS = 64_000
-MAX_ROUNDS = int(os.environ.get("RESEARCH_MAX_ROUNDS", "40"))
+MAX_ROUNDS = int(os.environ.get("RESEARCH_MAX_ROUNDS", "100"))  # each call from code is a round; $ caps bind first
 MAX_USD = float(os.environ.get("RESEARCH_MAX_USD", "3"))
 DAILY_USD = float(os.environ.get("RESEARCH_DAILY_USD", "30"))
 USER_DAILY_USD = float(os.environ.get("RESEARCH_USER_DAILY_USD", "10"))
@@ -50,6 +50,8 @@ STDOUT_SHOWN = 4_000  # characters of a code run's output put in its event
 
 EVENT_VERSION = 2  # 2: the case file's events (docs/research-contract.md)
 WALLET_IN = re.compile(r"0x[0-9a-fA-F]{40}")
+REQUEST_TIMEOUT_S = 300.0  # no bytes for this long ends a model request (streams send pings while it thinks)
+SLOW_REQUEST_S = 120.0
 CHECK_NOTE = "Signals' number check:"  # starts the note sent back for an untraced number; never itself a source
 # The case file draws everything from data; Vega-Lite charts wait for the later "+ New view" (make_chart stays built).
 DATA_TOOLS = [t for t in T.TOOLS if t["name"] != "make_chart"]
@@ -82,12 +84,15 @@ your code runs and between the trader's questions: reuse them instead of reading
 # The flow
 - A new investigation: call propose_plan first, before reading anything, and end your turn. The trader presses \
 Start (or asks for changes; then propose a new plan).
-- After Start: work through the plan, reporting each step with step_status (from your code inside loops too). \
-Read the wallet's trades, group them by window, and call show_windows for every window it traded so the overview \
-fills in. Add a finding for each pattern you can count (observed first, then inferred readings resting on them). \
-Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's about) \
-and focus on it. Offer what you'd look at next with propose. Finish with answer: the pattern in one or two lines, \
-the observed and inferred lines, and the finding ids.
+- After Start: work through the plan, marking each step running and done with step_status. Read the wallet's \
+trades, group them by window, and call show_windows once with every window it traded (the overview fills in as \
+they're built). Add a finding for each pattern you can count (observed first, then inferred readings resting on \
+them). Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \
+about) and focus on it. Offer what you'd look at next with propose. Always finish with answer: the pattern in one \
+or two lines, the observed and inferred lines, and the finding ids.
+- Every call from your code is a round trip, so keep them few: one show_windows for all windows, step_status for \
+a step's start and end, not every item. Call the workspace tools after your code has finished, never in the same \
+step as a code run.
 - A follow-up: answer it directly with answer (and annotations or focus when it's about a moment). If it widens \
 the scope (more windows, a longer range, another wallet), call propose_plan instead and wait.
 - When the trader points at something, the message carries what they pointed at, read from the data: a fill, a \
@@ -199,7 +204,7 @@ class Agent:
         if client is None:
             import anthropic
 
-            client = anthropic.Anthropic(max_retries=3)
+            client = anthropic.Anthropic(max_retries=2, timeout=REQUEST_TIMEOUT_S)
         self.reads, self.store, self.client, self.model = reads, store, client, model
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="research-tool")
 
@@ -212,9 +217,15 @@ class Agent:
         )  # fmt: skip
         if container:
             kw["container"] = container
+        t0 = time.monotonic()
         try:
             with self.client.beta.messages.stream(**kw) as stream:
-                return _d(stream.get_final_message())  # type: ignore[no-any-return]
+                out = _d(stream.get_final_message())
+            took = time.monotonic() - t0
+            if took > SLOW_REQUEST_S:  # 10 Nov: one resume took ~37 min (timeouts + retries); see what it was
+                print(f"research: slow model request {took:.0f} s, {len(messages)} messages, "
+                      f"container {container}, stop {out.get('stop_reason')}", flush=True)  # fmt: skip
+            return out  # type: ignore[no-any-return]
         except Exception as e:
             if container and _container_refused(e):
                 global _container_error_logged

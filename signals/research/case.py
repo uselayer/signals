@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from signals.research import trace, workspace
@@ -66,7 +66,8 @@ CASE_TOOLS: list[dict[str, Any]] = [
             "(prices, the wallet's fills, its position, coverage), so pass only window ids (slugs) and, if you "
             "like, tags per window ({slug: {...}}: e.g. the moment BTC cleared the price to beat). Returns JSON "
             "{windows: [{window_id, result, fills, first_entry_s, cost, profit, coverage}], coverage totals}. "
-            "Call it from code for many windows at once."
+            "Call it once with every window: the server builds them in parallel and each tile appears on the page "
+            "as soon as it's ready (no need to batch or report progress yourself)."
         ),
         "input_schema": {
             "type": "object",
@@ -289,16 +290,22 @@ class Case:
             except Exception as e:  # noqa: BLE001 - a window that can't be read is named, the rest still show
                 return f"{type(e).__name__}: {e}"[:200]
 
-        # Built SHOW_AT_ONCE at a time (a call from code must answer within about 4 minutes), shown in order.
+        # Built SHOW_AT_ONCE at a time (a call from code must answer within about 4 minutes); each tile goes to the
+        # page as soon as it's built, so the overview fills in while the rest are read.
+        got: dict[str, dict[str, Any] | str] = {}
         with ThreadPoolExecutor(max_workers=SHOW_AT_ONCE) as pool:
-            built = list(pool.map(one, ids))
-        for slug, r in zip(ids, built, strict=True):
+            futures = {pool.submit(one, slug): slug for slug in ids}
+            for fut in as_completed(futures):
+                slug, r = futures[fut], fut.result()
+                got[slug] = r
+                if not isinstance(r, str):
+                    self.emit({"type": "window.summary", **workspace.summary(r)})
+        for slug in ids:  # the agent's answer in the order it asked
+            r = got[slug]
             if isinstance(r, str):
                 failed.append({"window_id": slug, "why": r})
                 continue
-            s = workspace.summary(r)
-            self.emit({"type": "window.summary", **s})
-            briefs.append(_brief(s))
+            briefs.append(_brief(workspace.summary(r)))
             covs.append(r["coverage"])
         totals = workspace.totals(covs)
         self.emit({"type": "coverage", "per_source": totals, "windows": covs})
