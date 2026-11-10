@@ -624,6 +624,41 @@ def test_the_daily_limit_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
     assert model.requests == [] and "today's limit" in [e for e in events if e["type"] == "error"][0]["message"]
 
 
+def test_near_the_time_limit_the_agent_is_told_to_answer_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(A, "WRAP_AT", 0.0)  # from the first step
+    model = _model(_calls_tool(), _answers("Observed: 3 trades."))
+    _ask(model)
+    notes = [m for m in model.requests[0]["messages"] if m["role"] == "system"]
+    assert notes == [{"role": "system", "content": A.WRAP_UP}]
+    # the second request answers the code's paused call: only tool results there, and the note isn't repeated
+    second = model.requests[1]["messages"]
+    assert second[-1]["role"] == "user" and sum(m["role"] == "system" for m in second) == 1
+
+
+def test_a_stop_with_findings_ends_on_an_answer_not_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(A, "MAX_USD", 0.001)
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.add_finding(sid, {"label": "observed", "title": "Two-sided in 93 of 94 windows", "counts": True,
+                            "stat": {"text": "93 of 94 windows"}})  # fmt: skip
+    store.add_finding(sid, {"label": "observed", "title": "Made-up", "counts": False})
+    events: list[dict[str, Any]] = []
+    A.Agent(FakeReads(), store, _model(_calls_tool(), _calls_tool())).ask(sid, "u1", "Go", events.append)  # type: ignore[arg-type]
+    kinds = [e["type"] for e in events]
+    assert "error" not in kinds and kinds[-4:] == ["answer.card", "notice", "usage", "done"]
+    card = events[kinds.index("answer.card")]
+    assert card["partial"] and card["observed"] == ["Two-sided in 93 of 94 windows: 93 of 94 windows"]
+    assert card["finding_ids"] == ["F1"]  # the flagged one isn't in it
+    assert "limit" in events[kinds.index("notice")]["text"]
+
+
+def test_usage_reports_the_phases() -> None:
+    plan = {"title": "t", "scope": {"wallet": W}, "steps": [{"id": "s", "title": "x", "source": "y"}]}
+    events, _, _ = _ask(_model(_turn(_direct("propose_plan", plan))))
+    usage = [e for e in events if e["type"] == "usage"][0]
+    assert set(usage["phases"]) == {"plan"} and usage["phases"]["plan"] >= 0 and usage["seconds"] >= 0
+
+
 def test_a_refusal_ends_with_a_sentence() -> None:
     events, _, _ = _ask(_model({"stop_reason": "refusal", "usage": USAGE, "content": []}))
     assert [e["message"] for e in events if e["type"] == "error"] == ["The model declined this request."]

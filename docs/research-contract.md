@@ -120,7 +120,13 @@ dates, wallet addresses and slugs aren't checked.
 ### Run end
 - `notice` `{text}` (e.g. an expired working state being rebuilt), `error` `{message}`,
   `usage` `{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, token_usd, code_runs,
-  container_s, container_usd, cost_usd, rounds, tool_calls}`, then `done`.
+  container_s, container_usd, cost_usd, rounds, tool_calls, seconds, phases: {plan, first_tile, tiles_done,
+  first_finding, walkthrough, answer}}` (seconds from the run's start; a phase that didn't happen is absent), then
+  `done`.
+- A question has a time budget (`RESEARCH_MAX_SECONDS`, 600 by default) besides its cost cap. At 80% the agent is
+  told to answer from the findings so far. A run that stops (time, steps, money, an error) with findings but no
+  answer ends on an `answer.card` built from the findings that counted, with `partial: true`, then a `notice` saying
+  why, never on an `error`. An `error` means there was nothing to show.
 
 ## Client calls
 - **Ask** `POST /api/research/sessions/{id}/ask` `{question, context?, origin?}`. `context`: none, `{trade_id}`,

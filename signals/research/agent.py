@@ -50,6 +50,14 @@ STDOUT_SHOWN = 4_000  # characters of a code run's output put in its event
 
 EVENT_VERSION = 2  # 2: the case file's events (docs/research-contract.md)
 WALLET_IN = re.compile(r"0x[0-9a-fA-F]{40}")
+MAX_SECONDS = int(os.environ.get("RESEARCH_MAX_SECONDS", "600"))  # a question's wall-time budget
+WRAP_AT = 0.8  # at this share of it the agent is told to answer from what it has
+WRAP_UP = ("Time is nearly up for this question. Stop exploring: finish any finding you've counted, then call answer "
+           "now from the findings so far, saying in one line what you didn't get to.")  # fmt: skip
+# The phases a run's usage reports (seconds from its start): the targets for a 1-day investigation are plan < 15 s,
+# all tiles < 60 s after Start, the first finding < 3 min, the answer < 8 min.
+PHASES = {"plan.proposed": "plan", "window.summary": "first_tile", "finding.added": "first_finding",
+          "walkthrough.ready": "walkthrough", "answer.card": "answer"}  # fmt: skip
 REQUEST_TIMEOUT_S = 300.0  # no bytes for this long ends a model request (streams send pings while it thinks)
 SLOW_REQUEST_S = 120.0
 CHECK_NOTE = "Signals' number check:"  # starts the note sent back for an untraced number; never itself a source
@@ -86,8 +94,9 @@ your code runs and between the trader's questions: reuse them instead of reading
 Start (or asks for changes; then propose a new plan).
 - After Start: work through the plan, marking each step running and done with step_status. Read the wallet's \
 trades, group them by window, and call show_windows once with every window it traded (the overview fills in as \
-they're built). Add a finding for each pattern you can count (observed first, then inferred readings resting on \
-them). Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \
+they're built). Add each finding the moment you've counted it, so the trader reads while you work: observed \
+first, then inferred readings resting on them. Aim to answer within about 8 minutes; if you're told time is \
+nearly up, answer at once from what you have. Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \
 about) and focus on it. Offer what you'd look at next with propose. Always finish with answer: the pattern in one \
 or two lines, the observed and inferred lines, and the finding ids.
 - Every call from your code is a round trip, so keep them few: one show_windows for all windows, step_status for \
@@ -187,6 +196,14 @@ class OverBudget(Exception):
     pass
 
 
+def _code_waiting(messages: list[dict[str, Any]]) -> bool:
+    """True when the agent's code is paused on our tool results (then the next message may hold only those)."""
+    if len(messages) < 2 or messages[-2]["role"] != "assistant" or not isinstance(messages[-2]["content"], list):
+        return False
+    return any(b.get("type") == "tool_use" and str((b.get("caller") or {}).get("type", "")).startswith("code_execution")
+               for b in messages[-2]["content"])  # fmt: skip
+
+
 class ContainerGone(Exception):
     """The API refused the session's code container (expired or unknown)."""
 
@@ -243,13 +260,22 @@ class Agent:
         ``type`` and ``v`` (EVENT_VERSION: a page can tell a shape it doesn't know) and the question's ``run``."""
         run = self.store.start_run(sid, user)
         out = emit
+        t0 = time.time()
+        phases: dict[str, float] = {}  # seconds from the start to each phase (PHASES), for the usage event and logs
 
-        def emit(e: dict[str, Any]) -> None:  # noqa: F811 - each event stamped
+        def emit(e: dict[str, Any]) -> None:  # noqa: F811 - each event stamped, its phase timed
+            at = round(time.time() - t0, 1)
+            phase = PHASES.get(e.get("type", ""))
+            if phase and phase not in phases:
+                phases[phase] = at
+            if e.get("type") == "window.summary":
+                phases["tiles_done"] = at  # the last tile so far
             out({**e, "v": EVENT_VERSION, "run": run})
 
         totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
         # container_from: when this question's code container was first in use (its time is billed from then).
-        state = {"rounds": 0, "tool_calls": 0, "cost": 0.0, "code_runs": 0, "container_from": None}
+        state = {"rounds": 0, "tool_calls": 0, "cost": 0.0, "code_runs": 0, "container_from": None, "t0": t0,
+                 "wrapped": False}  # fmt: skip
         if not self.store.messages(sid):  # the investigation's first question
             w = WALLET_IN.search(question)
             emit({"type": "investigation.created", "id": sid, "title": short_title(question), "question": question,
@@ -265,11 +291,14 @@ class Agent:
             ok = self._ask(sid, run, said, emit, totals, state)
             self.store.update_run(run, check_ok=int(ok))
         except OverBudget as e:
-            emit({"type": "error", "message": str(e)})
+            # Never end on an error with findings and no answer: the answer is then what the findings say.
+            if not self._fallback_answer(sid, run, str(e), phases, emit):
+                emit({"type": "error", "message": str(e)})
             self.store.update_run(run, error="over_budget")
         except Exception as e:  # noqa: BLE001 - the page gets a sentence, the log the detail
             print(f"research: run {run} failed: {type(e).__name__}: {e}", flush=True)
-            emit({"type": "error", "message": "The investigation stopped on an error. Try again in a minute."})
+            if not self._fallback_answer(sid, run, "It stopped on an error.", phases, emit):
+                emit({"type": "error", "message": "The investigation stopped on an error. Try again in a minute."})
             self.store.update_run(run, error=f"{type(e).__name__}: {e}"[:500])
         finally:
             # Container time: from its first use in this question to the end, at least the billed 5 minutes. An
@@ -280,7 +309,8 @@ class Agent:
             usage = {**totals, "token_usd": round(state["cost"], 4), "code_runs": state["code_runs"],
                      "container_s": container_s, "container_usd": round(container_usd, 4),
                      "cost_usd": round(state["cost"] + container_usd, 4), "rounds": state["rounds"],
-                     "tool_calls": state["tool_calls"]}  # fmt: skip
+                     "tool_calls": state["tool_calls"], "seconds": round(time.time() - t0, 1),
+                     "phases": dict(phases)}  # fmt: skip
             emit({"type": "usage", **usage})
             self.store.update_run(
                 run, ended=time.time(), input_tokens=totals["input_tokens"], output_tokens=totals["output_tokens"],
@@ -325,6 +355,13 @@ class Agent:
             rebuild()
         retried = False
         while True:
+            elapsed = time.time() - state["t0"]
+            if elapsed >= MAX_SECONDS:
+                raise OverBudget(f"The investigation reached its {MAX_SECONDS // 60}-minute limit.")
+            if elapsed >= WRAP_AT * MAX_SECONDS and not state["wrapped"] and not _code_waiting(messages):
+                state["wrapped"] = True  # once: stop exploring, answer from the findings so far
+                messages.append({"role": "system", "content": WRAP_UP})
+                self.store.add_message(sid, "system", WRAP_UP, hidden=True)
             if state["rounds"] >= MAX_ROUNDS:
                 raise OverBudget(f"The investigation used its {MAX_ROUNDS} steps without finishing. Ask a narrower question.")
             if state["cost"] >= MAX_USD:
@@ -392,6 +429,28 @@ class Agent:
                 emit({"type": "answer.card", "ask_id": run, "text": answer, "truncated": stop == "max_tokens",
                       "number_check": {"passed": not flags, "flagged": {"text": flags} if flags else {}}})  # fmt: skip
             return not flags
+
+    def _fallback_answer(self, sid: str, run: int, why: str, phases: dict[str, float],
+                         emit: Callable[[dict[str, Any]], None]) -> bool:  # fmt: skip
+        """When a run stops (time, steps, money, an error) with findings but no answer: an answer card made from the
+        findings that counted (their numbers already checked), saying it stopped. False when there's nothing to say."""
+        if "answer" in phases:
+            return True
+        fs = [f for f in self.store.findings(sid) if f.get("counts")]
+        if not fs:
+            return False
+        def line(f: dict[str, Any]) -> str:
+            stat = (f.get("stat") or {}).get("text")
+            return f"{f['title']}: {stat}" if stat else str(f["title"])
+
+        emit({"type": "answer.card", "ask_id": run, "label": "Where the investigation got to", "partial": True,
+              "observed": [line(f) for f in fs if f.get("label") == "observed"],
+              "inferred": [line(f) for f in fs if f.get("label") == "inferred"],
+              "annotations": [], "focus": None, "finding_ids": [f["finding_id"] for f in fs],
+              "number_check": {"passed": True, "flagged": {}}})  # fmt: skip
+        emit({"type": "notice", "text": f"{why} This answer is built from the findings so far; ask a narrower "
+                                        "question to go further."})  # fmt: skip
+        return True
 
     def _emit_blocks(self, run: int, content: list[dict[str, Any]], emit: Callable[[dict[str, Any]], None]) -> None:
         """The agent's notes and its code runs, as they appear in a response."""
