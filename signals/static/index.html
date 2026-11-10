@@ -1024,14 +1024,14 @@ async function followOnTelegram(btn) {
     await new Promise((ok) => setTimeout(ok, 3000));
     if (!(await api(`/api/follow/telegram/${encodeURIComponent(r.code)}`).catch(() => null))?.done) continue;
     tgFollowed(wallet);
-    track("trader followed", { from, via: "telegram", ...who });
     toast("Following. You'll get a message on Telegram a few minutes after they trade.");
     break;
   }
   redrawFollow();
 }
 // A one-time link to our bot; Start there connects the chat. The tab opens in the tap, so it isn't blocked. The tap
-// and the bot's confirmation (seen here, in /api/me's telegram) are named events, with the trader it was opened from.
+// is a named event, with the trader it was opened from; "telegram connected" comes from the engine when the bot
+// confirms (10 Nov: from here it was lost whenever the tab was closed or asleep by the time Start was tapped).
 async function connectTelegram(btn) {
   const from = followFrom(), who = traderOnPage(), win = window.open("", "_blank");
   track("telegram connect opened", { from, ...who });
@@ -1044,7 +1044,7 @@ async function connectTelegram(btn) {
     auth.me = await api("/api/me").catch(() => auth.me);
   }
   redrawFollow();
-  if (auth.me?.telegram) { track("telegram connected", { from, ...who }); toast("Telegram connected. You'll get a message a few minutes after they trade."); }
+  if (auth.me?.telegram) { toast("Telegram connected. You'll get a message a few minutes after they trade."); }
 }
 
 // ---- numbers ----

@@ -72,7 +72,9 @@ behind Vercel (see README, "Hosting").
 - Analytics (README, "Analytics"): PostHog on the page, off unless `SIGNALS_POSTHOG_KEY` is set, sent through
   `/lyr` (`web/vercel.json`). A signed-in person is identified by their Clerk user id only: never send PostHog a
   name, email, Telegram account or anything from `/api/me`, and keep fields and Clerk's menus masked in replays.
-  It's for seeing how the page is used; Counting (above) stays the record of alerts and follows. Named events go
+  It's for seeing how the page is used, and (since 10 Nov, through `ph` in the engine) what people do in Telegram:
+  connected, alerts sent/failed/tapped, "Fewer alerts", stops, votes; the account id only (Clerk id or a Telegram-only
+  follower's random `tg_` id), never a chat id. Counting (above) stays the record of alerts and follows. Named events go
   through `track` (README lists them) and say where on the page (`from`) and, since 7 Nov (the owner: a trader's
   page link carried the wallet anyway), which trader: `traderFacts` (wallet, the name Signals shows, main category,
   categories), only from what the page has read, never made up. Still never anything about the person.

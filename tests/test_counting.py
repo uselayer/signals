@@ -129,7 +129,8 @@ def test_stops_and_unfollows_within_seven_days_of_an_alert(api: TestClient) -> N
             ("stop", "user_1", SAM, aid)]  # fmt: skip
     api.delete(f"/api/me/follows/{ANN}", headers=auth())  # no alert about Ann: an unfollow, not after an alert
     m = metrics(api)["stops"]
-    assert m == {"stop_taps": 1, "stop_taps_within_7_days_of_an_alert": 1, "unfollows": 1, "unfollows_within_7_days_of_an_alert": 0}
+    assert m == {"stop_taps": 1, "stop_taps_within_7_days_of_an_alert": 1, "unfollows": 1, "unfollows_within_7_days_of_an_alert": 0,
+                 "alerts_turned_off_with_stop": 0}  # fmt: skip
 
 
 def test_votes_follows_per_interest_pick_and_telegram(api: TestClient) -> None:
