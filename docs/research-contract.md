@@ -66,7 +66,11 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 - `window.summary` (a tile) `{window_id, start, end, result, price_to_beat, entries: [{t, side, action}],
   first_entry_s, shares: {up, down}, cost, sold_for, payout, profit, profit_note, spark: [{t, p}],
   coverage: {chainlink, book, outage}}`. `cost`/`sold_for` are the fills' `usd`; `payout` is $1 per share held of the
-  winning side at the end; merges and redemptions aren't in the fills (`profit_note`).
+  winning side at the end; merges and redemptions aren't in the fills (`profit_note`). A tile counts the whole
+  window: every fill of the wallet's in it, pre-open buys included (read from 30 minutes before it opens). On Start
+  the scope's tiles are the windows that start in it (`from` <= start < `to`), so 05:30–06:45 is 05:30 to 06:30 and
+  never the 06:45 window, even when a fill bought into it before 06:45. A window a read only cut through (the agent's
+  own range, say) is read again whole before it gets a tile (`fills_complete` in the store).
 - `window.ready` (a replay) `{window_id, start, end, axis: {from, to}, title, price_to_beat, final_price, result,
   binance: [{t, p}], binance_at_start, chainlink: [{t, p}]|null, units: {binance: "USDT", chainlink: "USD",
   price_to_beat: "USD, Chainlink's 60-second average"}, up: [{t, bid, ask}], down: [{t, bid, ask}], minute_fallback:

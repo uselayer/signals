@@ -414,6 +414,67 @@ def test_build_reads_only_what_the_investigation_hasnt() -> None:
     assert [s["window_id"] for s in store.summaries(sid)] == [LATE_SLUG]
 
 
+class RangeReads(FakeCaseReads):
+    """A wallet's fills across several windows, read by time like the real ``wallet_trades``."""
+
+    def __init__(self, fills: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self.fills, self.asked = fills, []  # type: ignore[var-annotated]
+
+    def window(self, slug: str, condition_id: Any = None, **kw: Any) -> dict[str, Any]:
+        s = int(slug.rsplit("-", 1)[1])
+        return {"slug": slug, "start": s, "end": s + 900, "price_to_beat": 1.0, "result": "Up",
+                "prices": {"Up": [[s, 0.5]], "Down": [[s, 0.5]]}, "book": {"available": False, "status": "not_processed"},
+                "coverage": {"trades_read": None, "trades_complete": None}}  # fmt: skip
+
+    def wallet_trades(self, wallet: str, a: Any, b: Any, prefix: Any) -> dict[str, Any]:
+        self.asked.append((a, b, prefix))
+        rows = [f for f in self.fills if a <= f["ts"] <= b and f["slug"].startswith(prefix or "")]
+        return {"wallet": W, "trades": rows, "complete": True, "start": a, "end": b}
+
+
+def test_start_tiles_the_windows_that_start_in_the_scope_each_whole() -> None:
+    """10 Nov, 05:30–06:45: Start's tiles came from the fills timed in the range, so the 05:30 tile missed a buy 2 s
+    before it opened and the 06:45 window got a tile from its 2 early fills: +$134.41 over 6 windows, where its
+    5 windows made $110.41."""
+    from signals.research import case as C
+    from signals.research import workspace as WS
+
+    a, b = LATE - 1800, LATE  # 05:30–06:00: the 05:30 and 05:45 windows
+
+    def fill(tx: str, ts: int, start: int) -> dict[str, Any]:
+        return {**_wallet_fill(tx, ts, 0.4, 10), "slug": f"btc-updown-15m-{start}"}
+
+    fills = [fill("0xpre", a - 2, a), fill("0xa", a + 100, a), fill("0xb", a + 950, a + 900),
+             fill("0xearly", b - 15, b), fill("0xlate", b + 200, b)]  # fmt: skip
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    reads, events = RangeReads(fills), []  # type: ignore[var-annotated]
+    n = C.prebuild(store, reads, sid, {"wallet": W, "family": "btc-updown-15m", "from": a, "to": b}, events.append)
+    tiles = {e["window_id"]: e for e in events if e["type"] == "window.summary"}
+    assert n == 2 and sorted(tiles) == [f"btc-updown-15m-{a}", f"btc-updown-15m-{a + 900}"]  # not the 06:00 one
+    assert len(tiles[f"btc-updown-15m-{a}"]["entries"]) == 2  # its buy 2 s before it opened counts
+    assert reads.asked == [(a - 1800, b + 960, "btc-updown-15m-")]  # one read; no window read again
+    # A window only part-read (the agent's own read of 05:30–06:00 kept the 06:00 window's early fill): before it
+    # gets a tile it's read whole, never tiled from the one fill.
+    store.add_trades(sid, [fills[3]])
+    r = WS.build(store, reads, sid, f"btc-updown-15m-{b}")
+    assert [t["trade_id"] for t in r["trades"]] == [fills[3]["id"], fills[4]["id"]]
+    assert reads.asked[-1] == (b - 86_400, b + 960, f"btc-updown-15m-{b}")
+    assert store.window(sid, f"btc-updown-15m-{b}")["complete"]
+
+
+def test_a_read_marks_only_the_windows_it_covered_whole() -> None:
+    a, b = LATE - 1800, LATE + 1800
+    got = {"trades": [{"slug": f"btc-updown-15m-{s}"} for s in (a - 900, a, a + 900, LATE, LATE + 900)], "complete": True}
+    # 05:30–06:30 read: only the 06:00 window has 30 min of pre-open before it and a minute after it in the read
+    assert D.complete_slugs(got, a, b) == {f"btc-updown-15m-{LATE}"}
+    assert D.complete_slugs({**got, "sdk_warnings": ["cut"]}, a, b) == set()
+    assert D.complete_slugs({**got, "complete": False, "read_to": LATE + 900}, a, b) == set()
+    assert D.in_scope(f"btc-updown-15m-{a}", a, b) and not D.in_scope(f"btc-updown-15m-{b}", a, b)
+    assert D.window_length("btc-updown-15m") == 900 and D.window_length("eth-updown-5m") == 300
+
+
 def test_a_window_without_its_file_gets_chainlink_from_the_raw_recording() -> None:
     from signals.research import workspace as WS
 

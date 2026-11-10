@@ -36,6 +36,9 @@ BTC_15M = "btc-updown-15m-"
 PAGE = 10_000  # trades per SDK read (``trades_between``'s default limit)
 MAX_TRADES = 30_000  # a wallet's trades read for one call, every market; more and it says so (``complete`` false)
 MARKET_TRADES = 3_000  # a window's trades by everyone read for one call
+# A window's fills count as read in full when the read began this long before it opened (windows are listed about a
+# day ahead; pre-open fills are mostly seconds early). Same span as the replay's axis (workspace.PRE_OPEN_MAX_S).
+PRE_OPEN_READ_S = 1_800
 BINANCE = "https://data-api.binance.vision/api/v3/klines"  # market data only; api.binance.com refuses the US (451)
 BINANCE_MAX_S = 2 * 86_400
 ENGINE = os.environ.get("SIGNALS_ENGINE_URL", "https://usesignals.app").rstrip("/")
@@ -116,6 +119,30 @@ def window_of(slug: str) -> dict[str, Any] | None:
         return None
     start = int(m["start"])
     return {"family": m["family"], "start": start, "end": start + 60 * int(m["len"])}
+
+
+def window_length(family: str) -> int:
+    """A family's window length in seconds (``btc-updown-15m`` → 900); 15 minutes when it doesn't say."""
+    m = re.search(r"-(\d+)m-?$", family or "")
+    return 60 * int(m[1]) if m else 900
+
+
+def in_scope(slug: str | None, a: int, b: int) -> bool:
+    """Whether a window belongs to a range: it starts in it (``a`` <= start < ``b``). A range 05:30–06:45 holds the
+    windows 05:30 to 06:30, each whole, never the 06:45 one a fill bought into a few seconds before it opened."""
+    w = window_of(slug or "")
+    return bool(w) and a <= w["start"] < b  # type: ignore[index]
+
+
+def complete_slugs(got: dict[str, Any], a: int, b: int, also: tuple[str, ...] = ()) -> set[str]:
+    """The windows whose fills a ``wallet_trades`` answer read from ``a`` to ``b`` holds in full: read from
+    PRE_OPEN_READ_S before the window opened to a minute after it closed (block time lags), and nothing cut short.
+    ``also``: windows to judge even if the wallet has no fill in them. A window still open is never complete."""
+    if got.get("sdk_warnings"):
+        return set()
+    to = min(b if got.get("complete", True) else int(got.get("read_to") or a) - 1, int(now()))
+    slugs = {t.get("slug") for t in got.get("trades") or []} | set(also)
+    return {s for s in slugs if s and (w := window_of(s)) and a <= w["start"] - PRE_OPEN_READ_S and w["end"] + 60 <= to}
 
 
 def recording_notes(start: int, end: int) -> list[str]:
