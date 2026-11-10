@@ -3998,6 +3998,63 @@
   ]
  ],
  "asks": {
+  "Fix the number that didn't match the data in this finding.": [
+   {
+    "type": "answer.progress",
+    "text": "Adding up its buys by side from the fills."
+   },
+   {
+    "type": "finding.updated",
+    "finding_id": "F5",
+    "kind": "pattern",
+    "label": "observed",
+    "title": "Spends more on Up than on Down: $1,866.01 on Up, $1,538.38 on Down",
+    "stat": null,
+    "rule": "The fills' usd, buys only, by side.",
+    "evidence": {
+     "supporting_window_ids": [
+      "btc-updown-15m-1794222000",
+      "btc-updown-15m-1794227400",
+      "btc-updown-15m-1794268800"
+     ],
+     "against_window_ids": [],
+     "trade_ids": []
+    },
+    "example": null,
+    "based_on": [],
+    "would_change_mind": null,
+    "number_check": {
+     "passed": true,
+     "flagged": {}
+    },
+    "counts": true,
+    "sample_note": null,
+    "previous": {
+     "title": "Spends more on Up than on Down: $1,190.00 on Up, $1,538.38 on Down",
+     "stat": null
+    }
+   },
+   {
+    "type": "answer.card",
+    "label": "F5 fixed",
+    "observed": [
+     "Over these 3 windows its buys came to $1,866.01 on Up and $1,538.38 on Down (the fills' usd). F5 said $1,190.00 on Up; it now says $1,866.01."
+    ],
+    "inferred": [],
+    "annotations": [],
+    "focus": null,
+    "finding_ids": [
+     "F5"
+    ],
+    "number_check": {
+     "passed": true,
+     "flagged": {}
+    }
+   },
+   {
+    "type": "done"
+   }
+  ],
   "Why does it buy below the asking price?": [
    {
     "type": "answer.progress",
