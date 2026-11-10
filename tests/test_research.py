@@ -161,6 +161,7 @@ def test_window_facts_prices_trades_and_coverage() -> None:
     assert w["tokens"] == {"Up": "1", "Down": "2"} and w["prices"]["Up"][0] == [1794285000, 0.5]
     assert w["coverage"]["largest_price_gap_s"] == 180 and w["coverage"]["price_step_s"] == 180
     assert w["coverage"]["trades_complete"] and not w["book"]["available"]
+    assert w["book"]["status"] == "not_processed" and "isn't processed yet" in w["book"]["why"]  # after 2 Nov 17:00
 
 
 LAYER_WINDOW = {
@@ -247,7 +248,46 @@ def test_chainlink_says_why_it_isnt_there() -> None:
     before = reads.outside_prices("chainlink", 1794285000, 1794285900)  # 10 Nov 04:30, before recording began
     assert not before["available"] and "wasn't recorded before 10 Nov 05:27 UTC" in before["why"]
     after = reads.outside_prices("chainlink", 1794290000, 1794290900)
-    assert "only a recorded window" in after["why"] and "price_to_beat" in after["why"]
+    assert "can't be read from here right now" in after["why"] and "price_to_beat" in after["why"]
+
+
+def test_raw_chainlink_from_layers_live_feed_recording() -> None:
+    import brotli
+
+    from signals.research import recorded
+
+    def line(c: str, payload: dict[str, Any]) -> str:
+        return json.dumps({"t": 0, "c": c, "m": {"topic": "crypto_prices_chainlink", "payload": payload}})
+
+    s = LATE  # a file starting at the window's start
+    body = "\n".join([
+        json.dumps({"t": 0, "ev": "file", "venue": "crypto"}),
+        line("rh1", {"symbol": "btc/usd", "data": [{"timestamp": (s + 1) * 1000, "value": 1.0},
+                                                    {"timestamp": (s + 2) * 1000, "value": 2.0}]}),
+        line("rt1", {"symbol": "btc/usd", "timestamp": (s + 2) * 1000 + 400, "value": 2.5}),  # live wins its second
+        line("rt1", {"symbol": "btcusdt", "timestamp": (s + 2) * 1000, "value": 9.0}),
+    ]).encode()  # fmt: skip
+    day = "2026/11/10"
+    key = f"raw/ticks/crypto/{day}/polymarket-rtds-2026-11-10T06-{s * 1000}.jsonl.br"
+    old = f"raw/ticks/crypto/{day}/polymarket-rtds-2026-11-10T03-{(s - 9000) * 1000}.jsonl.br"  # far too early
+
+    class FakeR2:
+        def __init__(self) -> None:
+            self.got: list[str] = []
+
+        def keys(self, prefix: str, limit: int) -> list[str]:
+            return [old, key] if prefix.endswith(day + "/") else []
+
+        def get(self, k: str) -> bytes:
+            self.got.append(k)
+            return brotli.compress(body)
+
+    r2 = FakeR2()
+    raw = recorded.RawCrypto(r2)  # type: ignore[arg-type]
+    assert raw.prices("btc/usd", s, s + 900) == [[s + 1, 1.0], [s + 2, 2.5]]
+    assert raw.prices("btcusdt", s, s + 900) == [[s + 2, 9.0]]
+    assert r2.got == [key]  # the early file isn't read, and the file is read once for both symbols
+    assert raw.prices("btc/usd", 1_793_000_000, 1_793_000_900) is None  # before the recording began
 
 
 def test_times_parse() -> None:
@@ -370,6 +410,36 @@ def test_build_reads_only_what_the_investigation_hasnt() -> None:
     WS.build(store, reads, sid, LATE_SLUG, {"x": 1})
     assert reads.calls == ["window", f"trades:{LATE_SLUG}"] and store.window(sid, LATE_SLUG)["ready"]["tags"] == {"x": 1}
     assert [s["window_id"] for s in store.summaries(sid)] == [LATE_SLUG]
+
+
+def test_a_window_without_its_file_gets_chainlink_from_the_raw_recording() -> None:
+    from signals.research import workspace as WS
+
+    class ApiOnly(FakeCaseReads):  # Layer hasn't built the window yet: Polymarket's API, and the raw recording
+        asked: list[tuple[str, int, int]] = []
+
+        def window(self, slug: str, condition_id: Any = None, **kw: Any) -> dict[str, Any]:
+            return {"slug": LATE_SLUG, "start": LATE, "end": LATE + 900, "price_to_beat": 74719.5, "result": "Up",
+                    "prices": {"Up": [[LATE, 0.5]], "Down": [[LATE, 0.5]]},
+                    "book": {"available": False, "status": "not_processed"},
+                    "coverage": {"trades_read": None, "trades_complete": None}}  # fmt: skip
+
+        def chainlink(self, symbol: str, a: int, b: int) -> list[list[float]]:
+            self.asked.append((symbol, a, b))
+            return [[LATE, 74719.5], [LATE + 1, 74720.0]]
+
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    reads = ApiOnly()
+    r = WS.build(store, reads, sid, LATE_SLUG)
+    assert reads.asked == [("btc/usd", r["axis"]["from"], r["axis"]["to"])]
+    assert r["chainlink"] == [{"t": LATE, "p": 74719.5}, {"t": LATE + 1, "p": 74720.0}]
+    cov = r["coverage"]
+    assert cov["chainlink"] == "full" and cov["chainlink_source"] == "Layer raw recording (live feed)"
+    assert cov["book_status"] == "not_processed" and not cov["book"]
+    WS.build(store, reads, sid, LATE_SLUG)
+    assert len(reads.asked) == 1  # read once, kept
 
 
 def test_window_routes(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -277,8 +277,14 @@ class Reads:
         trades.sort(key=lambda r: r["ts"])
         gaps = [b[0] - a[0] for pts in out["prices"].values() for a, b in zip(pts, pts[1:], strict=False)]
         out["trades"] = trades
-        out["book"] = {"available": False, "why": "Order books come from Layer's recordings through its window "
-                       "reader, which isn't connected yet. Prices here are Polymarket's price history."}  # fmt: skip
+        if end > BOOKS_FROM:  # Layer recorded it; its window file just isn't built yet (it's built hourly)
+            out["book"] = {"available": False, "status": "not_processed",
+                           "why": "Layer recorded this window's order book, but it isn't processed yet. Prices here "
+                                  "are Polymarket's once-a-minute history."}  # fmt: skip
+        else:
+            out["book"] = {"available": False, "status": "not_recorded",
+                           "why": "Layer didn't record order books before 2 Nov 17:00 UTC. Prices here are "
+                                  "Polymarket's once-a-minute history."}  # fmt: skip
         out["coverage"] = {
             "source": "Polymarket API (uselayer)",
             "price_step_s": sorted(gaps)[len(gaps) // 2] if gaps else None,  # measured (median), not assumed
@@ -303,8 +309,7 @@ class Reads:
             if pts is None:
                 why = ("Chainlink wasn't recorded before 10 Nov 05:27 UTC, so these prices don't exist anywhere."
                        if b < OUTSIDE_FROM else
-                       "Chainlink is recorded from 10 Nov 05:27 UTC, but only a recorded window (window tool) "
-                       "can be read from here.")  # fmt: skip
+                       "Layer's Chainlink recording (from 10 Nov 05:27 UTC) can't be read from here right now.")
                 return {"source": "chainlink", "symbol": f"{sym}/USD", "start": a, "end": b, "available": False,
                         "why": why + " For a window, its start price (price_to_beat) and final price come from "
                                      "Polymarket (window tool)."}  # fmt: skip
@@ -350,7 +355,9 @@ def reads() -> Reads:
     client = Client()
     rate = float(os.environ.get("RESEARCH_READ_RATE", "4"))
     whales = Whales(BackgroundHttp(client._http, Budget(rate, name="research")), client._layer, client)  # type: ignore[arg-type]
-    return Reads(whales, recorded_window=recorded.reader(recorded.R2.from_env()))
+    r2 = recorded.R2.from_env()
+    # Layer's built windows first; Chainlink from its raw recording when a window isn't built yet.
+    return Reads(whales, recorded_window=recorded.reader(r2), chainlink=recorded.raw_crypto(r2))
 
 
 def now() -> float:

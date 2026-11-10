@@ -70,7 +70,10 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   - `up`/`down`: best bid and ask every second, carried forward from each recorded change; empty without a recorded
     book, and then `minute_fallback` has Polymarket's ~1-minute prices.
   - `chainlink`: only for windows from 10 Nov 2026 05:27 UTC (when recording began); before that `null`, and the
-    window's `price_to_beat` and `result` are all there is ("start_and_result").
+    window's `price_to_beat` and `result` are all there is ("start_and_result"). When Layer hasn't built the window's
+    file yet, Chainlink comes from Layer's raw recording of the live feed (`coverage.chainlink_source`).
+  - `coverage.book_status`: `recorded` (the book is drawn), `not_processed` (Layer recorded it but hasn't built
+    the window yet: say "the order book isn't processed yet") or `not_recorded` (before 2 Nov 17:00 UTC).
   - **Units:** Binance is BTC in USDT (Tether); Chainlink and the price to beat are US dollars, and the price to beat
     is a 60-second average. They sit about 0.1% apart, so never draw or compare Binance against the price to beat as
     if they were the same line. Without Chainlink, show Binance lined up to its own value at the start

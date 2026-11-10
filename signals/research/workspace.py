@@ -134,6 +134,10 @@ def coverage(window: dict[str, Any]) -> dict[str, Any]:
         "window_id": window.get("slug"), "source": window.get("source") or "Polymarket API",
         "chainlink": "full" if has_chainlink else "start_and_result",
         "book": bool(recorded and (window.get("book") or {}).get("available")),
+        # recorded (built), not_processed (recorded, its window file not built yet) or not_recorded (before 2 Nov)
+        "book_status": "recorded" if recorded and (window.get("book") or {}).get("available")
+        else (window.get("book") or {}).get("status") or "not_recorded",
+        "chainlink_source": window.get("chainlink_source") or ("Layer window file" if recorded else None),
         "missing_seconds": [[round(_secs(x.get("from"))), round(_secs(x.get("to")) - _secs(x.get("from")), 1)]
                             for x in book.get("lost") or []] if recorded else None,
         "lost": [{"from": round(_secs(x.get("from")), 1), "to": round(_secs(x.get("to")), 1), "why": _why(x.get("why"))}
@@ -234,6 +238,14 @@ def build(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, Any] | No
         store.add_trades(sid, got["trades"])
         trades = [t for t in got["trades"] if t.get("slug") == slug]
     a, b = axis(start, end, trades)
+    if not read.get("chainlink") and b >= OUTSIDE_FROM and read.get("_chainlink_span") != [a, b]:
+        # No window file yet: Chainlink from Layer's raw recording of the live feed, for the whole axis, once.
+        family = str(read.get("slug") or slug).split("-")[0]
+        pts = getattr(reads, "chainlink", lambda *x: None)(f"{family}/usd", a, b)
+        read["_chainlink_span"] = [a, b]
+        if pts:
+            read["chainlink"], read["chainlink_source"] = pts, "Layer raw recording (live feed)"
+        store.put_window(sid, slug, read=read)
     binance = None
     recorded_from = min((p[0] for p in read.get("binance") or []), default=None)
     if not read.get("binance") or (recorded_from is not None and recorded_from > a):
