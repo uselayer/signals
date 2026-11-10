@@ -25,7 +25,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterator
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -83,6 +83,26 @@ def unix(x: Any) -> int:
     except ValueError as e:
         raise ReadError(f"Not a time: {x!r}. Give unix seconds or an ISO time like 2026-11-09T14:00:00Z.") from e
     return int((d if d.tzinfo else d.replace(tzinfo=UTC)).timestamp())
+
+
+SCOPE_WORDS = re.compile(r"(today|yesterday)(?:\s+at)?\s+(\d{1,2}):(\d{2})(?:\s*utc)?", re.IGNORECASE)
+
+
+def scope_time(x: Any, now: float | None = None) -> int:
+    """unix() plus the words a plan's scope carries when the agent writes it as it would say it: "now",
+    "today 05:30 UTC", "yesterday 22:00" (UTC). A plan's scope written this way once made Start's tiles fail."""
+    if isinstance(x, str):
+        s, now = x.strip(), time.time() if now is None else now
+        if s.lower() == "now":
+            return int(now)
+        m = SCOPE_WORDS.fullmatch(s)
+        if m:
+            try:
+                d = datetime.fromtimestamp(now, UTC).replace(hour=int(m[2]), minute=int(m[3]), second=0, microsecond=0)
+            except ValueError as e:
+                raise ReadError(f"Not a time: {x!r}.") from e
+            return int((d - timedelta(days=1 if m[1].lower() == "yesterday" else 0)).timestamp())
+    return unix(x)
 
 
 def iso(t: int | float) -> str:

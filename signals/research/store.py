@@ -192,6 +192,12 @@ class Store:
             return {"read": None, "ready": None, "summary": None}
         return {k: json.loads(rows[0][k]) if rows[0][k] else None for k in ("read", "ready", "summary")}
 
+    def unshown(self, sid: str) -> list[str]:
+        """Windows read in this investigation that have no tile (summary) yet."""
+        return [r["slug"] for r in self._q(
+            "SELECT slug FROM inv_windows WHERE session = ? AND read IS NOT NULL AND summary IS NULL ORDER BY slug",
+            (sid,))]  # fmt: skip
+
     def summaries(self, sid: str) -> list[dict[str, Any]]:
         return [json.loads(r["summary"]) for r in self._q(
             "SELECT summary FROM inv_windows WHERE session = ? AND summary IS NOT NULL ORDER BY slug", (sid,))]  # fmt: skip

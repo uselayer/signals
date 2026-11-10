@@ -24,7 +24,7 @@ from typing import Any
 
 from signals.research import tools as T
 from signals.research import trace
-from signals.research.case import CASE_TOOLS, Case, prebuild
+from signals.research.case import CASE_TOOLS, Case, fill_tiles, prebuild, scope_ok
 from signals.research.case import NAMES as CASE_NAMES
 from signals.research.data import Reads
 from signals.research.store import Store
@@ -303,7 +303,7 @@ class Agent:
             if facts:  # what the user pointed at, as the server read it from the data
                 said += "\n\nThe user is pointing at this (from the data):\n" + json.dumps(facts, default=str)
             scope = self.store.scope(sid) if (context or {}).get("action") == "approve" else None
-            if scope and scope.get("wallet") and scope.get("from") and scope.get("to"):
+            if scope_ok(scope):  # only then is the agent told the tiles are coming (else it shows them itself)
                 # Start: the server builds the approved scope's tiles at once, while the agent is still thinking.
                 pre = threading.Thread(target=self._prebuild, args=(sid, scope, emit), name=f"prebuild-{sid}",
                                        daemon=True)  # fmt: skip
@@ -324,6 +324,13 @@ class Agent:
         finally:
             if pre is not None and pre.is_alive():  # its tiles belong to this run's events
                 pre.join(timeout=60)
+            if pre is None or not pre.is_alive():  # every window the agent read where the wallet traded gets a tile
+                try:
+                    n = fill_tiles(self.store, self.reads, sid, emit)
+                    if n:
+                        print(f"research: run {run} added {n} tiles the run hadn't shown", flush=True)
+                except Exception as e:  # noqa: BLE001 - the answer stands without them
+                    print(f"research: run {run} tile sweep failed: {type(e).__name__}: {e}", flush=True)
             # Container time: from its first use in this question to the end, at least the billed 5 minutes. An
             # estimate (Anthropic bills execution time; a paused container waiting on our tools may count).
             used = state["container_from"] is not None

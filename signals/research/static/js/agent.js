@@ -107,7 +107,7 @@ function Answer({ a, inv, act }) {
     ${rows.map(r => r.kind ? html`<div class=${'line2 ' + (r.kind === 'Inferred' ? 'inf' : '')}><span class=${'tag ' + r.kind.toLowerCase()}>${r.kind}</span><p>${flagged(r.t, r.fl)}</p></div>` : html`<p>${flagged(r.t, r.fl)}</p>`)}
     ${isFlagged && html`<div class="flagnote">${allFlags.length} number${allFlags.length === 1 ? '' : 's'} didn't match the data: ${allFlags.map(x => x.value_text).join(', ')}.</div>`}
     ${(a.annotations || []).length > 0 && html`<p class="muted small">Marked on the chart.</p>`}
-    ${(a.finding_ids || []).length > 0 && html`<div class="acts2">${a.finding_ids.map(id => html`<span class="chip">${inv.findings[id] ? `${id}: ${inv.findings[id].title}` : id}</span>`)}</div>`}
+    ${(a.finding_ids || []).length > 0 && html`<div class="acts2">${a.finding_ids.map(id => html`<span class="chip fchip">${inv.findings[id] ? `${id}: ${inv.findings[id].title}` : id}</span>`)}</div>`}
     ${a.truncated && html`<p class="muted small">The answer was cut short. Ask again for the rest.</p>`}
     ${a.computed_note && html`<span class="check">${a.computed_note}</span>`}
     ${!isFlagged && !a.fixtures_note && !a.computed_note && html`<span class="check">✓ Numbers checked against the data</span>`}</article>`;
