@@ -62,7 +62,8 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   coverage: {chainlink, book, outage}}`. `cost`/`sold_for` are the fills' `usd`; `payout` is $1 per share held of the
   winning side at the end; merges and redemptions aren't in the fills (`profit_note`).
 - `window.ready` (a replay) `{window_id, start, end, axis: {from, to}, title, price_to_beat, final_price, result,
-  binance: [{t, p}], chainlink: [{t, p}]|null, up: [{t, bid, ask}], down: [{t, bid, ask}], minute_fallback:
+  binance: [{t, p}], binance_at_start, chainlink: [{t, p}]|null, units: {binance: "USDT", chainlink: "USD",
+  price_to_beat: "USD, Chainlink's 60-second average"}, up: [{t, bid, ask}], down: [{t, bid, ask}], minute_fallback:
   {up: [{t, p}], down: [{t, p}]}|null, trades: [{trade_id, t, side, action, shares, price, usd, paid_ask, liquidity,
   pre_open}], position: [{t, up, down}], tags, coverage}`
   - `axis` starts 30 s before the earlier of the window's start and the first fill (at most 30 min early).
@@ -70,6 +71,10 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     book, and then `minute_fallback` has Polymarket's ~1-minute prices.
   - `chainlink`: only for windows from 10 Nov 2026 05:27 UTC (when recording began); before that `null`, and the
     window's `price_to_beat` and `result` are all there is ("start_and_result").
+  - **Units:** Binance is BTC in USDT (Tether); Chainlink and the price to beat are US dollars, and the price to beat
+    is a 60-second average. They sit about 0.1% apart, so never draw or compare Binance against the price to beat as
+    if they were the same line. Without Chainlink, show Binance lined up to its own value at the start
+    (`binance_at_start`), and say so whenever both appear.
   - `paid_ask`: a buy at or above the recorded best ask just before the trade reached the stream; `false` = below
     it (its resting order filled); `null` = not checked (no book, not on the tape, inside a recording gap, or a sell).
     `liquidity` says the same in words: `taker`|`maker`|`null`.
@@ -104,7 +109,16 @@ dates, wallet addresses and slugs aren't checked.
   `usage` `{input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, token_usd, code_runs,
   container_s, container_usd, cost_usd, rounds, tool_calls}`, then `done`.
 
-## Client calls (M3, coming)
-- `plan.approve` / `plan.edit` `{plan_id, text?, scope_option_ids?}` → a new run.
-- `proposal.accept` / `proposal.decline` `{proposal_id}`: decline starts no run.
-- `ask` `{question, context: null | {trade_id} | {window_id, t} | {finding_id} | {finding_id, stat}}`.
+## Client calls
+- **Ask** `POST /api/research/sessions/{id}/ask` `{question, context?, origin?}`. `context`: none, `{trade_id}`,
+  `{window_id, t}`, `{finding_id}` or `{finding_id, stat}`. The server reads what it points at from the
+  investigation's data (the fill as drawn, or the prices, position and fills within 10 s at that moment) and gives
+  the agent those facts with the question; 404 when it isn't in this investigation. `ask.started.context` echoes it.
+  Follow-ups answer directly unless they widen the scope, which proposes a plan and waits.
+- **Plan** `POST /api/research/sessions/{id}/plan` `{plan_id, action: approve|edit, text?, scope_option_ids?}` →
+  202 and a run ("Start", or "change the plan: …", which re-plans). 404 unknown plan, 409 already answered, 400 an
+  edit with no text. Emits `plan.answered` `{plan_id, action, scope_option_ids, text}`.
+- **Proposal** `POST /api/research/sessions/{id}/proposals/{proposal_id}` `{action: accept|decline}`: accept → 202
+  and a run; decline → 200 `{started: false}`, no run. 409 when already answered. Emits `proposal.answered`
+  `{proposal_id, action}`.
+- 409 also means one of your runs is still going; 429 that research is busy.

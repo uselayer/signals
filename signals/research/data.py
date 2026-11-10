@@ -304,7 +304,7 @@ class Reads:
                 return {"source": "chainlink", "symbol": f"{sym}/USD", "start": a, "end": b, "available": False,
                         "why": why + " For a window, its start price (price_to_beat) and final price come from "
                                      "Polymarket (window tool)."}  # fmt: skip
-            return {"source": "chainlink (Layer recording of Polymarket's live data feed)", "symbol": f"{sym}/USD",
+            return {"source": "chainlink (Layer recording of Polymarket's live data feed)", "symbol": f"{sym}/USD", "unit": "USD",
                     "start": a, "end": b, "available": True, "step": "1 second", "points": pts}  # fmt: skip
         if source != "binance":
             raise ReadError('source must be "binance" or "chainlink".')
@@ -330,7 +330,7 @@ class Reads:
             if len(rows) < 1000:
                 break
             at = rows[-1][0] + step_s * 1000
-        return {"source": "binance spot (data-api.binance.vision)", "symbol": f"{sym}USDT", "start": a, "end": b,
+        return {"source": "binance spot (data-api.binance.vision)", "symbol": f"{sym}USDT", "unit": "USDT (Tether), not USD", "start": a, "end": b,
                 "available": True, "step": f"{step_s} second{'s' if step_s > 1 else ''}", "price": "candle close",
                 "points": pts}  # fmt: skip
 

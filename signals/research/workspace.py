@@ -169,7 +169,10 @@ def ready(window: dict[str, Any], trades: list[dict[str, Any]], binance: list[li
         "price_to_beat": window.get("price_to_beat"), "final_price": window.get("final_price"),
         "result": window.get("result"),
         "binance": _points(window.get("binance") or binance),
+        "binance_at_start": next((p["p"] for p in _points(window.get("binance") or binance) if p["t"] >= start), None),
         "chainlink": _points(window["chainlink"]) if window.get("chainlink") and start >= OUTSIDE_FROM else None,
+        # Binance is BTC in Tether, Chainlink and the price to beat in US dollars: about 0.1% apart, never compared.
+        "units": {"binance": "USDT", "chainlink": "USD", "price_to_beat": "USD, Chainlink's 60-second average"},
         "up": _per_second(best, "up", a, b) if has_book else [],
         "down": _per_second(best, "down", a, b) if has_book else [],
         "minute_fallback": None if has_book else {"up": _points((window.get("prices") or {}).get("Up")),

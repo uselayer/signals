@@ -77,11 +77,14 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "outside_prices",
         "description": (
-            "Prices outside Polymarket between start and end. source 'binance': Binance spot candles' close "
-            "(BTCUSDT), 1-second steps for up to an hour, 1-minute steps up to 2 days. source 'chainlink': Chainlink "
-            "BTC/USD (what windows settle on) where Layer recorded it. JSON: {source, symbol, start, end, available, "
-            "why (when not available), step, points: [[ts unix s, price]]}. Binance is a different market from "
-            "Chainlink: never call one the other."
+            "Prices outside Polymarket between start and end. source 'binance': BTC priced in USDT (Tether) on "
+            "Binance spot, candle close, 1-second steps for up to an hour, 1-minute steps up to 2 days. source "
+            "'chainlink': Chainlink BTC/USD (US dollars: what windows settle on, and the price to beat is its "
+            "60-second average) where Layer recorded it, from 10 Nov 2026 05:27 UTC. JSON: {source, symbol, unit, "
+            "start, end, available, why (when not available), step, points: [[ts unix s, price]]}. Different units: "
+            "Binance usually sits about 0.1% from Chainlink, so never compare a Binance price to the price to beat. "
+            "To judge 'BTC above the start', use Chainlink where recorded; otherwise measure Binance against its own "
+            "value at the window's start, and say so."
         ),
         "input_schema": {
             "type": "object",

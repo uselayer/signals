@@ -117,6 +117,52 @@ NAMES = {t["name"] for t in CASE_TOOLS}
 WAITS = "propose_plan"  # after this one the run ends: the user starts the plan
 
 
+def _at(points: list[dict[str, Any]], t: float) -> dict[str, Any] | None:
+    """The last point at or before ``t`` (series are sorted by ``t``)."""
+    best = None
+    for p in points or []:
+        if p["t"] > t:
+            break
+        best = p
+    return best
+
+
+def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | None) -> dict[str, Any] | None:
+    """What the user pointed at, as facts from the data (never the page's word for them): a fill, a moment in a
+    window, or a finding. None for no context; ReadError when it doesn't exist in this investigation."""
+    if not context:
+        return None
+    if context.get("trade_id"):
+        fill = store.trade(sid, str(context["trade_id"]))
+        if not fill:
+            raise ReadError("That trade isn't one of this investigation's fills.")
+        slug = fill.get("slug")
+        ready = store.window(sid, slug)["ready"] if slug else None
+        drawn = next((t for t in (ready or {}).get("trades") or [] if t["trade_id"] == fill["id"]), None)
+        return {"kind": "trade", "trade": fill, "window_id": slug,
+                "as_drawn": drawn, "seconds_after_start": fill["ts"] - int(ready["start"]) if ready else None}  # fmt: skip
+    if context.get("window_id"):
+        slug = str(context["window_id"])
+        ready = store.window(slug=slug, sid=sid)["ready"] or workspace.build(store, reads, sid, slug)
+        t = context.get("t")
+        out: dict[str, Any] = {"kind": "moment" if t is not None else "window", "window_id": slug,
+                               "start": ready["start"], "end": ready["end"], "price_to_beat": ready["price_to_beat"],
+                               "result": ready["result"]}  # fmt: skip
+        if t is not None:
+            t = int(t)
+            out |= {"t": t, "seconds_after_start": t - ready["start"], "binance": _at(ready["binance"], t),
+                    "chainlink": _at(ready["chainlink"] or [], t), "up": _at(ready["up"], t), "down": _at(ready["down"], t),
+                    "position": _at(ready["position"], t),
+                    "fills_within_10s": [f for f in ready["trades"] if abs(f["t"] - t) <= 10]}  # fmt: skip
+        return out
+    if context.get("finding_id"):
+        f = store.finding(sid, str(context["finding_id"])) if hasattr(store, "finding") else None
+        if not f:
+            raise ReadError("That finding isn't in this investigation.")
+        return {"kind": "finding", "finding": f, "stat": context.get("stat")}
+    raise ReadError("Point at a trade (trade_id), a moment (window_id and t) or a finding (finding_id).")
+
+
 def _brief(s: dict[str, Any]) -> dict[str, Any]:
     return {"window_id": s["window_id"], "result": s["result"], "fills": len(s["entries"]),
             "first_entry_s": s["first_entry_s"], "cost": s["cost"], "profit": s["profit"], "coverage": s["coverage"]}  # fmt: skip

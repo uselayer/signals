@@ -197,7 +197,8 @@ class Agent:
             raise
 
     def ask(self, sid: str, user: str, question: str, emit: Callable[[dict[str, Any]], None], *,
-            context: dict[str, Any] | None = None, origin: str | None = None) -> None:  # fmt: skip
+            context: dict[str, Any] | None = None, facts: dict[str, Any] | None = None,
+            origin: str | None = None) -> None:  # fmt: skip
         """Answers ``question`` in session ``sid``, calling ``emit`` with each event as it happens. Every event has
         ``type`` and ``v`` (EVENT_VERSION: a page can tell a shape it doesn't know) and the question's ``run``."""
         run = self.store.start_run(sid, user)
@@ -218,7 +219,10 @@ class Agent:
         try:
             if self.store.spent_today() >= DAILY_USD or self.store.spent_today(user) >= USER_DAILY_USD:
                 raise OverBudget("Research has reached today's limit. It resets at 00:00 UTC.")
-            ok = self._ask(sid, run, question, emit, totals, state)
+            said = question
+            if facts:  # what the user pointed at, as the server read it from the data
+                said += "\n\nThe user is pointing at this (from the data):\n" + json.dumps(facts, default=str)
+            ok = self._ask(sid, run, said, emit, totals, state)
             self.store.update_run(run, check_ok=int(ok))
         except OverBudget as e:
             emit({"type": "error", "message": str(e)})

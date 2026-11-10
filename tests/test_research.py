@@ -708,7 +708,9 @@ def test_server_sessions_are_their_owners(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(server, "store", Store(os.path.join(tempfile.mkdtemp(), "s.db")))
 
     class Fake:
-        def ask(self, sid: str, user: str, q: str, emit: Any) -> None:
+        reads = None
+
+        def ask(self, sid: str, user: str, q: str, emit: Any, **kw: Any) -> None:
             emit({"type": "answer", "text": "ok", "unverified": []})
             emit({"type": "done"})
 
@@ -728,6 +730,124 @@ def test_server_sessions_are_their_owners(monkeypatch: pytest.MonkeyPatch) -> No
         assert c.get(f"/api/research/sessions/{sid}/events").status_code == 404
     finally:
         server.app.dependency_overrides.clear()
+
+
+class Recorder:
+    """A stand-in agent that keeps what each run was asked."""
+
+    reads = None
+
+    def __init__(self) -> None:
+        self.asked: list[dict[str, Any]] = []
+
+    def ask(self, sid: str, user: str, q: str, emit: Any, **kw: Any) -> None:
+        self.asked.append({"text": q, **kw})
+        emit({"type": "done"})
+
+
+def _client(monkeypatch: pytest.MonkeyPatch, agent: Any) -> tuple[Any, Any]:
+    from fastapi.testclient import TestClient
+
+    from signals.research import server
+
+    monkeypatch.setattr(server, "store", Store(os.path.join(tempfile.mkdtemp(), "s.db")))
+    monkeypatch.setattr(server, "_agent", agent)
+    monkeypatch.setattr(server, "_reads", FakeCaseReads())
+    server.app.dependency_overrides[server.auth.user_of] = lambda: "alice"
+    return TestClient(server.app), server
+
+
+def _settle(server: Any) -> None:
+    import time as _time
+
+    for _ in range(100):
+        if not server._running:
+            return
+        _time.sleep(0.01)
+
+
+def test_plan_start_and_edit(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = Recorder()
+    c, server = _client(monkeypatch, rec)
+    try:
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        server.store.add_event(sid, {"type": "plan.proposed", "plan_id": "plan-1", "steps": [],
+                                     "scope_options": [{"id": "oct", "text": "Also October, 1-minute prices"}]})  # fmt: skip
+        assert c.post(f"/api/research/sessions/{sid}/plan", json={"plan_id": "plan-9", "action": "approve"}).status_code == 404
+        r = c.post(f"/api/research/sessions/{sid}/plan",
+                   json={"plan_id": "plan-1", "action": "approve", "scope_option_ids": ["oct"]})  # fmt: skip
+        assert r.status_code == 202
+        _settle(server)
+        assert rec.asked[0]["text"] == "Start the plan.\nAlso: Also October, 1-minute prices"
+        assert rec.asked[0]["context"] == {"plan_id": "plan-1", "action": "approve"}
+        assert c.post(f"/api/research/sessions/{sid}/plan", json={"plan_id": "plan-1", "action": "approve"}).status_code == 409
+        server.store.add_event(sid, {"type": "plan.proposed", "plan_id": "plan-2", "steps": []})
+        assert c.post(f"/api/research/sessions/{sid}/plan", json={"plan_id": "plan-2", "action": "edit"}).status_code == 400
+        assert c.post(f"/api/research/sessions/{sid}/plan",
+                      json={"plan_id": "plan-2", "action": "edit", "text": "Only Nov 9"}).status_code == 202  # fmt: skip
+        _settle(server)
+        assert rec.asked[1]["text"] == "Change the plan: Only Nov 9"
+        answered = [e for e in server.store.events(sid) if e["type"] == "plan.answered"]
+        assert [(e["plan_id"], e["action"]) for e in answered] == [("plan-1", "approve"), ("plan-2", "edit")]
+    finally:
+        server.app.dependency_overrides.clear()
+
+
+def test_proposals_accept_or_decline(monkeypatch: pytest.MonkeyPatch) -> None:
+    rec = Recorder()
+    c, server = _client(monkeypatch, rec)
+    try:
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        server.store.add_event(sid, {"type": "proposal", "proposal_id": "P1", "text": "Look at the losing windows"})
+        server.store.add_event(sid, {"type": "proposal", "proposal_id": "P2", "text": "Compare with Nov 8"})
+        r = c.post(f"/api/research/sessions/{sid}/proposals/P2", json={"action": "decline"})
+        assert r.json() == {"started": False} and rec.asked == []
+        assert c.post(f"/api/research/sessions/{sid}/proposals/P2", json={"action": "accept"}).status_code == 409
+        assert c.post(f"/api/research/sessions/{sid}/proposals/P1", json={"action": "accept"}).status_code == 202
+        _settle(server)
+        assert rec.asked[0]["text"] == "Yes, go ahead: Look at the losing windows"
+    finally:
+        server.app.dependency_overrides.clear()
+
+
+def test_asking_about_a_trade_or_a_moment(monkeypatch: pytest.MonkeyPatch) -> None:
+    from signals.research import workspace as WS
+
+    rec = Recorder()
+    c, server = _client(monkeypatch, rec)
+    try:
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        server.store.set_wallet(sid, W)
+        fill = _wallet_fill("0xa", LATE + 12, 0.62, 10)
+        server.store.add_trades(sid, [fill])
+        server.store.put_window(sid, LATE_SLUG, read=_recorded_read())
+        WS.build(server.store, FakeCaseReads(), sid, LATE_SLUG)
+        bad = c.post(f"/api/research/sessions/{sid}/ask", json={"question": "Why?", "context": {"trade_id": "nope"}})
+        assert bad.status_code == 404 and rec.asked == []
+        r = c.post(f"/api/research/sessions/{sid}/ask", json={"question": "Why here?", "context": {"trade_id": fill["id"]}})
+        assert r.status_code == 202
+        _settle(server)
+        f = rec.asked[0]["facts"]
+        assert f["kind"] == "trade" and f["trade"]["tx"] == "0xa" and f["seconds_after_start"] == 12
+        assert f["as_drawn"]["liquidity"] == "taker" and rec.asked[0]["context"] == {"trade_id": fill["id"]}
+        c.post(f"/api/research/sessions/{sid}/ask", json={"question": "What happened here?",
+                                                          "context": {"window_id": LATE_SLUG, "t": LATE + 11}})  # fmt: skip
+        _settle(server)
+        m = rec.asked[1]["facts"]
+        assert m["kind"] == "moment" and m["seconds_after_start"] == 11 and m["up"] == {"t": LATE + 11, "bid": 0.6, "ask": 0.62}
+        assert [x["trade_id"] for x in m["fills_within_10s"]] == [fill["id"]]
+    finally:
+        server.app.dependency_overrides.clear()
+
+
+def test_pointed_at_facts_reach_the_model() -> None:
+    model = _model(_answers("Observed: 3 trades."))
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "Why here?", lambda e: None,  # type: ignore[arg-type]
+                                           context={"trade_id": "abc"}, facts={"kind": "trade", "price": 0.62})
+    said = model.requests[0]["messages"][-1]["content"][0]["text"]
+    assert said.startswith("Why here?") and '"price": 0.62' in said
 
 
 def test_the_request_through_the_real_anthropic_sdk() -> None:
