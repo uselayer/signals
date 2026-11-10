@@ -103,7 +103,9 @@ your code runs and between the trader's questions: reuse them instead of reading
 Start (or asks for changes; then propose a new plan).
 - After Start: work through the plan, marking each step running and done with step_status. The server puts the \
 approved scope's windows on the page itself as soon as Start is pressed; read the wallet's trades in your code and \
-group them by window for your own counting. Use show_windows only for windows outside the approved scope. Add each finding the moment you've counted it, one at a time (count one pattern, call finding, then the next; \
+group them by window for your own counting. The scope's windows are the ones that start in it (from <= start < to), \
+each counted whole with its pre-open fills: read from 30 minutes before from to 16 minutes after to, and count \
+those same windows, so your totals match the tiles. Use show_windows only for windows outside the approved scope. Add each finding the moment you've counted it, one at a time (count one pattern, call finding, then the next; \
 never save them up for a batch at the end), so the trader reads while you work: observed \
 first, then inferred readings resting on them. Aim to answer within about 8 minutes; if you're told time is \
 nearly up, answer at once from what you have. Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \

@@ -11,7 +11,7 @@ import bisect
 from datetime import datetime
 from typing import Any
 
-from signals.research.data import OUTSIDE_FROM, UNUSABLE, trade_id
+from signals.research.data import OUTSIDE_FROM, UNUSABLE, complete_slugs, trade_id
 
 SPARK_POINTS = 60  # a tile's line: one Binance point every 15 s of a 15-minute window
 PAD_S = 30  # the time axis starts this long before the earlier of the window's start and the first fill
@@ -233,10 +233,14 @@ def build(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, Any] | No
     start, end = int(read["start"]), int(read["end"])
     trades = store.trades(sid, slug)
     wallet = (store.session_any(sid) or {}).get("wallet")
-    if not trades and wallet:  # not read for this window yet: its own read, from a day before (listed a day ahead)
-        got = reads.wallet_trades(wallet, start - 86_400, end + 60, slug)
+    if not kept.get("complete") and wallet:
+        # Not read for this window yet, or only by a range that cut through it (a tile from those would count part
+        # of the window as all of it): its own read, from a day before (listed a day ahead) to just after it ends.
+        lo, hi = start - 86_400, end + 60
+        got = reads.wallet_trades(wallet, lo, hi, slug)
         store.add_trades(sid, got["trades"])
-        trades = [t for t in got["trades"] if t.get("slug") == slug]
+        store.mark_complete(sid, complete_slugs(got, lo, hi, also=(slug,)) & {slug})
+        trades = store.trades(sid, slug)
     a, b = axis(start, end, trades)
     if not read.get("chainlink") and b >= OUTSIDE_FROM and read.get("_chainlink_span") != [a, b]:
         # No window file yet: Chainlink from Layer's raw recording of the live feed, for the whole axis, once.
