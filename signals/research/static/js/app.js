@@ -129,7 +129,7 @@ function Investigation({ api, id }) {
       if (c) context = api.fixtures ? { ...c.context, answer: localAnswer(c, q) } : c.context;
       redraw(); runCall(api.ask(id, q, context));
     },
-    askBurst: (w, b) => { ui.pop = null; ui.ctx = { kind: 'burst', label: `${shares(b.shares)} ${b.side} at ${mmss(b.t0)}, ${clock(w.start).slice(0, 5)} window`, w, b, context: { trade_id: b.fills[0].trade_id } };
+    askBurst: (w, b) => { ui.pop = null; ui.ctx = { kind: 'burst', label: `${shares(b.shares)} ${b.side} at ${mmss(b.t0)}, ${clock(w.start).slice(0, 5)} window`, w, b, context: { trade_ids: b.fills.slice(0, 50).map(x => x.trade_id) } };
       ui.extraAnn = [{ window_id: w.id, kind: 'point', t0: b.t0, label: 'this fill' }]; act.ask('Why here?'); },
     askFix: f => runCall(api.ask(id, 'Fix the number that didn\'t match the data in this finding.', { finding_id: f.finding_id })),
     pinMoment: (w, t) => { ui.pin = { window_id: w.id, t }; ui.pop = null; ui.ctx = { kind: 'moment', label: `${mmss(t)} in the ${clock(w.start).slice(0, 5)} window`, w, t, context: { window_id: w.id, t: w.start + t } }; ui.composeFocus = true; redraw(); },
@@ -142,7 +142,7 @@ function Investigation({ api, id }) {
     setStep: i => { ui.step = i; ui.ph = null; ui.full = false; ui.pop = null; redraw(); },
     setFull: v => { ui.full = v; redraw(); },
     setRaw: v => { ui.raw = v; redraw(); },
-    highlight: f => { const ev = f.evidence || {}; ui.hl = { label: `${f.stat ? f.stat.text : ''} · ${f.title}`, match: new Set(ev.supporting || []), base: new Set([...(ev.supporting || []), ...(ev.against || [])]) }; ui.stage = 'windows'; redraw(); },
+    highlight: f => { const ev = f.evidence || {}, sup = ev.supporting_window_ids || ev.supporting || [], ag = ev.against_window_ids || ev.against || []; ui.hl = { label: `${f.stat ? f.stat.text : ''} · ${f.title}`, match: new Set(sup), base: new Set([...sup, ...ag]) }; ui.stage = 'windows'; redraw(); },
     clearHl: () => { ui.hl = null; redraw(); },
   };
 

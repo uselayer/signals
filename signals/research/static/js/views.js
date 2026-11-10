@@ -43,7 +43,7 @@ export function WindowsStage({ inv, ui, act }) {
         <${Spark} s=${s} />
         <div class="tf"><span>${plural((s.entries || []).length, 'fill')}${s.first_entry_s < 0 ? `, first ${-s.first_entry_s} s early` : ''}</span><span class=${s.profit >= 0 ? 'gain' : 'loss'}>${s.profit == null ? '' : signedMoney(s.profit)}</span></div>
         <div class="badges">${s.shares && s.shares.up > 0 && s.shares.down > 0 && html`<span class="badge">both sides</span>`}
-          ${!c.book && html`<span class="badge warn">no order book</span>`}${c.outage && html`<span class="badge warn">recording gaps</span>`}
+          ${!c.book && html`<span class="badge warn">no order book</span>`}${c.book && c.book_usable === false && html`<span class="badge warn">book gaps</span>`}${c.outage && html`<span class="badge warn">recording lost</span>`}
           ${c.chainlink === 'start_and_result' && html`<span class="badge">Chainlink: start and result</span>`}</div></button>`;
     })}</div></div>`;
 }
@@ -73,7 +73,8 @@ export function ReplayStage({ inv, ui, act, w, steps, idx, total }) {
   const compact = width < 620;
   const step = steps[Math.min(ui.step, steps.length - 1)] || steps[0];
   const ph = ui.full ? null : (ui.ph ?? step.t);
-  const anns = (ui.full ? [] : (step.annotations || [])).concat((ui.extraAnn || []).filter(a => a.window_id === w.id));
+  const rel = a => ({ ...a, t0: a.t0 > 1e9 ? a.t0 - w.start : a.t0, t1: a.t1 > 1e9 ? a.t1 - w.start : a.t1 }); // unix or from the start
+  const anns = (ui.full ? [] : (step.annotations || [])).concat((ui.extraAnn || []).filter(a => a.window_id === w.id).map(rel));
   const go = i => { playTok.current += 1; setPlaying(false); act.setStep(Math.max(0, Math.min(steps.length - 1, i))); };
   const play = async () => {
     if (playing) { playTok.current += 1; setPlaying(false); return; }
@@ -134,7 +135,7 @@ export function ReplayStage({ inv, ui, act, w, steps, idx, total }) {
         ${!w.hasCL && html`<label><input type="checkbox" id="rawbn" checked=${ui.raw} onChange=${e => act.setRaw(e.target.checked)} /> Binance's own price</label>`}</div>
     </div>
     <div class="caption">
-      <div class="ct"><h4>${step.title}</h4><span class="when">${fmtWhen(w, step.t)}</span><button class="link" onClick=${() => act.pinMoment(w, step.t)}>Ask about this moment</button></div>
+      <div class="ct"><h4>${flagged(step.title, flagsFor(step.number_check, 'title'))}</h4><span class="when">${fmtWhen(w, step.t)}</span><button class="link" onClick=${() => act.pinMoment(w, step.t)}>Ask about this moment</button></div>
       <div class="line2"><span class="tag observed">Observed</span><p>${flagged(step.observed, flagsFor(step.number_check, `step ${step.index} observed`).concat(flagsFor(step.number_check, 'observed')))}</p></div>
       ${step.inferred && html`<div class="line2 inf"><span class="tag inferred">Inferred</span><p>${flagged(step.inferred, flagsFor(step.number_check, `step ${step.index} inferred`).concat(flagsFor(step.number_check, 'inferred')))}</p></div>`}
       <span class="src-note">${step.auto ? "Steps drawn from this window's data. The agent's own walkthrough replaces them when it writes one." : 'Walkthrough written by the agent; its numbers were checked against the data.'}${T.note ? ' ' + T.note : ''}</span>

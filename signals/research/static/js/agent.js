@@ -10,7 +10,7 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
   useEffect(() => { const el = feedRef.current; if (el && ui.tab === 'findings') el.scrollTop = el.scrollHeight; }, [n, ui.tab]);
   const working = inv.running;
   const last = inv.plans[inv.planOrder[inv.planOrder.length - 1]], waiting = !working && last && last.status === 'proposed';
-  const nCards = inv.feed.filter(x => x.type === 'finding' || x.type === 'answer').length;
+  const nCards = inv.feed.filter(x => (x.type === 'finding' && (inv.findings[x.id] || {}).counts !== false) || x.type === 'answer').length;
   return html`<aside class="agent" aria-label="The research agent">
     <div class="agent-head"><span class=${'dot ' + (working ? 'live' : inv.done && !waiting ? 'ok' : '')}></span>
       <div><div class="t">Signals agent</div><div class="s">${working ? 'Working' : inv.error ? 'Stopped on an error' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
@@ -32,7 +32,7 @@ function Item({ it, inv, act }) {
   if (it.type === 'working') return html`<div class="working"><span class="dot live"></span><div>${it.lines.map(l => html`<p class=${l.done ? 'done' : ''}>${l.done ? '✓ ' : ''}${l.text}</p>`)}</div></div>`;
   if (it.type === 'ask') return html`<div class="ask"><div class="k">You asked${it.ctx ? html` about <span class="ctx">${it.ctx}</span>` : ''}</div><p>${it.text}</p></div>`;
   if (it.type === 'finding') return html`<${Finding} f=${inv.findings[it.id]} inv=${inv} act=${act} />`;
-  if (it.type === 'answer') return html`<${Answer} a=${it} act=${act} />`;
+  if (it.type === 'answer') return html`<${Answer} a=${it} inv=${inv} act=${act} />`;
   if (it.type === 'proposal') return html`<div class=${'proposal ' + (it.state !== 'open' ? 'done' : '')}><div class="k">Next, I'd look at</div><p>${it.text}</p>
     ${it.state === 'open' ? html`<div style="display:flex;gap:6px"><button class="btn sm primary" onClick=${() => act.proposal(it, true)}>${it.accept_label || 'Yes'}</button><button class="btn sm ghost" onClick=${() => act.proposal(it, false)}>Not now</button></div>`
       : html`<p class="muted small">${it.state === 'accepted' ? 'You said yes.' : 'Skipped. Ask anything else below.'}</p>`}</div>`;
@@ -44,47 +44,64 @@ function Item({ it, inv, act }) {
   return null;
 }
 
+// A finding (contract: finding.added/updated). Its words are its title, stat, rule and would_change_mind, each
+// number-checked; a finding whose numbers didn't check out (counts: false) is shown flagged and isn't counted.
 function Finding({ f, inv, act }) {
   if (!f) return null;
-  const inferred = f.label === 'inferred', fl = flagsFor(f.number_check, 'body');
-  const isFlagged = f.number_check && f.number_check.passed === false;
-  const ev = f.evidence || {}, sup = new Set(ev.supporting || []), base = [...sup, ...(ev.against || [])];
+  const inferred = f.label === 'inferred', nc = f.number_check;
+  const isFlagged = (nc && nc.passed === false) || f.counts === false;
+  const ev = f.evidence || {}, sup = new Set(ev.supporting_window_ids || ev.supporting || []);
+  const against = ev.against_window_ids || ev.against || [], base = [...sup, ...against];
   const order = inv.summaries.map(s => s.window_id).filter(id => base.includes(id));
-  const lines = (f.body || '').split('\n');
+  const allFlags = isFlagged ? ['title', 'stat', 'rule', 'would_change_mind'].flatMap(k => flagsFor(nc, k)) : [];
+  const prev = f.previous && f.previous.stat && f.stat && f.previous.stat.text !== f.stat.text ? f.previous.stat.text : null;
+  const ex = f.example && f.example.window_id ? f.example : null;
+  const ruleLines = (f.rule || '').split('\n').filter(Boolean);
   return html`<article class=${'card ' + (isFlagged ? 'flagged' : inferred ? 'inferred' : '')}>
-    <div class="top2">${isFlagged ? html`<span class="tag flag">Number not verified</span>` : f.kind === 'data' ? html`<span class="tag plain">What's missing</span>` : html`<span class=${'tag ' + (inferred ? 'inferred' : 'observed')}>${inferred ? 'Inferred' : 'Observed'}</span>`}<span class="k">${f.kind === 'read' ? 'My reading' : f.finding_id}</span></div>
-    <h4>${f.title}</h4>
-    ${f.stat && html`<div class="statrow"><button class="stat" onClick=${() => act.highlight(f)} title="Show these windows">${f.stat.text}</button>${f.previous_stat && f.previous_stat.text !== f.stat.text && html`<span class="was">was ${f.previous_stat.text}</span>`}</div>`}
+    <div class="top2">${isFlagged ? html`<span class="tag flag">Number not verified</span>` : f.kind === 'data' ? html`<span class="tag plain">What's missing</span>` : f.kind === 'unsure' ? html`<span class="tag plain">Not sure yet</span>` : html`<span class=${'tag ' + (inferred ? 'inferred' : 'observed')}>${inferred ? 'Inferred' : 'Observed'}</span>`}<span class="k">${f.kind === 'read' ? 'My reading' : f.finding_id}</span></div>
+    <h4>${flagged(f.title, flagsFor(nc, 'title'))}</h4>
+    ${f.stat && html`<div class="statrow"><button class="stat" onClick=${() => act.highlight(f)} title="Show these windows">${flagged(f.stat.text, flagsFor(nc, 'stat'))}</button>${prev && html`<span class="was">was ${prev}</span>`}</div>`}
     ${order.length > 0 && html`<div class="waffle">${order.map(id => html`<button class=${sup.has(id) ? '' : 'no'} title=${id} aria-label=${id} onClick=${() => act.openWin(id)}></button>`)}</div>`}
-    ${lines.length > 1 ? html`<ul>${lines.map(l => html`<li>${l}</li>`)}</ul>` : html`<p>${flagged(f.body, fl)}</p>`}
-    ${isFlagged && html`<div class="flagnote">${fl.length} number${fl.length === 1 ? '' : 's'} didn't match the data the agent read: ${fl.map(x => x.value_text).join(', ')}.${fl.some(x => x.data_value) ? ` The data shows ${fl.filter(x => x.data_value).map(x => x.data_value).join(', ')}.` : ''} Not counted until it's fixed.</div>`}
-    ${f.based_on && html`<p class="muted small">Based on ${f.based_on.join(', ')}.</p>`}
-    ${f.would_change && html`<details open><summary>What would change this reading</summary><p>${f.would_change}</p></details>`}
-    ${f.rule && html`<details><summary>How I counted</summary><p>${f.rule}</p></details>`}
-    <div class="acts2">${f.example && f.example.window_id && html`<button class="link" onClick=${() => act.openWin(f.example.window_id, f.example.step)}>Step through an example</button>`}
-      ${isFlagged && html`<button class="link" onClick=${() => act.askFix(f)}>Ask the agent to fix it</button>`}</div>
+    ${f.body && html`<p>${f.body}</p>`}
+    ${ruleLines.length > 0 && (f.kind === 'data'
+      ? html`<ul>${ruleLines.map(l => html`<li>${l}</li>`)}</ul>`
+      : html`<p class="muted small"><b>How I counted:</b> ${flagged(f.rule, flagsFor(nc, 'rule'))}</p>`)}
+    ${isFlagged && html`<div class="flagnote">${allFlags.length ? `${allFlags.length} number${allFlags.length === 1 ? '' : 's'} didn't match the data the agent read: ${allFlags.map(x => x.value_text).join(', ')}.${allFlags.some(x => x.data_value) ? ` The data shows ${allFlags.filter(x => x.data_value).map(x => x.data_value).join(', ')}.` : ''}` : "Its numbers didn't check out against the data."} Not counted, and nothing inferred rests on it, until it's fixed.</div>`}
+    ${f.based_on && f.based_on.length > 0 && html`<p class="muted small">Based on ${f.based_on.join(', ')}.</p>`}
+    ${f.would_change_mind && html`<details open><summary>What would change this reading</summary><p>${flagged(f.would_change_mind, flagsFor(nc, 'would_change_mind'))}</p></details>`}
+    <div class="acts2">${ex && html`<button class="link" onClick=${() => act.openWin(ex.window_id, ex.step_index ?? ex.step)}>Step through an example</button>`}
+      ${isFlagged && html`<button class="link" onClick=${() => act.askFix(f)}>Ask the agent to fix it</button>`}
+      ${f.history && f.history.length > 0 && html`<span class="check">Rewritten ${f.history.length === 1 ? 'once' : f.history.length + ' times'}</span>`}</div>
     ${f.sample_note && html`<span class="check">${f.sample_note}</span>`}
     ${!isFlagged && f.kind !== 'data' && html`<span class="check">✓ Numbers checked against the data</span>`}</article>`;
 }
 
-// An answer: v2 sends text; a paragraph that starts "Observed:" or "Inferred:" gets its tag
-function Answer({ a, act }) {
-  const fl = flagsFor(a.number_check, 'text');
-  const paras = (a.text || '').split(/\n+/).filter(Boolean);
-  const isFlagged = a.number_check && a.number_check.passed === false;
-  let off = 0;
-  return html`<article class=${'card ' + (isFlagged ? 'flagged' : '')}>
-    ${a.label && html`<div class="top2"><span class="tag observed">${a.label}</span></div>`}
-    ${paras.map(p => {
+// An answer: structured (label, observed lines, inferred lines) or, when the agent wrote plain text, text whose
+// paragraphs starting "Observed:" / "Inferred:" get their tag
+function Answer({ a, inv, act }) {
+  const nc = a.number_check, isFlagged = nc && nc.passed === false;
+  const allFlags = isFlagged ? Object.values((nc && nc.flagged) || {}).flat() : [];
+  let rows;
+  if (a.observed || a.inferred) {
+    rows = [...(a.observed || []).map((t, i) => ({ kind: 'Observed', t, fl: flagsFor(nc, `observed ${i + 1}`) })),
+            ...(a.inferred || []).map((t, i) => ({ kind: 'Inferred', t, fl: flagsFor(nc, `inferred ${i + 1}`) }))];
+  } else {
+    const fl = flagsFor(nc, 'text'); let off = 0;
+    rows = (a.text || '').split(/\n+/).filter(Boolean).map(p => {
       const start = (a.text || '').indexOf(p, off); off = start + p.length;
       const local = fl.filter(x => x.start == null || (x.start >= start && x.end <= start + p.length)).map(x => (x.start == null ? x : { ...x, start: x.start - start, end: x.end - start }));
       const m = /^(Observed|Inferred):\s*/.exec(p);
-      if (!m) return html`<p>${flagged(p, local)}</p>`;
-      const rest = p.slice(m[0].length), body = rest.charAt(0).toUpperCase() + rest.slice(1), shift = m[0].length; // same length: flag offsets hold
-      const lf = local.map(x => (x.start == null ? x : { ...x, start: x.start - shift, end: x.end - shift }));
-      return html`<div class=${'line2 ' + (m[1] === 'Inferred' ? 'inf' : '')}><span class=${'tag ' + m[1].toLowerCase()}>${m[1]}</span><p>${flagged(body, lf)}</p></div>`;
-    })}
-    ${isFlagged && html`<div class="flagnote">${fl.length} number${fl.length === 1 ? '' : 's'} didn't match the data: ${fl.map(x => x.value_text).join(', ')}.</div>`}
+      if (!m) return { kind: null, t: p, fl: local };
+      const rest = p.slice(m[0].length), shift = m[0].length; // same length after capitalising: flag offsets hold
+      return { kind: m[1], t: rest.charAt(0).toUpperCase() + rest.slice(1), fl: local.map(x => (x.start == null ? x : { ...x, start: x.start - shift, end: x.end - shift })) };
+    });
+  }
+  return html`<article class=${'card ' + (isFlagged ? 'flagged' : '')}>
+    ${a.label && html`<h4>${flagged(a.label, flagsFor(nc, 'label'))}</h4>`}
+    ${rows.map(r => r.kind ? html`<div class=${'line2 ' + (r.kind === 'Inferred' ? 'inf' : '')}><span class=${'tag ' + r.kind.toLowerCase()}>${r.kind}</span><p>${flagged(r.t, r.fl)}</p></div>` : html`<p>${flagged(r.t, r.fl)}</p>`)}
+    ${isFlagged && html`<div class="flagnote">${allFlags.length} number${allFlags.length === 1 ? '' : 's'} didn't match the data: ${allFlags.map(x => x.value_text).join(', ')}.</div>`}
+    ${(a.annotations || []).length > 0 && html`<p class="muted small">Marked on the chart.</p>`}
+    ${(a.finding_ids || []).length > 0 && html`<div class="acts2">${a.finding_ids.map(id => html`<span class="chip">${inv.findings[id] ? `${id}: ${inv.findings[id].title}` : id}</span>`)}</div>`}
     ${a.truncated && html`<p class="muted small">The answer was cut short. Ask again for the rest.</p>`}
     ${a.computed_note && html`<span class="check">${a.computed_note}</span>`}
     ${!isFlagged && !a.fixtures_note && !a.computed_note && html`<span class="check">✓ Numbers checked against the data</span>`}</article>`;

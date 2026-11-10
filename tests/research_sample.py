@@ -3,9 +3,8 @@ fixtures mode (``/research/?fixtures``) and its tests.
 
 The windows are real (the service's own ``window.ready``/``window.summary`` for one wallet's BTC 15-minute windows on
 9 Nov 2026); the events around them follow docs/research-contract.md (v2). Every number in the sample's text is
-worked out here from those windows, so the sample can't claim what the data doesn't show. Two parts are labelled
-samples of what's still to come: ``finding.added`` (M4) and one finding with a deliberately flagged number, to show
-how the page draws a failed number check.
+worked out here from those windows, so the sample can't claim what the data doesn't show. One finding is labelled a
+sample: it carries a deliberately flagged number, to show how the page draws a failed number check.
 
 Run ``uv run python tests/research_sample.py`` to rewrite the file; ``tests/test_research_ui.py`` checks it's current.
 """
@@ -67,7 +66,8 @@ def build() -> dict[str, Any]:
     up_cost = round(sum(t["usd"] for r in ready for t in r["trades"] if t["side"] == "Up" and t["action"] == "buy"), 2)
     dn_cost = round(sum(t["usd"] for r in ready for t in r["trades"] if t["side"] == "Down" and t["action"] == "buy"), 2)
     assert up_cost > dn_cost, "the flagged sample's title says Up got more"
-    wrong_body = f"It spent $1,190.00 on Up and {money(dn_cost)} on Down across the {n} windows."
+    wrong_title = f"Spends more on Up than on Down: $1,190.00 on Up, {money(dn_cost)} on Down"
+    assert all(by[i]["profit"] < 0 for i in ids), "F2's title says it lost in every window"
     focus = max(book, key=lambda r: sum(t["pre_open"] for t in r["trades"]) * 1000 + len(r["trades"]))["window_id"]
 
     ends = "; ".join(
@@ -118,49 +118,63 @@ def build() -> dict[str, Any]:
         {"type": "view.focus", "stage": "window", "window_id": focus, "step_index": 1, "highlight_window_ids": [], "label": "its buys before the open"},
         {"type": "answer.progress", "ask_id": 2, "text": "Looking for what repeats across the windows."},
         {"type": "step.status", "step_id": "s5", "status": "done", "summary": "4 findings, 1 reading, and what's missing"},
-        {"type": "finding.added", "finding_id": "F1", "kind": "pattern", "label": "observed",
+        {"type": "finding.added", "finding_id": "F1", "ask_id": 2, "kind": "pattern", "label": "observed",
          "title": "Buys before the window opens, usually both sides",
          "stat": {"count": len(pre), "out_of": n, "unit": "windows", "text": f"{len(pre)} of {n} windows"},
-         "body": "Its first fill came " + ", ".join(f"{first_before[i]} s" for i in ids if i in first_before) + " before the start ("
-                 + ", ".join(str(pre_fills[i]) for i in ids if i in pre_fills) + " fills before the open). "
-                 + f"Both Up and Down before the open in {len(pre_both)} of {len(pre)}"
-                 + ("; " + "; ".join(f"the {hm[i]} UTC window: {side} only" for i, side in one_side.items()) if one_side else "") + ".",
-         "rule": "Fills with a time before the window's start (pre_open).",
-         "evidence": {"supporting": [r["window_id"] for r in pre], "against": [i for i in ids if i not in first_before]},
-         "example": {"window_id": focus, "step": 1}, "number_check": {"passed": True, "flagged": {}}},
-        {"type": "finding.added", "finding_id": "F2", "kind": "pattern", "label": "observed",
-         "title": "Holds both sides to the close",
+         "rule": "Fills timed before the window's start (pre_open). Its first came "
+                 + ", ".join(f"{first_before[i]} s" for i in ids if i in first_before) + " early ("
+                 + ", ".join(str(pre_fills[i]) for i in ids if i in pre_fills) + " fills before the open); "
+                 + f"both Up and Down before the open in {len(pre_both)} of {len(pre)}"
+                 + ("; " + "; ".join(f"the {hm[i]} UTC window {side} only" for i, side in one_side.items()) if one_side else "") + ".",
+         "evidence": {"supporting_window_ids": [r["window_id"] for r in pre], "against_window_ids": [i for i in ids if i not in first_before],
+                      "trade_ids": [t["trade_id"] for r in pre for t in r["trades"] if t["pre_open"]]},
+         "example": {"window_id": focus, "step_index": 1}, "based_on": [], "would_change_mind": None,
+         "number_check": {"passed": True, "flagged": {}}, "counts": True},
+        {"type": "finding.added", "finding_id": "F2", "ask_id": 2, "kind": "pattern", "label": "observed",
+         "title": f"Holds both sides to the close, and lost in all {n} windows",
          "stat": {"count": len(both_end), "out_of": n, "unit": "windows", "text": f"{len(both_end)} of {n} windows"},
-         "body": f"At the close: {ends}. From fills, {signed(total)} across the {n} windows.",
-         "rule": "Shares held of each side at the window's end (position), and profit from fills plus the payout of shares held; merges and redemptions aren't counted.",
-         "evidence": {"supporting": [r["window_id"] for r in both_end], "against": [i for i in ids if i not in {r['window_id'] for r in both_end}]},
-         "example": {"window_id": ids[-1], "step": None}, "number_check": {"passed": True, "flagged": {}}},
-        {"type": "finding.added", "finding_id": "F3", "kind": "pattern", "label": "observed",
+         "rule": f"Shares held of each side at the end, and profit from its fills plus the payout of shares held. {ends}. "
+                 f"Together {signed(total)}; merges and redemptions aren't in the fills.",
+         "evidence": {"supporting_window_ids": [r["window_id"] for r in both_end],
+                      "against_window_ids": [i for i in ids if i not in {r['window_id'] for r in both_end}], "trade_ids": []},
+         "example": {"window_id": ids[-1], "step_index": None}, "based_on": [], "would_change_mind": None,
+         "number_check": {"passed": True, "flagged": {}}, "counts": True},
+        {"type": "finding.added", "finding_id": "F3", "ask_id": 2, "kind": "pattern", "label": "observed",
          "title": "Most of its checked fills were resting buys, not taken at the asking price",
          "stat": {"count": maker, "out_of": maker + taker, "unit": "checked fills", "text": f"{maker} of {maker + taker} checked fills"},
-         "body": f"In the {len(book)} windows with a recorded order book: {maker} resting buys filled, {taker} paid the asking price, and {unchecked} fell in recording gaps and can't be checked. The window without a book can't be checked at all.",
-         "rule": "liquidity: a buy at or above the recorded best ask just before the trade is taker; below it, maker.",
-         "evidence": {"supporting": [r["window_id"] for r in book], "against": []},
-         "example": {"window_id": focus, "step": None}, "number_check": {"passed": True, "flagged": {}}},
-        {"type": "finding.added", "finding_id": "F4", "kind": "read", "label": "inferred",
+         "rule": f"A buy at or above the recorded best ask just before the trade paid the asking price; below it, a resting buy filled. "
+                 f"In the {len(book)} windows with a recorded book: {maker} resting, {taker} paid the asking price, {unchecked} in recording gaps "
+                 "and not checked. The window without a book can't be checked.",
+         "evidence": {"supporting_window_ids": [r["window_id"] for r in book], "against_window_ids": [], "trade_ids": []},
+         "example": {"window_id": focus, "step_index": None}, "based_on": [], "would_change_mind": None,
+         "number_check": {"passed": True, "flagged": {}}, "counts": True},
+        {"type": "finding.added", "finding_id": "F4", "ask_id": 2, "kind": "read", "label": "inferred",
          "title": "It seems to quote both sides rather than pick a direction",
-         "body": f"It seems to rest buy orders on both Up and Down and keep what fills to the close. If so, most fills should sit below the asking price and its two sides should end close in size: {maker} of {maker + taker} checked fills were resting buys, and every window ended holding both sides.",
-         "based_on": ["F1", "F2", "F3"],
-         "would_change": "Fills mostly at the asking price in windows with a recorded book, or windows where it ends holding one side only.",
-         "number_check": {"passed": True, "flagged": {}}},
-        {"type": "finding.added", "finding_id": "F5", "kind": "pattern", "label": "observed",
-         "title": "Spends more on Up than on Down",
-         "body": wrong_body,
-         "number_check": {"passed": False, "flagged": {"body": [{"value_text": "$1,190.00", "start": wrong_body.index("$1,190.00"),
-                                                                  "end": wrong_body.index("$1,190.00") + 9, "data_value": money(up_cost)}]}},
-         "sample_note": "A deliberately flagged sample, to show how a failed number check looks."},
-        {"type": "finding.added", "finding_id": "F6", "kind": "data", "label": "observed", "title": "What the data doesn't show",
-         "body": "\n".join([
+         "stat": None,
+         "rule": f"If it rests buy orders on both Up and Down and keeps what fills to the close, most fills should sit below the asking "
+                 f"price and both sides should be held at the end: {maker} of {maker + taker} checked fills were resting buys, and all {n} "
+                 "windows ended holding both sides.",
+         "evidence": {"supporting_window_ids": ids, "against_window_ids": [], "trade_ids": []},
+         "example": None, "based_on": ["F1", "F2", "F3"],
+         "would_change_mind": "Fills mostly at the asking price in windows with a recorded book, or windows where it ends holding one side only.",
+         "number_check": {"passed": True, "flagged": {}}, "counts": True},
+        {"type": "finding.added", "finding_id": "F5", "ask_id": 2, "kind": "pattern", "label": "observed",
+         "title": wrong_title, "stat": None,
+         "rule": "The fills' usd, buys only, by side.",
+         "evidence": {"supporting_window_ids": ids, "against_window_ids": [], "trade_ids": []},
+         "example": None, "based_on": [], "would_change_mind": None,
+         "number_check": {"passed": False, "flagged": {"title": [{"value_text": "$1,190.00", "start": wrong_title.index("$1,190.00"),
+                                                                   "end": wrong_title.index("$1,190.00") + 9, "data_value": money(up_cost)}]}},
+         "counts": False, "sample_note": "A deliberately flagged sample, to show how a failed number check looks."},
+        {"type": "finding.added", "finding_id": "F6", "ask_id": 2, "kind": "data", "label": "observed", "title": "What the data doesn't show",
+         "stat": None,
+         "rule": "\n".join([
              "Chainlink BTC/USD isn't recorded before 10 Nov 05:27 UTC, so BTC's moves here are measured on Binance BTCUSDT from its own price at the start.",
              *[f"{hm[r['window_id']]} UTC window: {r['coverage']['market_trades']['pct']}% of market trades recorded; gaps are hatched on the chart." for r in book],
              *[f"{hm[r['window_id']]} UTC window: no order book; the dotted lines are Polymarket's once-a-minute prices." for r in ready if not r["coverage"]["book"]],
              "Profit counts fills and the payout of shares held at the end; merges and redemptions aren't in the fills."]),
-         "number_check": {"passed": True, "flagged": {}}},
+         "evidence": {"supporting_window_ids": [], "against_window_ids": [], "trade_ids": []},
+         "example": None, "based_on": [], "would_change_mind": None, "number_check": {"passed": True, "flagged": {}}, "counts": True},
         {"type": "proposal", "proposal_id": "P1", "ask_id": 2, "text": f"Every BTC 15-minute window it traded on 9 Nov, to see whether these {n} are typical.", "accept_label": "Read them"},
         {"type": "usage", "cost_usd": 0.41, "rounds": 6, "tool_calls": 3 + n},
         {"type": "done"},
@@ -168,9 +182,11 @@ def build() -> dict[str, Any]:
     asks = {
         "Why does it buy below the asking price?": [
             {"type": "answer.progress", "text": "Counting its fills against the recorded book."},
-            {"type": "answer.card", "truncated": False, "number_check": {"passed": True, "flagged": {}},
-             "text": f"Observed: in the {len(book)} windows with a recorded order book, {maker} of its {maker + taker} checked fills were resting buys that filled, and {taker} paid the asking price; {unchecked} fell in recording gaps.\n"
-                     "Inferred: it seems to post buy orders a little below the asking price and wait to be filled, on both sides. If so, its fills should cluster just under the best ask, and the windows with a recorded book are where that can be checked."},
+            {"type": "answer.card", "label": "How its fills compare with the asking price",
+             "observed": [f"In the {len(book)} windows with a recorded order book, {maker} of its {maker + taker} checked fills were resting buys that filled, and {taker} paid the asking price.",
+                          f"{unchecked} fills fell in recording gaps and can't be checked."],
+             "inferred": ["It seems to post buy orders a little below the asking price and wait to be filled, on both sides. If so, its fills should cluster just under the best ask; the windows with a recorded book are where that can be checked."],
+             "annotations": [], "focus": None, "finding_ids": ["F3"], "number_check": {"passed": True, "flagged": {}}},
             {"type": "done"}],
         "Read every BTC 15-minute window it traded on 9 Nov": [
             {"type": "answer.progress", "text": "That reads more windows, so here's the plan first."},

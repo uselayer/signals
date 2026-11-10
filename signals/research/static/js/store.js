@@ -86,13 +86,16 @@ export function apply(s, e, ui) {
       break;
     case 'finding.added': case 'finding.updated': {
       const prev = s.findings[e.finding_id];
-      s.findings[e.finding_id] = { ...(prev || {}), ...e, previous_stat: e.previous_stat ?? (prev && t === 'finding.updated' ? prev.stat : undefined) };
+      s.findings[e.finding_id] = { ...(prev || {}), ...e, previous: e.previous ?? (prev && t === 'finding.updated' ? { stat: prev.stat, title: prev.title } : undefined) };
       if (!prev) feedPush(s, { type: 'finding', id: e.finding_id });
       break;
     }
     case 'proposal': feedPush(s, { ...e, type: 'proposal', state: 'open' }); break;
     case 'answer.progress': workLine(s, e.text); break;
-    case 'answer.card': closeWork(s); feedPush(s, { ...e, type: 'answer' }); break;
+    case 'answer.card':
+      closeWork(s); feedPush(s, { ...e, type: 'answer' });
+      if (ui && e.annotations && e.annotations.length) ui.extraAnn = e.annotations; // what the answer points at, drawn
+      break;
     case 'chart': s.charts = [...(s.charts || []), e]; break; // the later "+ New view"
     case 'note': case 'notice': feedPush(s, { type: 'note', text: e.text }); break;
     case 'check': // v1: the number check on the answer

@@ -3773,6 +3773,7 @@
    {
     "type": "finding.added",
     "finding_id": "F1",
+    "ask_id": 2,
     "kind": "pattern",
     "label": "observed",
     "title": "Buys before the window opens, usually both sides",
@@ -3782,59 +3783,81 @@
      "unit": "windows",
      "text": "3 of 3 windows"
     },
-    "body": "Its first fill came 44 s, 23 s, 47 s before the start (3, 3, 7 fills before the open). Both Up and Down before the open in 2 of 3; the 9 Nov 12:30 UTC window: Down only.",
-    "rule": "Fills with a time before the window's start (pre_open).",
+    "rule": "Fills timed before the window's start (pre_open). Its first came 44 s, 23 s, 47 s early (3, 3, 7 fills before the open); both Up and Down before the open in 2 of 3; the 9 Nov 12:30 UTC window Down only.",
     "evidence": {
-     "supporting": [
+     "supporting_window_ids": [
       "btc-updown-15m-1794222000",
       "btc-updown-15m-1794227400",
       "btc-updown-15m-1794268800"
      ],
-     "against": []
+     "against_window_ids": [],
+     "trade_ids": [
+      "88382aa3cc72",
+      "49289f08efd1",
+      "ab534ad39ea3",
+      "ef2a08bdb7d4",
+      "8edf8c867b8a",
+      "9f5bc9e4a7be",
+      "550055277903",
+      "a14e4c523ce0",
+      "b54cf8867998",
+      "5e8bfb080f75",
+      "36d5e7b842ec",
+      "681f03fa51da",
+      "bb3e7a6f0f08"
+     ]
     },
     "example": {
      "window_id": "btc-updown-15m-1794227400",
-     "step": 1
+     "step_index": 1
     },
+    "based_on": [],
+    "would_change_mind": null,
     "number_check": {
      "passed": true,
      "flagged": {}
-    }
+    },
+    "counts": true
    },
    {
     "type": "finding.added",
     "finding_id": "F2",
+    "ask_id": 2,
     "kind": "pattern",
     "label": "observed",
-    "title": "Holds both sides to the close",
+    "title": "Holds both sides to the close, and lost in all 3 windows",
     "stat": {
      "count": 3,
      "out_of": 3,
      "unit": "windows",
      "text": "3 of 3 windows"
     },
-    "body": "At the close: 9 Nov 11:00 UTC window: 950 Up and 824 Down, resolved Down, −$46.61; 9 Nov 12:30 UTC window: 1,253 Up and 1,544 Down, resolved Up, −$55.59; 10 Nov 00:00 UTC window: 1,504 Up and 1,151 Down, resolved Down, −$74.23. From fills, −$176.43 across the 3 windows.",
-    "rule": "Shares held of each side at the window's end (position), and profit from fills plus the payout of shares held; merges and redemptions aren't counted.",
+    "rule": "Shares held of each side at the end, and profit from its fills plus the payout of shares held. 9 Nov 11:00 UTC window: 950 Up and 824 Down, resolved Down, −$46.61; 9 Nov 12:30 UTC window: 1,253 Up and 1,544 Down, resolved Up, −$55.59; 10 Nov 00:00 UTC window: 1,504 Up and 1,151 Down, resolved Down, −$74.23. Together −$176.43; merges and redemptions aren't in the fills.",
     "evidence": {
-     "supporting": [
+     "supporting_window_ids": [
       "btc-updown-15m-1794222000",
       "btc-updown-15m-1794227400",
       "btc-updown-15m-1794268800"
      ],
-     "against": []
+     "against_window_ids": [],
+     "trade_ids": []
     },
     "example": {
      "window_id": "btc-updown-15m-1794268800",
-     "step": null
+     "step_index": null
     },
+    "based_on": [],
+    "would_change_mind": null,
     "number_check": {
      "passed": true,
      "flagged": {}
-    }
+    },
+    "counts": true
    },
    {
     "type": "finding.added",
     "finding_id": "F3",
+    "ask_id": 2,
     "kind": "pattern",
     "label": "observed",
     "title": "Most of its checked fills were resting buys, not taken at the asking price",
@@ -3844,75 +3867,117 @@
      "unit": "checked fills",
      "text": "156 of 191 checked fills"
     },
-    "body": "In the 2 windows with a recorded order book: 156 resting buys filled, 35 paid the asking price, and 99 fell in recording gaps and can't be checked. The window without a book can't be checked at all.",
-    "rule": "liquidity: a buy at or above the recorded best ask just before the trade is taker; below it, maker.",
+    "rule": "A buy at or above the recorded best ask just before the trade paid the asking price; below it, a resting buy filled. In the 2 windows with a recorded book: 156 resting, 35 paid the asking price, 99 in recording gaps and not checked. The window without a book can't be checked.",
     "evidence": {
-     "supporting": [
+     "supporting_window_ids": [
       "btc-updown-15m-1794222000",
       "btc-updown-15m-1794227400"
      ],
-     "against": []
+     "against_window_ids": [],
+     "trade_ids": []
     },
     "example": {
      "window_id": "btc-updown-15m-1794227400",
-     "step": null
+     "step_index": null
     },
+    "based_on": [],
+    "would_change_mind": null,
     "number_check": {
      "passed": true,
      "flagged": {}
-    }
+    },
+    "counts": true
    },
    {
     "type": "finding.added",
     "finding_id": "F4",
+    "ask_id": 2,
     "kind": "read",
     "label": "inferred",
     "title": "It seems to quote both sides rather than pick a direction",
-    "body": "It seems to rest buy orders on both Up and Down and keep what fills to the close. If so, most fills should sit below the asking price and its two sides should end close in size: 156 of 191 checked fills were resting buys, and every window ended holding both sides.",
+    "stat": null,
+    "rule": "If it rests buy orders on both Up and Down and keeps what fills to the close, most fills should sit below the asking price and both sides should be held at the end: 156 of 191 checked fills were resting buys, and all 3 windows ended holding both sides.",
+    "evidence": {
+     "supporting_window_ids": [
+      "btc-updown-15m-1794222000",
+      "btc-updown-15m-1794227400",
+      "btc-updown-15m-1794268800"
+     ],
+     "against_window_ids": [],
+     "trade_ids": []
+    },
+    "example": null,
     "based_on": [
      "F1",
      "F2",
      "F3"
     ],
-    "would_change": "Fills mostly at the asking price in windows with a recorded book, or windows where it ends holding one side only.",
+    "would_change_mind": "Fills mostly at the asking price in windows with a recorded book, or windows where it ends holding one side only.",
     "number_check": {
      "passed": true,
      "flagged": {}
-    }
+    },
+    "counts": true
    },
    {
     "type": "finding.added",
     "finding_id": "F5",
+    "ask_id": 2,
     "kind": "pattern",
     "label": "observed",
-    "title": "Spends more on Up than on Down",
-    "body": "It spent $1,190.00 on Up and $1,538.38 on Down across the 3 windows.",
+    "title": "Spends more on Up than on Down: $1,190.00 on Up, $1,538.38 on Down",
+    "stat": null,
+    "rule": "The fills' usd, buys only, by side.",
+    "evidence": {
+     "supporting_window_ids": [
+      "btc-updown-15m-1794222000",
+      "btc-updown-15m-1794227400",
+      "btc-updown-15m-1794268800"
+     ],
+     "against_window_ids": [],
+     "trade_ids": []
+    },
+    "example": null,
+    "based_on": [],
+    "would_change_mind": null,
     "number_check": {
      "passed": false,
      "flagged": {
-      "body": [
+      "title": [
        {
         "value_text": "$1,190.00",
-        "start": 9,
-        "end": 18,
+        "start": 32,
+        "end": 41,
         "data_value": "$1,866.01"
        }
       ]
      }
     },
+    "counts": false,
     "sample_note": "A deliberately flagged sample, to show how a failed number check looks."
    },
    {
     "type": "finding.added",
     "finding_id": "F6",
+    "ask_id": 2,
     "kind": "data",
     "label": "observed",
     "title": "What the data doesn't show",
-    "body": "Chainlink BTC/USD isn't recorded before 10 Nov 05:27 UTC, so BTC's moves here are measured on Binance BTCUSDT from its own price at the start.\n9 Nov 11:00 UTC window: 53.9% of market trades recorded; gaps are hatched on the chart.\n9 Nov 12:30 UTC window: 75.4% of market trades recorded; gaps are hatched on the chart.\n10 Nov 00:00 UTC window: no order book; the dotted lines are Polymarket's once-a-minute prices.\nProfit counts fills and the payout of shares held at the end; merges and redemptions aren't in the fills.",
+    "stat": null,
+    "rule": "Chainlink BTC/USD isn't recorded before 10 Nov 05:27 UTC, so BTC's moves here are measured on Binance BTCUSDT from its own price at the start.\n9 Nov 11:00 UTC window: 53.9% of market trades recorded; gaps are hatched on the chart.\n9 Nov 12:30 UTC window: 75.4% of market trades recorded; gaps are hatched on the chart.\n10 Nov 00:00 UTC window: no order book; the dotted lines are Polymarket's once-a-minute prices.\nProfit counts fills and the payout of shares held at the end; merges and redemptions aren't in the fills.",
+    "evidence": {
+     "supporting_window_ids": [],
+     "against_window_ids": [],
+     "trade_ids": []
+    },
+    "example": null,
+    "based_on": [],
+    "would_change_mind": null,
     "number_check": {
      "passed": true,
      "flagged": {}
-    }
+    },
+    "counts": true
    },
    {
     "type": "proposal",
@@ -3940,12 +4005,23 @@
    },
    {
     "type": "answer.card",
-    "truncated": false,
+    "label": "How its fills compare with the asking price",
+    "observed": [
+     "In the 2 windows with a recorded order book, 156 of its 191 checked fills were resting buys that filled, and 35 paid the asking price.",
+     "99 fills fell in recording gaps and can't be checked."
+    ],
+    "inferred": [
+     "It seems to post buy orders a little below the asking price and wait to be filled, on both sides. If so, its fills should cluster just under the best ask; the windows with a recorded book are where that can be checked."
+    ],
+    "annotations": [],
+    "focus": null,
+    "finding_ids": [
+     "F3"
+    ],
     "number_check": {
      "passed": true,
      "flagged": {}
-    },
-    "text": "Observed: in the 2 windows with a recorded order book, 156 of its 191 checked fills were resting buys that filled, and 35 paid the asking price; 99 fell in recording gaps.\nInferred: it seems to post buy orders a little below the asking price and wait to be filled, on both sides. If so, its fills should cluster just under the best ask, and the windows with a recorded book are where that can be checked."
+    }
    },
    {
     "type": "done"

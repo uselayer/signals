@@ -74,5 +74,17 @@ def test_the_sample_shows_one_flagged_number_and_says_so() -> None:
     flagged = [f for f in findings if not f["number_check"]["passed"]]
     assert len(flagged) == 1 and flagged[0].get("sample_note")
     f = flagged[0]
-    for flag in f["number_check"]["flagged"]["body"]:
-        assert f["body"][flag["start"]:flag["end"]] == flag["value_text"]
+    assert f["counts"] is False, "a finding whose numbers didn't check out isn't counted"
+    for field, flags in f["number_check"]["flagged"].items():
+        for flag in flags:
+            assert f[field][flag["start"]:flag["end"]] == flag["value_text"]
+
+
+def test_sample_findings_have_the_contracts_fields() -> None:
+    sample = json.loads((FIX / "events.sample.json").read_text())
+    for f in (e for e in sample["runs"][1] if e["type"] == "finding.added"):
+        for k in ["finding_id", "ask_id", "kind", "label", "title", "stat", "rule", "evidence", "example", "based_on",
+                  "would_change_mind", "number_check", "counts"]:
+            assert k in f, f"{f['finding_id']} has no {k}"
+        assert set(f["evidence"]) == {"supporting_window_ids", "against_window_ids", "trade_ids"}
+        assert "body" not in f, "findings have no body in the contract"
