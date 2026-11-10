@@ -1,4 +1,4 @@
-// The research page (/research): Breakdowns, and one breakdown's workspace (an "investigation" in the code and contract). Routes: #/ (yours, and a new
+// The research page (usesignals.app/breakdowns; /research/ on the service): Breakdowns, and one breakdown's workspace (an "investigation" in the code and contract). Routes: #/ (yours, and a new
 // one), #/i/<id> (an investigation). ?fixtures plays recorded data with no service; ?sample is the same recorded run
 // for visitors (no sign-in: the signed-out page's "Watch a sample breakdown"); ?signin opens Sign in at once; ?q=
 // prefills a question (the main site's ask bar sends it).

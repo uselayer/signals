@@ -1,10 +1,15 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    { "source": "/breakdowns", "destination": "/breakdowns/", "permanent": true },
+    { "source": "/research", "destination": "/breakdowns/", "permanent": true },
+    { "source": "/research/", "destination": "/breakdowns/", "permanent": true }
+  ],
   "rewrites": [
+    { "source": "/breakdowns/(.*)", "destination": "https://signals-research-production.up.railway.app/research/$1" },
     { "source": "/lyr/static/(.*)", "destination": "https://us-assets.i.posthog.com/static/$1" },
     { "source": "/lyr/array/(.*)", "destination": "https://us-assets.i.posthog.com/array/$1" },
     { "source": "/lyr/(.*)", "destination": "https://us.i.posthog.com/$1" },
-    { "source": "/research", "destination": "https://signals-research-production.up.railway.app/research/" },
     { "source": "/research/(.*)", "destination": "https://signals-research-production.up.railway.app/research/$1" },
     { "source": "/api/research/(.*)", "destination": "https://signals-research-production.up.railway.app/api/research/$1" },
     { "source": "/(.*)", "destination": "https://signals-production-1eb7.up.railway.app/$1" }

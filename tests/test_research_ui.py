@@ -33,6 +33,26 @@ def test_the_service_serves_the_page_its_code_and_fixtures() -> None:
         assert c.get(f"/research/{path}").status_code == 200, path
 
 
+def test_a_shared_breakdowns_link_shows_its_card() -> None:
+    """usesignals.app/breakdowns (web/vercel.json: /breakdowns and /research redirect to /breakdowns/, which forwards
+    here) shows a title, a line and a 1200x630 image on X, iMessage, Slack. The image's URL has to be absolute."""
+    c = TestClient(app)
+    page = c.get("/research/").text
+    assert '<meta property="og:image" content="https://usesignals.app/breakdowns/og.png">' in page
+    assert '<meta name="twitter:card" content="summary_large_image">' in page
+    assert '<meta property="og:url" content="https://usesignals.app/breakdowns">' in page
+    png = c.get("/research/og.png")
+    assert png.status_code == 200 and png.headers["content-type"] == "image/png"
+    assert png.content[16:24] == (1200).to_bytes(4, "big") + (630).to_bytes(4, "big")  # PNG header: width, height
+    vercel = json.loads((STATIC.parents[2] / "web" / "vercel.json").read_text())
+    redirects = {r["source"]: r["destination"] for r in vercel["redirects"]}
+    assert redirects == {"/breakdowns": "/breakdowns/", "/research": "/breakdowns/", "/research/": "/breakdowns/"}
+    rewrites = {r["source"]: r["destination"] for r in vercel["rewrites"]}
+    assert rewrites["/breakdowns/(.*)"] == "https://signals-research-production.up.railway.app/research/$1"
+    sources = [r["source"] for r in vercel["rewrites"]]
+    assert sources.index("/breakdowns/(.*)") < sources.index("/(.*)")  # above the engine's catch-all
+
+
 def test_the_page_imports_only_its_own_files() -> None:
     """No CDN or other host in the page's code: the vendored bundle is pinned and served with it."""
     for js in (STATIC / "js").glob("*.js"):
