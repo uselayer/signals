@@ -306,9 +306,41 @@ http://127.0.0.1:8791/research/?fixtures for the page against recorded windows a
 and no sign-in. `uv run python tests/research_sample.py` rewrites that sample from the fixtures (a test checks it's
 current). http://127.0.0.1:8791/api/research/dev is the bare page for trying the agent.
 
-Hosting it (owner): a Railway service in the `signals` project from this repo with config `railway.research.json`,
-a volume at `/research`, and its variables; then a rewrite in `web/vercel.json` above the catch-all,
-`{ "source": "/api/research/(.*)", "destination": "https://<research service>/api/research/$1" }`.
+### Hosting Breakdowns (owner)
+
+Each step only when the owner asks (AGENTS.md, "Deploying"). Done on 10 Nov 2026 where marked.
+
+1. [x] **Railway service** `signals-research` in the `signals` project, production (created with the CLI: Railway's
+   GitHub app doesn't see the uselayer org, so it isn't git-connected).
+2. [x] **Volume** at `/research` (`signals-research-volume`): saved breakdowns, events, findings and costs.
+3. [x] **Domain** https://signals-research-production.up.railway.app
+4. [x] **Variables** on `signals-research` (keys set by the owner, or from the owner's Keychain on their say-so, never
+   printed): `ANTHROPIC_API_KEY`, `CLERK_PUBLISHABLE_KEY` = `${{signals.CLERK_PUBLISHABLE_KEY}}` (the engine's),
+   `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (read-only on `layer-history`). Optional:
+   `RESEARCH_METRICS_KEY`, the `RESEARCH_*` caps. `RESEARCH_HOSTED=1` comes from `Dockerfile.research`, and with it
+   the service refuses to start without the Clerk key. `RAILWAY_DOCKERFILE_PATH=Dockerfile.research` (step 5).
+5. [x] **Deploy** (first on 10 Nov 08:10 UTC; again for every release). It must build `Dockerfile.research`, never the engine's `Dockerfile`: on 10 Nov an
+   upload with only `railway.json` swapped still built `Dockerfile` (Railway ignored its `dockerfilePath`) and ran a
+   second copy of the engine, background loops and all, for about 15 minutes. So upload an export whose `Dockerfile`
+   *is* the research one (the service also has `RAILWAY_DOCKERFILE_PATH=Dockerfile.research`):
+   ```
+   rm -rf /tmp/research-deploy && mkdir /tmp/research-deploy && git archive main | tar -x -C /tmp/research-deploy
+   cd /tmp/research-deploy && cp Dockerfile.research Dockerfile && cp railway.research.json railway.json
+   railway up . --path-as-root --service signals-research
+   ```
+   Then check that https://signals-research-production.up.railway.app/openapi.json is titled "Signals research" (not
+   "Signals"), `/api/research/health` says `"ok": true, "model_key": true`, and a `POST /api/research/sessions`
+   without a sign-in gets 401.
+6. **Vercel rewrites** in `web/vercel.json`, above the catch-all, then `vercel deploy --prod` inside `web/` (a
+   routing change on usesignals.app):
+   ```json
+   { "source": "/research", "destination": "https://signals-research-production.up.railway.app/research/" },
+   { "source": "/research/:path*", "destination": "https://signals-research-production.up.railway.app/research/:path*" },
+   { "source": "/api/research/:path*", "destination": "https://signals-research-production.up.railway.app/api/research/:path*" },
+   ```
+   Check https://usesignals.app/api/research/health and https://usesignals.app/research/ load.
+7. **Show it**: `SIGNALS_RESEARCH=1` on the engine service (`signals`): the Breakdowns tab, ask bar and phone tab
+   appear (`/api/config.research`). Off again by removing it.
 
 ## Good to know
 
