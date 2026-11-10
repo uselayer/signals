@@ -47,6 +47,9 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 - `plan.proposed` `{plan_id, ask_id, title, scope: {wallet, family, from, to}, steps: [{id, title, source, estimate_s}],
   scope_options: [{id, text}], estimate_usd, needs_approval: true}`. Every new investigation shows its plan and waits;
   a follow-up that widens the scope (more windows, a longer range, another wallet) does too. The run ends after it.
+  `estimate_usd` is the server's, never the agent's: the median `cost_usd` of the latest 20 Starts that ran to their
+  end (an answer, or the cost or time limit), once there are 5 (`Store.start_cost`); null before, and the page then
+  shows only the time.
 - `step.status` `{step_id, status: queued|running|done|warning|failed, progress: {done, total}|null, summary,
   warnings: [{kind, text, window_ids}]}`
 - `tool.call` `{id, tool, args, started_at}` and `tool.result` `{id, tool, ok, rows, limit_hit, ms, summary}`: the

@@ -41,7 +41,6 @@ CASE_TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "title": {"type": "string"}, "scope": _obj,
                 "steps": {"type": "array", "items": _obj}, "scope_options": {"type": "array", "items": _obj},
-                "estimate_usd": {"type": "number"},
             },  # fmt: skip
             "required": ["title", "scope", "steps"],
         },
@@ -338,7 +337,8 @@ class Case:
         self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild)
         plan = {"type": "plan.proposed", "plan_id": f"plan-{self.ask_id}", "ask_id": self.ask_id,
                 "title": inp.get("title"), "scope": scope, "steps": steps,
-                "scope_options": inp.get("scope_options") or [], "estimate_usd": inp.get("estimate_usd"),
+                # the server's figure, never the model's guess: what recent Starts cost (None until there are enough)
+                "scope_options": inp.get("scope_options") or [], "estimate_usd": self.store.start_cost(),
                 "needs_approval": True}  # fmt: skip
         self.store.set_title(self.sid, str(inp.get("title") or "")[:120])
         self.emit(plan)

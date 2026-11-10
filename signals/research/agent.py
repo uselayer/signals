@@ -389,6 +389,8 @@ class Agent:
         The run works in its own thread; this returns when the run has ended: on its own, at MAX_SECONDS by the
         wall-clock watchdog (even while a model request or a read is blocked), or stopped by ``stop_all``."""
         run = self.store.start_run(sid, user)
+        if (context or {}).get("action") == "approve":  # a Start: what these cost is the plan's cost line
+            self.store.update_run(run, kind="start")
         out = emit
         t0 = time.time()
         phases: dict[str, float] = {}  # seconds from the start to each phase (PHASES), for the usage event and logs

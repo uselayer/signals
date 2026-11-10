@@ -757,6 +757,40 @@ def test_scope_times_read_the_words_a_plan_is_written_in() -> None:
         D.scope_time("today 25:00 UTC", now)
 
 
+def test_a_plans_cost_is_what_recent_starts_cost_never_the_models_guess() -> None:
+    """The Breakdowns doc promises the plan shows an estimated cost; the model was never asked for one, so live
+    plans showed only the time. The server's figure: the median of the latest Starts that ran to their end."""
+    plan = {"title": "t", "scope": {"wallet": W, "from": "2026-11-10T05:30:00Z", "to": "2026-11-10T06:45:00Z"},
+            "steps": [{"id": "s", "title": "x", "source": "y", "estimate_s": 60}], "estimate_usd": 0.05}  # fmt: skip
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    events, _, _ = _ask(_model(_turn(_direct("propose_plan", plan))), store=store)
+    assert next(e for e in events if e["type"] == "plan.proposed")["estimate_usd"] is None  # too few Starts: no cost
+
+    def run(cost: float, kind: str | None = "start", error: str | None = None) -> None:
+        r = store.start_run("s0", "u9")  # another person's Starts (u1's own daily limit stays clear)
+        store.update_run(r, kind=kind, ended=time.time(), cost_usd=cost, error=error)
+
+    for c in (0.8, 1.1, 0.95, 1.4, 0.7):
+        run(c)
+    run(2.0, error="interrupted")  # cut off by a deploy: not what a Start costs
+    run(2.0, kind=None)  # a plain question
+    run(3.0, error="over_budget")  # stopped at the cost limit: it did cost that
+    assert store.start_cost() == 1.02  # median of 0.7, 0.8, 0.95, 1.1, 1.4, 3.0
+    events, _, _ = _ask(_model(_turn(_direct("propose_plan", plan))), store=store)
+    assert next(e for e in events if e["type"] == "plan.proposed")["estimate_usd"] == 1.02  # not the model's 0.05
+    from signals.research import case as C
+
+    assert "estimate_usd" not in next(t for t in C.CASE_TOOLS if t["name"] == "propose_plan")["input_schema"]["properties"]
+
+
+def test_a_start_is_marked_as_one_for_the_cost_line() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    A.Agent(FakeReads(), store, _model(_answers("Observed: 3 trades."))).ask(  # type: ignore[arg-type]
+        sid, "u1", "Start the plan.", lambda e: None, context={"plan_id": "plan-1", "action": "approve"})
+    assert [r["kind"] for r in store.runs()] == ["start"]
+
+
 def test_a_plan_keeps_its_scope_as_times_start_can_read() -> None:
     plan = {"title": "t", "scope": {"wallet": W, "from": "today 05:30 UTC", "to": "now"},
             "steps": [{"id": "s", "title": "x", "source": "y"}]}  # fmt: skip
