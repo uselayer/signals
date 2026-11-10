@@ -157,7 +157,8 @@ class Reads:
             # trades in one second; 0.19.1: stopped at the limit with more listed): kept, and the read is partial.
             with _sdk_warnings() as caught:
                 rows = [_row(t) for t in self.whales.trades_between(w, at, b, limit=PAGE)]
-            sdk_warnings.extend(caught)
+            # "stopped at the limit" (0.19.1) is this loop's own cue to read on, handled below; the rest lose trades.
+            sdk_warnings.extend(m for m in caught if "stopped at the limit" not in m)
             return rows
 
         source = "Polymarket activity via uselayer whales.trades_between"

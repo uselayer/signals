@@ -114,6 +114,20 @@ def test_an_sdk_warning_marks_the_history_cut_short() -> None:
             logging.getLogger("uselayer").warning("uselayer: %s has over 5,000 trades at %d; the rest are skipped", w, a)
             return super().trades_between(w, a, b, limit=limit)
 
+    class FullPage(Whales019):  # 0.19.1 warns on every full page; reading on handles it
+        def trades_between(self, w: str, a: int, b: int, *, limit: int) -> list[Any]:
+            got = super().trades_between(w, a, b, limit=limit)
+            if len(got) == limit:
+                logging.getLogger("uselayer").warning("uselayer: stopped at the limit of %d trades for %s", limit, w)
+            return got
+
+    old = D.PAGE
+    D.PAGE = 2
+    try:
+        full = D.Reads(FullPage([_trade(100 + i, tx=f"0x{i}") for i in range(5)])).wallet_trades(W, 100, 200)
+    finally:
+        D.PAGE = old
+    assert full["complete"] and full["count"] == 5 and "sdk_warnings" not in full
     out = D.Reads(Warns([_trade(100)])).wallet_trades(W, 100, 200)
     assert not out["complete"] and "cut short" in out["note"]
     assert out["sdk_warnings"] == [f"uselayer: {W} has over 5,000 trades at 100; the rest are skipped"]
