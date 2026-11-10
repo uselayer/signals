@@ -301,8 +301,19 @@ Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (require
 `RESEARCH_METRICS_KEY`, and for Layer's recorded windows a read-only R2 token on `layer-history`: `R2_ACCOUNT_ID`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_BUCKET`, default layer-history).
 
-Locally: `ANTHROPIC_API_KEY=… uv run signals-research`, then http://127.0.0.1:8791/api/research/dev (a bare page
-for trying it; the Research tab waits on its design).
+**The page** (`signals/research/static/`, served by the service at `/research`; the main site's nav links to it as
+Investigations, and its ask bar opens it with `?q=`). An investigation is a saved case file: the plan waits for
+Start; the agent's events fill a workspace (tiles of every window, one window's replay with steps, its fills) and a
+column of findings, answers and proposals; you can point at a fill or a moment and ask about it. The replay draws
+Binance BTCUSDT, Chainlink BTC/USD (when recorded), the price to beat, the Up and Down prices, the wallet's fills and
+its position on one time axis, with the pre-open band, recording gaps hatched and once-a-minute prices dotted. Preact
+and htm (one pinned, vendored file, no build step) and hand-drawn SVG, so every fill is an element to point at. The
+shapes it reads are `docs/research-contract.md`. Re-runs, alerts and "+ New view" show as later.
+
+Locally: `uv run signals-research`, then http://127.0.0.1:8791/research/ (with `ANTHROPIC_API_KEY` to ask), or
+http://127.0.0.1:8791/research/?fixtures for the page against recorded windows and a sample event log, with no key
+and no sign-in. `uv run python tests/research_sample.py` rewrites that sample from the fixtures (a test checks it's
+current). http://127.0.0.1:8791/api/research/dev is the bare page for trying the agent.
 
 Hosting it (owner): a Railway service in the `signals` project from this repo with config `railway.research.json`,
 a volume at `/research`, and its variables; then a rewrite in `web/vercel.json` above the catch-all,
