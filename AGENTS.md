@@ -349,8 +349,8 @@ behind Vercel (see README, "Hosting").
 
 Research is for traders and researchers, so it may say more than the consumer pages (how a wallet trades, its
 patterns, why it might trade that way), but the consumer rules above still hold: plain words, facts before
-readings, no advice. The agent's instructions (`SYSTEM` in `signals/research/agent.py`) follow these rules; change
-both together.
+readings, no advice. The agent's instructions (`SYSTEM` in `signals/research/agent.py`) carry 1, 3, 4, 6 and 8
+today; once these are confirmed, bring them fully in line, and from then on change both together.
 
 1. **Observed or Inferred, every finding.** Observed: what the data shows, with its numbers ("Observed: it bought
    Up in 41 of 52 windows, at 92¢ on average, in the last 90 seconds"). Inferred: a reading of why, said as a
