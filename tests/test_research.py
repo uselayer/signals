@@ -106,6 +106,22 @@ def test_wallet_trades_rows_from_the_sdk() -> None:
                    "token": "7", "action": "sell", "price": 0.6, "size": 10.0, "usd": 6.0, "tx": "0xt"}  # fmt: skip
 
 
+def test_an_sdk_warning_marks_the_history_cut_short() -> None:
+    import logging
+
+    class Warns(Whales019):
+        def trades_between(self, w: str, a: int, b: int, *, limit: int) -> list[Any]:
+            logging.getLogger("uselayer").warning("uselayer: %s has over 5,000 trades at %d; the rest are skipped", w, a)
+            return super().trades_between(w, a, b, limit=limit)
+
+    out = D.Reads(Warns([_trade(100)])).wallet_trades(W, 100, 200)
+    assert not out["complete"] and "cut short" in out["note"]
+    assert out["sdk_warnings"] == [f"uselayer: {W} has over 5,000 trades at 100; the rest are skipped"]
+    assert "sdk_warnings" not in D.Reads(Whales019([_trade(100)])).wallet_trades(W, 100, 200)
+    logging.getLogger("uselayer").warning("outside any read")  # no handler left behind
+    assert not any(type(h).__name__ == "Catch" for h in logging.getLogger("uselayer").handlers)
+
+
 def test_wallet_trades_refuses_a_bad_wallet() -> None:
     with pytest.raises(D.ReadError):
         D.Reads(SimpleNamespace()).wallet_trades("bob", 0, 1)
@@ -210,9 +226,12 @@ def test_binance_seconds_and_a_refusing_location() -> None:
     assert not out["available"] and "this server's location (HTTP 451)" in out["why"]
 
 
-def test_chainlink_says_it_isnt_readable_yet() -> None:
-    out = D.Reads(None, _web(lambda r: httpx.Response(500))).outside_prices("chainlink", 0, 900)
-    assert not out["available"] and "price_to_beat" in out["why"]
+def test_chainlink_says_why_it_isnt_there() -> None:
+    reads = D.Reads(None, _web(lambda r: httpx.Response(500)))
+    before = reads.outside_prices("chainlink", 1794285000, 1794285900)  # 10 Nov 04:30, before recording began
+    assert not before["available"] and "wasn't recorded before 10 Nov 05:27 UTC" in before["why"]
+    after = reads.outside_prices("chainlink", 1794290000, 1794290900)
+    assert "only a recorded window" in after["why"] and "price_to_beat" in after["why"]
 
 
 def test_times_parse() -> None:

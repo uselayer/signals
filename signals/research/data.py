@@ -16,12 +16,15 @@ can say when data is partial instead of treating a gap as "nothing happened".
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -40,10 +43,30 @@ ENGINE = os.environ.get("SIGNALS_ENGINE_URL", "https://usesignals.app").rstrip("
 BOOKS_FROM = 1_793_638_800  # 2026-11-02 17:00 UTC: up/down windows recorded by default from here
 UNUSABLE = [(1_794_074_400, 1_794_089_400)]  # 2026-11-07 18:00–22:10 UTC: the recorder was overloaded
 RECONNECT_FIX = 1_794_284_160  # 2026-11-10 04:16 UTC: Layer #640 live; weekday windows before often have big gaps
+OUTSIDE_FROM = 1_794_288_420  # 2026-11-10 05:27 UTC: Layer records Chainlink and Binance from here on (#641)
 
 
 class ReadError(Exception):
     """A read that failed in a way the agent should be told about in words (bad input, a venue refusing)."""
+
+
+@contextlib.contextmanager
+def _sdk_warnings() -> Iterator[list[str]]:
+    """The warnings the uselayer SDK logs while the block runs, as text (this thread's only)."""
+    caught: list[str] = []
+    me = threading.get_ident()
+
+    class Catch(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if record.thread == me and record.levelno >= logging.WARNING:
+                caught.append(record.getMessage())
+
+    log, h = logging.getLogger("uselayer"), Catch()
+    log.addHandler(h)
+    try:
+        yield caught
+    finally:
+        log.removeHandler(h)
 
 
 def unix(x: Any) -> int:
@@ -126,8 +149,15 @@ class Reads:
         a, b = unix(start), unix(end)
         if b < a:
             raise ReadError("The range ends before it starts.")
+        sdk_warnings: list[str] = []
+
         def page(at: int) -> list[dict[str, Any]]:
-            return [_row(t) for t in self.whales.trades_between(w, at, b, limit=PAGE)]
+            # The SDK warns on its "uselayer" logger when Polymarket couldn't list everything (0.19.0: over 5,000
+            # trades in one second; 0.19.1: stopped at the limit with more listed): kept, and the read is partial.
+            with _sdk_warnings() as caught:
+                rows = [_row(t) for t in self.whales.trades_between(w, at, b, limit=PAGE)]
+            sdk_warnings.extend(caught)
+            return rows
 
         source = "Polymarket activity via uselayer whales.trades_between"
         # A full page (exactly PAGE) may mean more: read on from its last second, dropping the overlap, until a short
@@ -163,6 +193,10 @@ class Reads:
         if not complete:
             out["note"] += (f" Partial: stopped after {len(seen)} trades (of every market) at {iso(read_to)}; "
                             f"nothing after that was read. Ask for a range starting there to see the rest.")  # fmt: skip
+        if sdk_warnings:
+            out["complete"] = False
+            out["sdk_warnings"] = list(dict.fromkeys(sdk_warnings))
+            out["note"] += " Polymarket couldn't list every trade (sdk_warnings): this history is cut short."
         return out
 
     def wallet_profile(self, wallet: str) -> dict[str, Any]:
@@ -259,10 +293,13 @@ class Reads:
         if source == "chainlink":
             pts = self.chainlink(f"{sym.lower()}/usd", a, b)
             if pts is None:
+                why = ("Chainlink wasn't recorded before 10 Nov 05:27 UTC, so these prices don't exist anywhere."
+                       if b < OUTSIDE_FROM else
+                       "Chainlink is recorded from 10 Nov 05:27 UTC, but only a recorded window (window tool) "
+                       "can be read from here.")  # fmt: skip
                 return {"source": "chainlink", "symbol": f"{sym}/USD", "start": a, "end": b, "available": False,
-                        "why": "Chainlink prices exist only where Layer's recorder kept them, and that recording "
-                               "isn't readable from here yet. For a window, its start price (price_to_beat) and "
-                               "final price come from Polymarket (window tool)."}  # fmt: skip
+                        "why": why + " For a window, its start price (price_to_beat) and final price come from "
+                                     "Polymarket (window tool)."}  # fmt: skip
             return {"source": "chainlink (Layer recording of Polymarket's live data feed)", "symbol": f"{sym}/USD",
                     "start": a, "end": b, "available": True, "step": "1 second", "points": pts}  # fmt: skip
         if source != "binance":
