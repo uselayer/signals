@@ -343,6 +343,10 @@ behind Vercel (see README, "Hosting").
   Layer's recordings.
 - Signed in only, and an investigation, its events and charts are only ever its owner's. Costs are capped per
   question, per person and per day (`RESEARCH_*_USD`); raising them is the owner's call.
+- Signed out, `/research` is a teaser (owner, 10 Nov: tease visitors into signing up): what a breakdown is, "Sign in
+  to ask your own", and "Watch a sample breakdown" (`?sample`): the recorded run fixtures mode plays (`fixtures.js`),
+  question locked, no service call and no model spend. The Breakdowns tab carries a dotted accent outline
+  (`class="new"`, main page and research page) for everyone while it's new; taking it off is the owner's call.
 - Keys (`ANTHROPIC_API_KEY`) are set by the owner in the service's variables, never by a session.
 
 ### Research wording (DRAFT, 10 Nov: for the owner to confirm or change)

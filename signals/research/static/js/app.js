@@ -1,6 +1,7 @@
 // The research page (/research): Breakdowns, and one breakdown's workspace (an "investigation" in the code and contract). Routes: #/ (yours, and a new
-// one), #/i/<id> (an investigation). ?fixtures plays recorded data with no service; ?q= prefills a question (the
-// main site's ask bar sends it).
+// one), #/i/<id> (an investigation). ?fixtures plays recorded data with no service; ?sample is the same recorded run
+// for visitors (no sign-in: the signed-out page's "Watch a sample breakdown"); ?signin opens Sign in at once; ?q=
+// prefills a question (the main site's ask bar sends it).
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser } from './api.js';
 import { fixtureApi } from './fixtures.js';
@@ -13,7 +14,7 @@ import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, ce
 
 const LOGO = html`<svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1" /><rect x="8.5" y="7" width="3" height="10" rx="1" /><rect x="14" y="3" width="3" height="14" rx="1" /></svg>`;
 const params = new URLSearchParams(location.search);
-const FIXTURES = params.has('fixtures');
+const SAMPLE = params.has('sample'), FIXTURES = SAMPLE || params.has('fixtures');
 const route = () => { const m = /^#\/i\/([\w-]+)/.exec(location.hash); return m ? { inv: m[1] } : { home: true }; };
 
 function Top({ fixtures }) {
@@ -21,8 +22,9 @@ function Top({ fixtures }) {
   useEffect(() => mountUser(acct.current));
   return html`<header class="top"><div class="in">
     <a class="brand" href="/"><span class="logo">${LOGO}</span>Signals</a>
-    <nav class="tabs" aria-label="Main"><a class="on" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a></nav>
-    <div class="acct">${fixtures ? html`<span class="chip">Fixtures: recorded data, no service</span>` : html`<div ref=${acct}></div>`}</div></div></header>`;
+    <nav class="tabs" aria-label="Main"><a class="on new" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a></nav>
+    <div class="acct">${SAMPLE ? html`<span class="chip">Sample: a recorded breakdown</span><a class="btn sm primary" href="./?signin#/">Sign in to ask your own</a>`
+      : fixtures ? html`<span class="chip">Fixtures: recorded data, no service</span>` : html`<div ref=${acct}></div>`}</div></div></header>`;
 }
 
 function App() {
@@ -34,21 +36,35 @@ function App() {
       const cfg = await a.config();
       if (cfg.event_version > 2) setErr('This page is older than the research service. Reload to get the new one.');
       const au = FIXTURES ? { signedIn: true } : await startAuth(cfg.clerk_key);
-      if (!au.signedIn) { setGate('signin'); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) setGate(null); }); }
+      if (!au.signedIn) { setGate('signin'); if (params.has('signin')) openSignIn(); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) setGate(null); }); }
       setApi(a);
     } catch (e) { setErr(e.message || 'The research service isn\'t reachable.'); }
   })(); }, []);
   return html`<${Hatch} /><${Top} fixtures=${FIXTURES} />
     ${err && html`<div class="home"><div class="banner err"><div><p>${err}</p><p class="small muted" style="margin-top:4px">To see the page with recorded data, open <a class="link" href="?fixtures#/">fixtures mode</a>.</p></div></div></div>`}
     ${!err && !api && html`<div class="home"><p class="muted">Loading…</p></div>`}
-    ${api && gate === 'signin' && html`<div class="home"><h1>Breakdowns</h1><p class="muted">Breakdowns are for signed-in Signals accounts: yours are only ever yours.</p><div><button class="btn primary" onClick=${openSignIn}>Sign in</button></div></div>`}
+    ${api && gate === 'signin' && html`<${Teaser} />`}
     ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} />`)}`;
+}
+
+// Signed out: what a breakdown is, the recorded one to watch (no sign-in, no model run), and Sign in to ask your own.
+function Teaser() {
+  return html`<main class="home teaser">
+    <div style="display:flex;flex-direction:column;gap:10px"><span class="tag new">New</span><h1>Breakdowns</h1>
+      <p class="muted">Paste a wallet or name a trader, then ask in your own words. The agent shows its plan before it reads anything, then lays every trade out on a chart you can replay. Polymarket only; research, no trading.</p></div>
+    <a class="sample-card" href="?sample#/">
+      <span class="muted small">A sample breakdown, recorded</span>
+      <q>Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy.</q>
+      <span class="go">Watch it run →</span></a>
+    <div class="row"><button class="btn primary" onClick=${openSignIn}>Sign in to ask your own</button><a class="btn" href="?sample#/">Watch a sample breakdown</a></div>
+    <p class="muted small">Your breakdowns are only ever yours.</p>
+  </main>`;
 }
 
 function Home({ api }) {
   const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
-  useEffect(() => { api.sessions().then(setList, e => setErr(e.message)); }, []);
+  useEffect(() => { if (!SAMPLE) api.sessions().then(setList, e => setErr(e.message)); }, []);
   const start = async () => {
     if (!q.trim()) return; setBusy(true); setErr(null);
     try {
@@ -60,15 +76,15 @@ function Home({ api }) {
   };
   return html`<main class="home">
     <div style="display:flex;flex-direction:column;gap:10px"><h1>What do you want to find out?</h1>
-      <p class="muted">Paste a wallet or name a trader, then ask in your own words. The agent shows its plan before it reads anything. Polymarket only; research, no trading.</p>
+      <p class="muted">${SAMPLE ? 'This is a sample: a breakdown recorded from a real run, with its question filled in. Press Break it down to watch it plan, read and chart the trades. Sign in to ask your own.' : 'Paste a wallet or name a trader, then ask in your own words. The agent shows its plan before it reads anything. Polymarket only; research, no trading.'}</p>
       <div class="compose-big">
-        <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} onInput=${e => setWallet(e.target.value)} />
-        <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} onInput=${e => setQ(e.target.value)}></textarea>
+        <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => setWallet(e.target.value)} />
+        <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${err && html`<div class="banner err">${err}</div>`}</div>
-    <div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
+    ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
-        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled breakdown'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div><span class="r">Saved</span></a>`)}</div>`}</div>
+        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled breakdown'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div><span class="r">Saved</span></a>`)}</div>`}</div>`}
     <p class="muted small">Later: re-running a breakdown when the wallet trades again, with Telegram alerts, comes after the first version.</p>
   </main>`;
 }
@@ -162,7 +178,8 @@ function Investigation({ api, id }) {
           <p>Re-run it when the wallet trades a new window, and tell you on Telegram when a pattern breaks or something new shows up. Those alerts will count in Signals' 20 a day.</p>
           <p class="muted small">For now the breakdown is saved: reopen it any time from Breakdowns.</p><button class="btn sm" onClick=${() => { ui.laterOpen = false; redraw(); }}>OK</button></div>`}
       </div>
-      ${FIXTURES && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
+      ${SAMPLE && html`<div class="banner sample"><span>A sample breakdown, recorded from a real run: real windows, with the agent's steps played back. <a class="link" href="./?signin#/">Sign in to ask your own.</a></span></div>`}
+      ${FIXTURES && !SAMPLE && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
       <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}
         <button class=${'later ' + (ui.stage === 'later' ? 'on' : '')} onClick=${() => act.stage('later')}>+ New view</button></div>
