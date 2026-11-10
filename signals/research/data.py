@@ -257,8 +257,10 @@ class Reads:
             "tokens": dict(zip(outcomes, tokens, strict=False)),
         }  # fmt: skip
         if recorded:  # Layer's window reader: books, trades, Chainlink and Binance, and its own coverage
-            return out | {k: v for k, v in recorded.items() if v is not None} | {
-                "recording_notes": recording_notes(start, end)}  # fmt: skip
+            merged = out | {k: v for k, v in recorded.items() if v is not None}
+            # coverage has the same keys whichever path read it (the agent's code relies on coverage.source)
+            merged["coverage"] = {"source": recorded.get("source"), **(recorded.get("coverage") or {})}
+            return merged | {"recording_notes": recording_notes(start, end)}
         out["prices"] = {}
         for name, token in out["tokens"].items():  # Polymarket's CLOB history, about 1 point a minute
             pts = self.whales.price_history(token, start - 60, end + 60)

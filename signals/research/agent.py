@@ -302,7 +302,8 @@ class Agent:
             for k in totals:
                 totals[k] += int(u.get(k) or 0)
             state["cost"] = _cost(totals)
-            state["code_runs"] += int((u.get("server_tool_use") or {}).get("code_execution_requests") or 0)
+            # code runs: the response's own code blocks (usage.server_tool_use isn't sent for every tool version)
+            state["code_runs"] += sum(b.get("type") == "server_tool_use" for b in resp.get("content") or [])
             if (resp.get("container") or {}).get("id"):
                 if state["container_from"] is None:
                     state["container_from"] = time.time()
