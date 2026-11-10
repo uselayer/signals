@@ -288,7 +288,8 @@ first used to the end of the question.
 
 Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (required with `RESEARCH_HOSTED=1`),
 `RESEARCH_MAX_USD` per question (3), `RESEARCH_USER_DAILY_USD` (10), `RESEARCH_DAILY_USD` for everyone (30),
-`RESEARCH_AT_ONCE` (2), `RESEARCH_MAX_ROUNDS` (40), `RESEARCH_EFFORT` (high), `SIGNALS_ENGINE_URL`,
+`RESEARCH_AT_ONCE` (2), `RESEARCH_MAX_ROUNDS` (40), `RESEARCH_MAX_SECONDS` per question (600, a wall clock: a
+watchdog ends the run at the limit even while a request is blocked; at 80% the agent is told to answer), `RESEARCH_EFFORT` (high), `SIGNALS_ENGINE_URL`,
 `RESEARCH_METRICS_KEY`, and for Layer's recorded windows a read-only R2 token on `layer-history`: `R2_ACCOUNT_ID`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_BUCKET`, default layer-history).
 
@@ -322,9 +323,21 @@ Each step only when the owner asks (AGENTS.md, "Deploying"). Done on 10 Nov 2026
 5. [x] **Deploy** (first on 10 Nov 08:10 UTC; again for every release). It must build `Dockerfile.research`, never the engine's `Dockerfile`: on 10 Nov an
    upload with only `railway.json` swapped still built `Dockerfile` (Railway ignored its `dockerfilePath`) and ran a
    second copy of the engine, background loops and all, for about 15 minutes. So upload an export whose `Dockerfile`
-   *is* the research one (the service also has `RAILWAY_DOCKERFILE_PATH=Dockerfile.research`):
+   *is* the research one (the service also has `RAILWAY_DOCKERFILE_PATH=Dockerfile.research`).
+   A deploy replaces the container, and a breakdown running in it stops (10 Nov ~17:00 UTC: two deploys cut one off
+   mid-run). So first wait until none is running: `/api/research/health` says `"running": 0` (up to 10 minutes; if
+   it's still busy, don't deploy, try later). A breakdown cut off anyway ends as interrupted, its findings kept as a
+   partial answer: at shutdown, or when the new container starts.
    ```
-   rm -rf /tmp/research-deploy && mkdir /tmp/research-deploy && git archive main | tar -x -C /tmp/research-deploy
+   ok=; for i in $(seq 60); do
+     n=$(curl -fsS https://usesignals.app/api/research/health | python3 -c 'import json,sys; print(json.load(sys.stdin)["running"])')
+     [ "$n" = 0 ] && ok=1 && break; echo "breakdowns running: ${n:-unknown}; waiting"; sleep 10
+   done; [ -n "$ok" ] && echo "none running: deploy now" || echo "still running after 10 min: don't deploy"
+   ```
+   Then, only after "none running" (export from `origin/main`, fetched just now, never a local `main` that may be old):
+   ```
+   cd ~/dev/signals && git fetch origin
+   rm -rf /tmp/research-deploy && mkdir /tmp/research-deploy && git archive origin/main | tar -x -C /tmp/research-deploy
    cd /tmp/research-deploy && cp Dockerfile.research Dockerfile && cp railway.research.json railway.json
    railway up . --path-as-root --project 1fa0df51-dcc0-4870-970d-129224fc3df9 --environment production --service signals-research --ci
    ```

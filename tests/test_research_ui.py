@@ -8,6 +8,9 @@ import json
 import re
 from pathlib import Path
 
+from typing import Any
+
+import pytest
 from fastapi.testclient import TestClient
 
 import research_sample
@@ -15,6 +18,7 @@ from signals.research.server import app
 
 STATIC = Path(__file__).resolve().parent.parent / "signals" / "research" / "static"
 FIX = STATIC / "fixtures"
+SLUG_EX = "btc-updown-15m-1794285000"
 CONTRACT = (Path(__file__).resolve().parent.parent / "docs" / "research-contract.md").read_text()
 
 
@@ -137,3 +141,80 @@ def test_example_questions_teach_without_running_anything() -> None:
     assert "if (isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet)" in pick  # a typed wallet is kept
     assert "!w.trim() || SAMPLE_TRADERS.some(" in js  # only an empty field or a sample wallet is swapped for a card's trader
     assert "${!SAMPLE && html`<div class=\"examples\"" in js  # the locked sample plays one recorded question only
+
+
+def _page_store(run_js_module: str) -> Any:
+    """Runs ``run_js_module`` (a module body with ``S`` = the page's store.js) in Node; returns what it prints."""
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node isn't installed: the page's JavaScript can't be run here")
+    code = f"import * as S from {json.dumps((STATIC / 'js' / 'store.js').as_uri())};\n{run_js_module}"
+    r = subprocess.run([node, "--input-type=module", "-e", code], capture_output=True, text=True, timeout=30, check=False)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def test_the_activity_log_words_each_tools_summary_never_an_object() -> None:
+    """10 Nov: the log read "finding: [object Object]" and "Read its trades: [object Object] (24.4 s)". A tool
+    result's summary is the tool's figures as an object (contract, tool.result): the page words it."""
+    results = [
+        {"tool": "wallet_trades", "ok": True, "rows": 412, "limit_hit": False, "ms": 24400,
+         "summary": {"rows": 412, "windows": 37, "complete": True, "limit_hit": False, "ms": 24400}},
+        {"tool": "finding", "ok": True, "summary": {"finding_id": "F3"}},
+        {"tool": "step_status", "ok": True, "summary": {"step_id": "trades", "status": "done"}},
+        {"tool": "propose_plan", "ok": True, "summary": {"steps": 3}},
+        {"tool": "window", "ok": True, "summary": {"slug": SLUG_EX, "result": "Up", "coverage": {"book": "full"}}},
+        {"tool": "show_windows", "ok": True, "summary": {"rows": 1, "failed": 0}},
+        {"tool": "walkthrough", "ok": True, "summary": {"steps": 4, "number_check": False}},
+        {"tool": "answer", "ok": True, "summary": {"number_check": True}},
+        {"tool": "outside_prices", "ok": True, "summary": {"source": "binance", "available": True, "points": 900}},
+        {"tool": "wallet_trades", "ok": False, "summary": {"error": "That isn't a wallet address."}},
+        {"tool": "some_new_tool", "ok": True, "summary": {"n": 2, "nested": {"a": 1}}},
+        {"tool": "wallet_trades", "ok": True, "summary": "450 fills in 3 windows"},  # the recorded sample's strings
+        {"tool": "code", "ok": True, "stdout": "x", "return_code": 0},
+    ]
+    events = [{"type": "tool.result", "seq": i, "v": 2, "run": 1, "id": f"t{i}", **e} for i, e in enumerate(results)]
+    log = _page_store(f"const inv = S.emptyInv('x'); for (const e of {json.dumps(events)}) S.apply(inv, e, null);\n"
+                      "process.stdout.write(JSON.stringify(inv.log.map(l => l.text)));")
+    assert not [line for line in log if "[object" in line or "undefined" in line], log
+    assert log == [
+        "Read its trades: 412 trades in 37 windows (24.4 s)",
+        "Added a finding: F3",
+        "Updated a step: step trades done",
+        "Proposed a plan: 3 steps",
+        f"Built a window: {SLUG_EX}, ended Up",
+        "Showed windows: 1 window",
+        "Wrote a walkthrough: 4 steps, a number flagged",
+        "Wrote the answer: shown",
+        "Read Binance and Chainlink prices: 900 prices from binance",
+        "Read its trades: failed: That isn't a wallet address.",
+        "some_new_tool: n 2",
+        "Read its trades: 450 fills in 3 windows",
+        "Ran a calculation: done",
+    ]
+
+
+def test_a_reloaded_interrupted_breakdown_shows_where_it_got_to_not_working() -> None:
+    """The events the service writes for a run cut off by a deploy, replayed as a reload does: not running, done, the
+    partial answer and the notice in the column."""
+    events = [
+        {"type": "ask.started", "ask_id": 7, "text": "Go", "context": None},
+        {"type": "tool.call", "id": "t1", "tool": "wallet_trades", "args": {"wallet": "0xab"}, "started_at": 1794300000},
+        {"type": "finding.added", "finding_id": "F1", "label": "observed", "title": "Two-sided in 93 of 94 windows",
+         "counts": True, "number_check": {"passed": True, "flagged": {}}},
+        {"type": "answer.card", "ask_id": 7, "label": "Where the breakdown got to", "partial": True,
+         "observed": ["Two-sided in 93 of 94 windows"], "inferred": [], "annotations": [], "focus": None,
+         "finding_ids": ["F1"], "number_check": {"passed": True, "flagged": {}}},
+        {"type": "notice", "text": "This breakdown was interrupted by an update. Ask again to finish it."},
+        {"type": "done"},
+    ]
+    events = [{"seq": i, "v": 2, "run": 7, **e} for i, e in enumerate(events)]
+    inv = _page_store(f"const inv = S.emptyInv('x'); for (const e of {json.dumps(events)}) S.apply(inv, e, S.emptyUi());\n"
+                      "process.stdout.write(JSON.stringify({running: inv.running, done: inv.done, error: inv.error, "
+                      "feed: inv.feed.map(f => [f.type, f.text || f.label || f.id || null])}));")
+    assert inv["running"] is False and inv["done"] is True and inv["error"] is None
+    assert inv["feed"] == [["ask", "Go"], ["finding", "F1"], ["answer", "Where the breakdown got to"],
+                           ["note", "This breakdown was interrupted by an update. Ask again to finish it."]]

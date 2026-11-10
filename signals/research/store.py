@@ -237,6 +237,18 @@ class Store:
             cols = ", ".join(f"{k} = ?" for k in fields)
             self._q(f"UPDATE runs SET {cols} WHERE id = ?", (*fields.values(), run))  # noqa: S608 (column names are ours)
 
+    def unfinished_runs(self) -> list[dict[str, Any]]:
+        """Runs with no end written: at startup, the ones the last process died in (oldest first)."""
+        return [dict(r) for r in self._q("SELECT id, session, user, started FROM runs WHERE ended IS NULL ORDER BY id")]
+
+    def latest_runs(self, sessions: set[str]) -> dict[str, int]:
+        """Each session's newest run."""
+        if not sessions:
+            return {}
+        marks = ", ".join("?" for _ in sessions)
+        return {r["session"]: r["id"] for r in self._q(
+            f"SELECT session, MAX(id) AS id FROM runs WHERE session IN ({marks}) GROUP BY session", tuple(sessions))}  # noqa: S608 # fmt: skip
+
     def spent_today(self, user: str | None = None) -> float:
         sql, args = "SELECT COALESCE(SUM(cost_usd), 0) FROM runs WHERE day = ?", (day(),)
         if user is not None:
