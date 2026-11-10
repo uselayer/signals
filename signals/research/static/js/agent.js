@@ -37,7 +37,7 @@ function Item({ it, inv, act }) {
     ${it.state === 'open' ? html`<div style="display:flex;gap:6px"><button class="btn sm primary" onClick=${() => act.proposal(it, true)}>${it.accept_label || 'Yes'}</button><button class="btn sm ghost" onClick=${() => act.proposal(it, false)}>Not now</button></div>`
       : html`<p class="muted small">${it.state === 'accepted' ? 'You said yes.' : 'Skipped. Ask anything else below.'}</p>`}</div>`;
   if (it.type === 'plan') { const p = inv.plans[it.plan_id]; if (!p) return null;
-    return html`<div class="proposal"><div class="k">${p.status === 'proposed' ? "This widens the investigation, so here's the plan first" : 'Plan'}</div><p><b>${p.title}</b></p>
+    return html`<div class="proposal"><div class="k">${p.status === 'proposed' ? "This widens the breakdown, so here's the plan first" : 'Plan'}</div><p><b>${p.title}</b></p>
       <ol style="margin:0;padding-left:1.2em;font-size:13.5px;display:flex;flex-direction:column;gap:3px">${p.steps.map(s => html`<li>${s.title}${s.source ? html` <span class="muted">(${s.source})</span>` : ''}</li>`)}</ol>
       ${p.estimate_usd != null && html`<p class="muted small">About ${money(p.estimate_usd)} of model time.</p>`}
       ${p.status === 'proposed' ? html`<div style="display:flex;gap:6px"><button class="btn sm primary" onClick=${() => act.approve(p.plan_id)}>Start</button><button class="btn sm ghost" onClick=${() => act.editPlan(p.plan_id)}>Change the plan</button></div>` : html`<p class="muted small">Started.</p>`}</div>`; }
@@ -123,7 +123,7 @@ function Activity({ inv }) {
       <tr><td>Up/Down order book (Layer's recordings)</td><td>${pc.book.complete} of ${pc.book.total}</td></tr>
       <tr><td>Recording gaps</td><td>${(pc.outage.windows || []).length} window${(pc.outage.windows || []).length === 1 ? '' : 's'}</td></tr></tbody></table>`}
     <h5>Log</h5><div class="log">${inv.log.length ? inv.log.map(l => html`<div><span>${l.at}</span><p class=${l.flagged ? 'flagged' : ''}>${l.text}</p></div>`) : html`<p class="muted">Nothing yet.</p>`}</div>
-    ${inv.usage && inv.usage.cost_usd != null && html`<p class="muted small">This investigation's model and tools so far: ${money(inv.usage.cost_usd)}.</p>`}</div>`;
+    ${inv.usage && inv.usage.cost_usd != null && html`<p class="muted small">This breakdown's model and tools so far: ${money(inv.usage.cost_usd)}.</p>`}</div>`;
 }
 
 function Composer({ inv, ui, act, fixtures }) {
@@ -139,7 +139,7 @@ function Composer({ inv, ui, act, fixtures }) {
     <div class="cbox">
       ${ui.ctx && html`<div><span class="ctx">${ui.ctx.label}<button aria-label="Remove" onClick=${() => act.clearCtx()}>×</button></span></div>`}
       <textarea ref=${ta} id="ask" rows="2" value=${text} disabled=${busy || !ready} aria-label="Ask the agent"
-        placeholder=${busy ? 'The agent is working…' : ui.ctx ? 'Ask about this…' : 'Ask about this investigation, or click anything in it'}
+        placeholder=${busy ? 'The agent is working…' : ui.ctx ? 'Ask about this…' : 'Ask about this breakdown, or click anything in it'}
         onInput=${e => setText(e.target.value)} onKeyDown=${e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}></textarea>
       <div class="row"><span class="muted small">Answers land here and on the chart</span><button class="btn sm primary" disabled=${busy || !ready || !text.trim()} onClick=${() => send()}>Ask</button></div></div></div>`;
 }
