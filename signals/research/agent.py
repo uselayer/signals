@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -22,6 +23,8 @@ from typing import Any
 
 from signals.research import tools as T
 from signals.research import trace
+from signals.research.case import CASE_TOOLS, Case
+from signals.research.case import NAMES as CASE_NAMES
 from signals.research.data import Reads
 from signals.research.store import Store
 
@@ -45,7 +48,8 @@ REBUILT = ("The code sandbox from earlier in this investigation has expired, so 
 BETAS = ["server-side-fallback-2026-07-01", "task-budgets-2026-03-13", "thinking-display-updates-2026-08-18"]
 STDOUT_SHOWN = 4_000  # characters of a code run's output put in its event
 
-EVENT_VERSION = 1
+EVENT_VERSION = 2  # 2: the case file's events (docs/research-contract.md)
+WALLET_IN = re.compile(r"0x[0-9a-fA-F]{40}")
 EVENTS = """start, progress (the agent's notes between steps), code (what it runs), tool_call, tool_result (a
 summary: counts, coverage, errors), code_result (output), chart (a Vega-Lite spec), check (the number check),
 answer, usage, error, done"""
@@ -130,13 +134,13 @@ def _code_output(block: dict[str, Any]) -> dict[str, Any] | None:
 def sources_of(messages: list[dict[str, Any]], system: str = SYSTEM) -> trace.Sources:
     """What numbers in an answer may trace to: the instructions, what the user wrote, every tool result and every
     code run's output. Not the agent's own text, thinking or code (it would vouch for itself)."""
-    s = trace.Sources([system])
+    s = trace.Sources([system], data=False)
     for m in messages:
         content = m["content"] if isinstance(m["content"], list) else [{"type": "text", "text": m["content"]}]
         for b in content:
             t = b.get("type")
             if m["role"] == "user" and t == "text":
-                s.add(b.get("text") or "")
+                s.add(b.get("text") or "", data=False)
             elif t == "tool_result":
                 c = b.get("content")
                 s.add(c if isinstance(c, str) else json.dumps(c))
@@ -173,7 +177,7 @@ class Agent:
     def _request(self, messages: list[dict[str, Any]], container: str | None) -> dict[str, Any]:
         kw: dict[str, Any] = dict(
             model=self.model, max_tokens=MAX_TOKENS, system=SYSTEM, messages=messages,
-            tools=[T.CODE_EXECUTION, *T.TOOLS], thinking={"type": "adaptive", "display": "updates"},
+            tools=[T.CODE_EXECUTION, *T.TOOLS, *CASE_TOOLS], thinking={"type": "adaptive", "display": "updates"},
             output_config={"effort": EFFORT, "task_budget": {"type": "tokens", "total": TASK_BUDGET}},
             cache_control={"type": "ephemeral"}, betas=BETAS, fallbacks="default",
         )  # fmt: skip
@@ -192,7 +196,8 @@ class Agent:
                 raise ContainerGone(str(e)) from e
             raise
 
-    def ask(self, sid: str, user: str, question: str, emit: Callable[[dict[str, Any]], None]) -> None:
+    def ask(self, sid: str, user: str, question: str, emit: Callable[[dict[str, Any]], None], *,
+            context: dict[str, Any] | None = None, origin: str | None = None) -> None:  # fmt: skip
         """Answers ``question`` in session ``sid``, calling ``emit`` with each event as it happens. Every event has
         ``type`` and ``v`` (EVENT_VERSION: a page can tell a shape it doesn't know) and the question's ``run``."""
         run = self.store.start_run(sid, user)
@@ -204,11 +209,16 @@ class Agent:
         totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
         # container_from: when this question's code container was first in use (its time is billed from then).
         state = {"rounds": 0, "tool_calls": 0, "cost": 0.0, "code_runs": 0, "container_from": None}
-        emit({"type": "start", "question": question})
+        if not self.store.messages(sid):  # the investigation's first question
+            w = WALLET_IN.search(question)
+            emit({"type": "investigation.created", "id": sid, "title": question[:120], "question": question,
+                  "subject": {"wallet": w.group(0).lower() if w else None, "name": None}, "scope": None,
+                  "origin": origin})  # fmt: skip
+        emit({"type": "ask.started", "ask_id": run, "text": question, "context": context})
         try:
             if self.store.spent_today() >= DAILY_USD or self.store.spent_today(user) >= USER_DAILY_USD:
                 raise OverBudget("Research has reached today's limit. It resets at 00:00 UTC.")
-            ok = self._ask(sid, question, emit, totals, state)
+            ok = self._ask(sid, run, question, emit, totals, state)
             self.store.update_run(run, check_ok=int(ok))
         except OverBudget as e:
             emit({"type": "error", "message": str(e)})
@@ -237,16 +247,24 @@ class Agent:
             print(f"research: run {run} session {sid} {json.dumps(usage)}", flush=True)
             emit({"type": "done"})
 
-    def _ask(self, sid: str, question: str, emit: Callable[[dict[str, Any]], None],
+    def _ask(self, sid: str, run: int, question: str, emit: Callable[[dict[str, Any]], None],
              totals: dict[str, int], state: dict[str, Any]) -> bool:  # fmt: skip
         session = self.store.session_any(sid) or {}
         container = session.get("container")
         messages = self.store.messages(sid)
         if not messages:
             self.store.set_title(sid, question[:120])
-        user_msg = {"role": "user", "content": [{"type": "text", "text": question}]}
-        messages.append(user_msg)
-        self.store.add_message(sid, "user", user_msg["content"])
+        text = {"type": "text", "text": question}
+        last = messages[-1] if messages else None
+        if last and last["role"] == "user" and isinstance(last["content"], list) and last["content"] \
+                and all(b.get("type") == "tool_result" for b in last["content"]):  # fmt: skip
+            # The last run ended on a tool's result (a plan waiting for Start): the user's words join that turn.
+            last["content"].append(text)
+            self.store.replace_last_message(sid, last["content"])
+        else:
+            messages.append({"role": "user", "content": [text]})
+            self.store.add_message(sid, "user", [text])
+        case = Case(sid, run, self.store, self.reads, emit, lambda: sources_of(messages))
 
         def rebuild() -> None:
             """A new container: the old one expired. Say so, and tell the agent to read again what it needs."""
@@ -294,7 +312,7 @@ class Agent:
             content = resp.get("content") or []
             messages.append({"role": "assistant", "content": content})
             self.store.add_message(sid, "assistant", content)
-            self._emit_blocks(content, emit)
+            self._emit_blocks(run, content, emit)
             stop = resp.get("stop_reason")
             if stop == "refusal":
                 emit({"type": "error", "message": "The model declined this request."})
@@ -303,44 +321,50 @@ class Agent:
                 continue
             pending = [b for b in content if b.get("type") == "tool_use"]
             if stop == "tool_use" and pending:
-                results = self._run_tools(sid, pending, emit, state)
+                results = self._run_tools(sid, case, pending, emit, state)
                 messages.append({"role": "user", "content": results})
                 self.store.add_message(sid, "user", results, hidden=True)
+                if case.waiting:  # a plan is on the page: the next run starts when the user presses Start
+                    return True
                 continue
             # The turn's answer: its text after the last code run or tool call.
-            last = max((i for i, b in enumerate(content) if b.get("type") != "text"), default=-1)
-            answer = "\n\n".join(b.get("text") or "" for b in content[last + 1 :] if b.get("type") == "text").strip()
-            check = trace.check(answer, sources_of(messages))
-            if not check["ok"] and not retried:
+            last_i = max((i for i, b in enumerate(content) if b.get("type") != "text"), default=-1)
+            answer = "\n\n".join(b.get("text") or "" for b in content[last_i + 1 :] if b.get("type") == "text").strip()
+            src = sources_of(messages)
+            flags = trace.flagged(answer, src)
+            if flags and not retried:
                 retried = True
-                emit({"type": "check", **check, "retrying": True})
                 note = ("Signals' number check: these numbers in your answer aren't in any tool result or printed "
-                        f"output: {', '.join(check['unmatched'])}. Print each figure you state from your code (or "
-                        "drop it), then give the whole answer again.")  # fmt: skip
+                        f"output: {', '.join(f['value_text'] for f in flags)}. Print each figure you state from your "
+                        "code (or drop it), then give the whole answer again.")  # fmt: skip
                 fix = {"role": "user", "content": [{"type": "text", "text": note}]}
                 messages.append(fix)
                 self.store.add_message(sid, "user", fix["content"], hidden=True)
                 continue
-            emit({"type": "check", **check, "retrying": False})
-            emit({"type": "answer", "text": answer, "unverified": check["unmatched"], "truncated": stop == "max_tokens"})
-            return bool(check["ok"])
+            if answer:
+                emit({"type": "answer.card", "ask_id": run, "text": answer, "truncated": stop == "max_tokens",
+                      "number_check": {"passed": not flags, "flagged": {"text": flags} if flags else {}}})  # fmt: skip
+            return not flags
 
-    def _emit_blocks(self, content: list[dict[str, Any]], emit: Callable[[dict[str, Any]], None]) -> None:
+    def _emit_blocks(self, run: int, content: list[dict[str, Any]], emit: Callable[[dict[str, Any]], None]) -> None:
+        """The agent's notes and its code runs, as they appear in a response."""
         for b in content:
             t = b.get("type")
             if t == "thinking" and (b.get("thinking") or "").strip():
-                emit({"type": "progress", "text": b["thinking"]})
+                emit({"type": "answer.progress", "ask_id": run, "text": b["thinking"]})
             elif t == "server_tool_use":
                 inp = b.get("input") or {}
-                emit({"type": "code", "id": b.get("id"), "code": inp.get("code") or inp.get("command") or json.dumps(inp)})
+                emit({"type": "tool.call", "id": b.get("id"), "tool": "code", "started_at": time.time(),
+                      "args": {"code": inp.get("code") or inp.get("command") or json.dumps(inp)}})  # fmt: skip
             elif (out := _code_output(b)) is not None:
-                emit({"type": "code_result", "id": b.get("tool_use_id"), **out,
+                emit({"type": "tool.result", "id": b.get("tool_use_id"), "tool": "code",
+                      "ok": out["return_code"] in (0, None) and not out["error"], **out,
                       "stdout": out["stdout"][:STDOUT_SHOWN], "cut": len(out["stdout"]) > STDOUT_SHOWN})  # fmt: skip
 
-    def _run_tools(self, sid: str, pending: list[dict[str, Any]], emit: Callable[[dict[str, Any]], None],
+    def _run_tools(self, sid: str, case: Case, pending: list[dict[str, Any]], emit: Callable[[dict[str, Any]], None],
                    state: dict[str, Any]) -> list[dict[str, Any]]:  # fmt: skip
-        """Runs the tool calls the agent's code is waiting on, at once, and returns their results in order. A result
-        answering code's call must be text only (programmatic tool calling)."""
+        """Runs the tool calls the agent (or its code) is waiting on, at once, and returns their results in order. A
+        result answering code's call must be text only (programmatic tool calling)."""
         charts: list[dict[str, Any]] = []
 
         def save(title: str, spec: dict[str, Any], caption: str | None) -> str:
@@ -348,16 +372,23 @@ class Agent:
             charts.append({"type": "chart", "chart_id": cid, "title": title, "caption": caption, "spec": spec})
             return cid
 
+        def one(b: dict[str, Any]) -> tuple[str, bool, dict[str, Any]]:
+            name, inp = b.get("name", ""), b.get("input") or {}
+            if name in CASE_NAMES:
+                return case.handle(name, inp)
+            return T.run(name, inp, self.reads, save, store=self.store, sid=sid)
+
         for b in pending:
-            emit({"type": "tool_call", "id": b.get("id"), "name": b.get("name"),
-                  "input": {k: v for k, v in (b.get("input") or {}).items() if k != "spec"}})  # fmt: skip
-        futures = [self.pool.submit(T.run, b.get("name", ""), b.get("input") or {}, self.reads, save,
-                                    store=self.store, sid=sid) for b in pending]  # fmt: skip
+            emit({"type": "tool.call", "id": b.get("id"), "tool": b.get("name"), "started_at": time.time(),
+                  "args": {k: v for k, v in (b.get("input") or {}).items() if k not in ("spec", "steps")}})  # fmt: skip
+        futures = [self.pool.submit(one, b) for b in pending]
         results = []
         for b, f in zip(pending, futures, strict=True):
             text, failed, summary = f.result()
             state["tool_calls"] += 1
-            emit({"type": "tool_result", "id": b.get("id"), "name": b.get("name"), "ok": not failed, **summary})
+            emit({"type": "tool.result", "id": b.get("id"), "tool": b.get("name"), "ok": not failed,
+                  "rows": summary.get("rows"), "limit_hit": summary.get("limit_hit"), "ms": summary.get("ms"),
+                  "summary": summary})  # fmt: skip
             r: dict[str, Any] = {"type": "tool_result", "tool_use_id": b["id"], "content": text}
             if failed:
                 r["is_error"] = True

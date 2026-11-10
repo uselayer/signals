@@ -301,6 +301,9 @@ def test_a_window_replay_from_a_recording() -> None:
     assert s["entries"][0] == {"t": LATE + 12, "side": "Up", "action": "buy"} and s["first_entry_s"] == 12
     assert s["result"] == "Down" and s["payout"] == 6 and s["cost"] == round(6.2 + 2.05 + 2.28, 2)
     assert s["profit"] == round(6 + 2.8 - (6.2 + 2.05 + 2.28), 2) and s["coverage"]["chainlink"] == "full"
+    # cost is what the fills say was paid (Polymarket's usd), not shares × the rounded price
+    r["trades"][0]["usd"] = 6.31
+    assert WS.summary(r)["cost"] == round(6.31 + 2.05 + 2.28, 2)
     cov = r["coverage"]
     assert cov["missing_seconds"] == [[1794199514, 2.4]]
     assert cov["lost"][0]["why"] == "The recorder's connection dropped and reconnected"
@@ -498,14 +501,20 @@ def test_a_tool_call_from_code_and_a_traced_answer() -> None:
     model = _model(_calls_tool(), _answers("Observed: 3 trades in 2 windows at 42¢ on average."))
     events, store, sid = _ask(model)
     kinds = [e["type"] for e in events]
-    assert kinds == ["start", "progress", "code", "tool_call", "tool_result", "code_result", "check", "answer", "usage", "done"]
+    assert kinds == ["investigation.created", "ask.started", "answer.progress", "tool.call", "tool.call", "tool.result",
+                     "tool.result", "answer.card", "usage", "done"]  # fmt: skip
+    created = events[0]
+    assert created["subject"] == {"wallet": None, "name": None} and created["question"] == "Analyze it"
+    code_call, data_call = events[3], events[4]
+    assert code_call["tool"] == "code" and data_call["tool"] == "wallet_trades"
+    data_result = [e for e in events if e["type"] == "tool.result" and e["tool"] == "wallet_trades"][0]
+    assert data_result["rows"] == 3 and data_result["limit_hit"] is False
     second = model.requests[1]
     assert second["container"] == "cont_1"  # the paused code's container
     assert [b["type"] for b in second["messages"][-1]["content"]] == ["tool_result"]  # only tool results
     assert json.loads(second["messages"][-1]["content"][0]["content"])["count"] == 3
     assert model.requests[0]["tools"][0] == T.CODE_EXECUTION and model.requests[0]["fallbacks"] == "default"
-    answer = events[kinds.index("answer")]
-    assert answer["unverified"] == [] and events[kinds.index("check")]["ok"]
+    assert events[kinds.index("answer.card")]["number_check"] == {"passed": True, "flagged": {}}
     run = store.runs()[0]
     assert run["check_ok"] == 1 and run["rounds"] == 2 and run["tool_calls"] == 1 and run["code_runs"] == 1
     assert run["container_s"] == A.CONTAINER_MIN_S  # used: billed 5 minutes at least
@@ -545,7 +554,7 @@ def test_an_expired_container_is_rebuilt_and_said() -> None:
     assert [r.get("container") for r in model.requests] == ["cont_old", None]
     retry = model.requests[1]["messages"]
     assert retry[-2]["content"][0]["text"] == "And the windows?" and retry[-1] == {"role": "system", "content": A.REBUILT}
-    assert [e["type"] for e in events if e["type"] in ("notice", "answer", "error")] == ["notice", "answer"]
+    assert [e["type"] for e in events if e["type"] in ("notice", "answer.card", "error")] == ["notice", "answer.card"]
     assert store.session(sid, "u1")["container"] == "cont_1"  # type: ignore[index]
     # the note stays in the conversation (hidden), so the next follow-up replays it in place
     assert {"role": "system", "content": A.REBUILT} in store.messages(sid)
@@ -580,17 +589,18 @@ def test_other_api_errors_are_not_mistaken_for_an_expired_container() -> None:
 def test_an_untraced_number_gets_one_retry() -> None:
     model = _model(_calls_tool(), _answers("It made $99.99."), _answers("Observed: 3 trades."))
     events, _, _ = _ask(model)
-    checks = [e for e in events if e["type"] == "check"]
-    assert checks[0]["unmatched"] == ["$99.99"] and checks[0]["retrying"] and checks[1]["ok"]
     assert "$99.99" in model.requests[2]["messages"][-1]["content"][0]["text"]
-    assert [e for e in events if e["type"] == "answer"][0]["text"] == "Observed: 3 trades."
+    cards = [e for e in events if e["type"] == "answer.card"]
+    assert len(cards) == 1 and cards[0]["text"] == "Observed: 3 trades." and cards[0]["number_check"]["passed"]
 
 
 def test_still_untraced_after_the_retry_is_shown_flagged() -> None:
     model = _model(_calls_tool(), _answers("It made $99.99."), _answers("It made $98.00."))
     events, store, _ = _ask(model)
-    answer = [e for e in events if e["type"] == "answer"][0]
-    assert answer["unverified"] == ["$98.00"] and store.runs()[0]["check_ok"] == 0
+    card = [e for e in events if e["type"] == "answer.card"][0]
+    assert card["number_check"] == {"passed": False, "flagged": {"text": [
+        {"value_text": "$98.00", "start": 8, "end": 14, "data_value": None}]}}  # fmt: skip
+    assert store.runs()[0]["check_ok"] == 0
 
 
 def test_the_per_question_budget_stops_a_long_run(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -610,6 +620,81 @@ def test_the_daily_limit_asks_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_a_refusal_ends_with_a_sentence() -> None:
     events, _, _ = _ask(_model({"stop_reason": "refusal", "usage": USAGE, "content": []}))
     assert [e["message"] for e in events if e["type"] == "error"] == ["The model declined this request."]
+
+
+# ---- the case file's tools ----
+
+
+def _direct(name: str, inp: dict[str, Any], tid: str = "tu_d") -> dict[str, Any]:
+    return {"type": "tool_use", "id": tid, "name": name, "input": inp, "caller": {"type": "direct"}}
+
+
+def _turn(*blocks: dict[str, Any], stop: str = "tool_use") -> dict[str, Any]:
+    return {"stop_reason": stop, "usage": USAGE, "content": list(blocks)}
+
+
+def test_a_plan_waits_for_start_and_start_continues_the_same_turn() -> None:
+    plan = {"title": "How it trades BTC 15m", "scope": {"wallet": W, "family": "btc-updown-15m"},
+            "steps": [{"id": "trades", "title": "Read its trades", "source": "Polymarket trades", "estimate_s": 20}]}  # fmt: skip
+    model = _model(_turn(_direct("propose_plan", plan)), _answers("Observed: 3 trades."))
+    events, store, sid = _ask(model, f"How does {W} trade?")
+    assert len(model.requests) == 1  # the run ended on the plan
+    p = [e for e in events if e["type"] == "plan.proposed"][0]
+    assert p["needs_approval"] and p["steps"][0]["id"] == "trades" and p["ask_id"] == events[0]["run"]
+    assert events[0]["type"] == "investigation.created" and events[0]["subject"]["wallet"] == W
+    assert store.session_any(sid)["wallet"] == W  # type: ignore[index]
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "Start", lambda e: None)  # type: ignore[arg-type]
+    last = model.requests[1]["messages"][-1]
+    assert [b["type"] for b in last["content"]] == ["tool_result", "text"] and last["content"][1]["text"] == "Start"
+
+
+def test_a_walkthrough_with_an_untraced_number_fails_once_then_shows_it_flagged() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    fill = _wallet_fill("0xa", LATE + 12, 0.62, 10)
+    store.add_trades(sid, [fill])
+    store.put_window(sid, LATE_SLUG, read=_recorded_read())
+    step = {"t": LATE + 12, "title": "It buys Up", "observed": "It bought 10 shares at 62¢, 12 s in.",
+            "inferred": None, "trade_ids": [fill["id"]]}  # fmt: skip
+    bad = {**step, "observed": "It bought 10 shares at 64¢, 12 s in."}
+    events: list[dict[str, Any]] = []
+    src = trace.Sources(['{"shares": 10, "price": 0.62, "s_in": 12}'])
+    case = __import__("signals.research.case", fromlist=["Case"]).Case(sid, 1, store, FakeCaseReads(), events.append, lambda: src)
+    text, failed, _ = case.handle("walkthrough", {"window_id": LATE_SLUG, "steps": [bad]})
+    assert failed and "64¢" in text and "closest in the data: 62" in text and not events
+    text, failed, _ = case.handle("walkthrough", {"window_id": LATE_SLUG, "steps": [bad]})
+    wt = [e for e in events if e["type"] == "walkthrough.ready"][0]
+    flag = wt["steps"][0]["number_check"]["flagged"]["observed"][0]
+    at = bad["observed"].index("64¢")
+    assert flag == {"value_text": "64¢", "start": at, "end": at + 3, "data_value": 62.0}
+    assert bad["observed"][flag["start"]:flag["end"]] == "64¢"
+    assert [e["type"] for e in events] == ["window.ready", "walkthrough.ready"]  # the replay first, once
+    text, failed, _ = case.handle("walkthrough", {"window_id": LATE_SLUG, "steps": [{**step, "trade_ids": ["nope"]}]})
+    assert failed and "aren't the wallet's fills" in text
+
+
+def test_show_windows_and_focus() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.set_wallet(sid, W)
+    events: list[dict[str, Any]] = []
+    from signals.research.case import Case
+
+    case = Case(sid, 1, store, FakeCaseReads(), events.append, lambda: trace.Sources())
+    text, failed, summary = case.handle("show_windows", {"window_ids": [LATE_SLUG], "tags": {LATE_SLUG: {"jump": 1}}})
+    out = json.loads(text)
+    assert not failed and out["windows"][0]["fills"] == 1 and "spark" not in out["windows"][0] and summary["rows"] == 1
+    assert [e["type"] for e in events] == ["window.summary", "coverage"]
+    assert events[0]["entries"] == [{"t": LATE + 12, "side": "Up", "action": "buy"}]
+    case.handle("focus", {"stage": "window", "window_id": LATE_SLUG, "step_index": 0, "label": "The clearest one"})
+    case.handle("focus", {"stage": "window", "window_id": LATE_SLUG, "step_index": 1})
+    kinds = [e["type"] for e in events[2:]]
+    assert kinds == ["window.ready", "view.focus", "view.focus"] and events[2]["tags"] == {"jump": 1}
+    assert events[3]["step_index"] == 0 and events[3]["label"] == "The clearest one"
+    assert case.handle("focus", {"stage": "nowhere"})[1]
+    assert case.handle("step_status", {"step_id": "trades", "status": "done", "summary": "94 windows"})[0] == "ok"
+    assert json.loads(case.handle("propose", {"text": "Next, I'd look at the losing windows"})[0])["proposal_id"] == "P1"
 
 
 # ---- the server ----
@@ -694,5 +779,5 @@ def test_the_request_through_the_real_anthropic_sdk() -> None:
     assert b["tools"][0] == T.CODE_EXECUTION and b["tools"][1]["allowed_callers"] == [T.CALLER]
     assert b["stream"] is True and [m["role"] for m in b["messages"]] == ["user", "assistant", "user", "system"]
     assert all(x in sent["beta"] for x in A.BETAS)
-    assert [e for e in events if e["type"] == "answer"][0]["text"] == "Observed: 3 trades."
+    assert [e for e in events if e["type"] == "answer.card"][0]["text"] == "Observed: 3 trades."
     assert store.session(sid, "u1")["container"] == "cont_9"  # type: ignore[index]

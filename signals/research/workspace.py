@@ -183,8 +183,12 @@ def summary(r: dict[str, Any]) -> dict[str, Any]:
     of shares still held at the end ($1 each on the winning side); merges and redemptions aren't in the fills."""
     fs = r["trades"]
     buys = [f for f in fs if f["action"] == "buy"]
-    cost = sum(f["shares"] * f["price"] for f in buys)
-    back = sum(f["shares"] * f["price"] for f in fs if f["action"] == "sell")
+
+    def paid(f: dict[str, Any]) -> float:  # what Polymarket says changed hands; its price is rounded
+        return float(f["usd"]) if f.get("usd") is not None else f["shares"] * f["price"]
+
+    cost = sum(paid(f) for f in buys)
+    back = sum(paid(f) for f in fs if f["action"] == "sell")
     held = r["position"][-1] if r["position"] else {"up": 0.0, "down": 0.0}
     payout = None
     if r.get("result") in ("Up", "Down"):

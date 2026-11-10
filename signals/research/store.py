@@ -113,6 +113,11 @@ class Store:
             seq = self._db.execute("SELECT COALESCE(MAX(seq), -1) + 1 FROM messages WHERE session = ?", (sid,)).fetchone()[0]
             self._db.execute("INSERT INTO messages VALUES (?, ?, ?, ?, ?)", (sid, seq, role, json.dumps(content), int(hidden)))
 
+    def replace_last_message(self, sid: str, content: Any) -> None:
+        """The conversation's last message, with new content (the user's words joining a tool's result)."""
+        self._q("UPDATE messages SET content = ? WHERE session = ? AND seq = "
+                "(SELECT MAX(seq) FROM messages WHERE session = ?)", (json.dumps(content), sid, sid))  # fmt: skip
+
     # ---- events ----
 
     def add_event(self, sid: str, event: dict[str, Any]) -> int:
