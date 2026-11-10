@@ -29,18 +29,29 @@ let sid = null, after = -1;
 const log = document.getElementById('log');
 const post = (u, b) => fetch(u, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(b)});
 function add(cls, text) { const d = document.createElement('div'); d.className = 'ev ' + cls; d.textContent = text; log.append(d); d.scrollIntoView({block: 'nearest'}); return d; }
+// Events v2 (docs/research-contract.md), drawn as a plain log: the real workspace is signals/research/static/.
+const flagged = nc => Object.values((nc || {}).flagged || {}).flat().map(f => f.value_text);
 function show(e) {
-  if (e.type === 'start') add('answer', 'Q: ' + e.question);
-  else if (e.type === 'progress') add('progress', e.text);
-  else if (e.type === 'code') add('code', e.code);
-  else if (e.type === 'code_result') add('code_result', (e.stdout || '') + (e.stderr ? '\nstderr: ' + e.stderr : ''));
-  else if (e.type === 'tool_call') add('tool_call', '→ ' + e.name + ' ' + JSON.stringify(e.input));
-  else if (e.type === 'tool_result') add('tool_result', '← ' + e.name + ' ' + JSON.stringify(Object.fromEntries(Object.entries(e).filter(([k]) => !['type', 'id', 'name', 'seq'].includes(k)))));
-  else if (e.type === 'chart') { const d = add('chart', e.title + (e.caption ? ' · ' + e.caption : '')); const c = document.createElement('div'); d.append(c); vegaEmbed(c, e.spec, {actions: false}).catch(err => c.textContent = String(err)); }
-  else if (e.type === 'check') add('check', e.ok ? `Numbers checked: all ${e.checked} trace to data.` : `Numbers not found in the data: ${e.unmatched.join(', ')}` + (e.retrying ? ' (asking the agent to fix them)' : ''));
-  else if (e.type === 'answer') add('answer', e.text + (e.unverified.length ? '\n\nUnverified: ' + e.unverified.join(', ') : ''));
-  else if (e.type === 'usage') add('usage', `${e.rounds} model calls · ${e.tool_calls} tool calls · ${e.input_tokens} in + ${e.cache_read_input_tokens} cached + ${e.output_tokens} out tokens · $${e.cost_usd}`);
-  else if (e.type === 'error') add('error', e.message);
+  const t = e.type;
+  if (t === 'ask.started') add('answer', 'Q: ' + e.text);
+  else if (t === 'answer.progress') add('progress', e.text);
+  else if (t === 'tool.call' && e.tool === 'code') add('code', e.args.code);
+  else if (t === 'tool.call') add('tool_call', '→ ' + e.tool + ' ' + JSON.stringify(e.args));
+  else if (t === 'tool.result' && e.tool === 'code') add('code_result', (e.stdout || '') + (e.stderr ? '\nstderr: ' + e.stderr : ''));
+  else if (t === 'tool.result') add('tool_result', '← ' + e.tool + (e.ok ? '' : ' failed') + ' ' + JSON.stringify(e.summary));
+  else if (t === 'plan.proposed') add('answer', 'Plan: ' + e.title + '\n' + e.steps.map(s => '· ' + s.title + ' (' + s.source + ')').join('\n') + '\n(type "Start" to run it)');
+  else if (t === 'step.status') add('tool_result', `step ${e.step_id}: ${e.status}${e.summary ? ' · ' + e.summary : ''}`);
+  else if (t === 'window.summary') add('tool_result', `tile ${e.window_id}: ${e.result}, ${e.entries.length} fills, profit $${e.profit}`);
+  else if (t === 'coverage') add('check', 'coverage ' + JSON.stringify(e.per_source));
+  else if (t === 'window.ready') add('tool_result', `replay ${e.window_id}: ${e.trades.length} fills, book ${e.coverage.book}, chainlink ${e.coverage.chainlink}`);
+  else if (t === 'view.focus') add('progress', `→ ${e.stage} ${e.window_id || ''} ${e.label || ''}`);
+  else if (t === 'walkthrough.ready') add('answer', e.window_id + '\n' + e.steps.map(s => `${s.index + 1}. ${s.title}\n   Observed: ${s.observed}` + (s.inferred ? `\n   Inferred: ${s.inferred}` : '') + (s.number_check.passed ? '' : `\n   Unverified: ${flagged(s.number_check).join(', ')}`)).join('\n'));
+  else if (t === 'proposal') add('check', `${e.proposal_id}: ${e.text}`);
+  else if (t === 'chart') { const d = add('chart', e.title + (e.caption ? ' · ' + e.caption : '')); const c = document.createElement('div'); d.append(c); vegaEmbed(c, e.spec, {actions: false}).catch(err => c.textContent = String(err)); }
+  else if (t === 'answer.card') add('answer', e.text + (e.number_check.passed ? '' : '\n\nUnverified: ' + flagged(e.number_check).join(', ')));
+  else if (t === 'notice') add('check', e.text);
+  else if (t === 'usage') add('usage', `${e.rounds} model calls · ${e.tool_calls} tool calls · ${e.input_tokens} in + ${e.cache_read_input_tokens} cached + ${e.output_tokens} out tokens · $${e.cost_usd} (container ${e.container_s} s)`);
+  else if (t === 'error') add('error', e.message);
 }
 function follow() {
   const es = new EventSource(`/api/research/sessions/${sid}/events?after=${after}`);
