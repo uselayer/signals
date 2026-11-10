@@ -283,8 +283,16 @@ def card(run_js: Any, r: dict[str, Any], of: int, *opened: str) -> str:
     return run_js(ROW, f"({adds}agreeCard({json.dumps(r)}, {of}))")  # type: ignore[no-any-return]
 
 
+def ago(days_ago: float) -> datetime:
+    """``days_ago`` back as the page counts it: whole days by the viewer's calendar (same clock time, so "1" is
+    always yesterday, even across a clock change, when a day is 23 or 25 hours), the rest in real time."""
+    whole = int(days_ago)
+    day = (datetime.now().replace(microsecond=0) - timedelta(days=whole)).astimezone()  # local clock time, then aware
+    return day - timedelta(days=days_ago - whole)
+
+
 def iso(days_ago: float) -> str:
-    return (datetime.now(UTC) - timedelta(days=days_ago)).isoformat()
+    return ago(days_ago).astimezone(UTC).isoformat()
 
 
 def test_an_agreement_card_is_a_row_per_trader_with_their_money_and_last_move_and_never_a_wallet(run_js: Any) -> None:
@@ -297,7 +305,7 @@ def test_an_agreement_card_is_a_row_per_trader_with_their_money_and_last_move_an
                        "story": {"last": {"action": "buy", "usd": 7736, "at": iso(60)}, "opened": None, "bought": None, "sold": None}},
              holder | {"wallet": E, "name": None, "worth": 120, "share": 0.0005, "story": None}]}  # fmt: skip
     html = card(run_js, r, 3)
-    old = (datetime.now(UTC) - timedelta(days=60)).astimezone()  # the page writes the day in the viewer's time
+    old = ago(60)  # the page writes the day in the viewer's time
     for said in ("2026 Balance of Power: D Senate, D House", "69¢", "Market price now", "Yes", "2 of 3 agree",
                  "BreakTheBank", "$207K", "Sold yesterday", "gopfan2", "$34.3K", f"Bought {old:%b} {old.day}",
                  "Trader 0xee…ee", "86% of the money on this side", "width:86%", "width:2%"):  # fmt: skip
@@ -345,7 +353,7 @@ def test_a_cards_line_says_whose_money_it_is_how_much_and_what_they_did_last(run
         "Mostly BreakTheBank's money: $207K of the $242K on Yes. They sold $20.8K of it yesterday.")
     assert line({"kind": "mostly", "wallets": [B]}, 39972, [h(*btb, 38925, "buy", 40050, 1, opened=True), h(*gop, 1047, "buy", 256, 205)]) == (
         "Mostly BreakTheBank's money: $38.9K of the $40K on Yes. They put it all in yesterday.")
-    began = (datetime.now(UTC) - timedelta(days=3)).astimezone()  # a run of buys over days: since when, not "just now"
+    began = ago(3)  # a run of buys over days: since when, not "just now"
     assert line({"kind": "mostly", "wallets": [B]}, 49200, [h(*btb, 41600, "buy", 30460, 0.004, since=3), h(*gop, 7600, "buy", 2301, 23)]) == (
         f"Mostly BreakTheBank's money: $41.6K of the $49.2K on Yes. They have added $30.5K since {began:%b} {began.day}.")
     assert line({"kind": "led", "wallets": [B]}, 40379, [h(*btb, 28060, "buy", 43, 0.04), h(*gop, 12319, "buy", 11, 23)], "No") == (
