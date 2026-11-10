@@ -179,7 +179,24 @@ def build() -> dict[str, Any]:
         {"type": "usage", "cost_usd": 0.41, "rounds": 6, "tool_calls": 3 + n},
         {"type": "done"},
     ]
+    fixed_title = f"Spends more on Up than on Down: {money(up_cost)} on Up, {money(dn_cost)} on Down"
     asks = {
+        # "Ask the agent to fix it" on the flagged F5 sends this (askFix in static/js/app.js): the sample's own fix,
+        # from the same fills, so a visitor sees a failed number check end in a corrected card.
+        "Fix the number that didn't match the data in this finding.": [
+            {"type": "answer.progress", "text": "Adding up its buys by side from the fills."},
+            {"type": "finding.updated", "finding_id": "F5", "kind": "pattern", "label": "observed", "title": fixed_title,
+             "stat": None, "rule": "The fills' usd, buys only, by side.",
+             "evidence": {"supporting_window_ids": ids, "against_window_ids": [], "trade_ids": []},
+             "example": None, "based_on": [], "would_change_mind": None,
+             "number_check": {"passed": True, "flagged": {}}, "counts": True, "sample_note": None,
+             "previous": {"title": wrong_title, "stat": None}},
+            {"type": "answer.card", "label": "F5 fixed",
+             "observed": [f"Over these {n} windows its buys came to {money(up_cost)} on Up and {money(dn_cost)} on Down "
+                          "(the fills' usd). F5 said $1,190.00 on Up; it now says " + money(up_cost) + "."],
+             "inferred": [], "annotations": [], "focus": None, "finding_ids": ["F5"],
+             "number_check": {"passed": True, "flagged": {}}},
+            {"type": "done"}],
         "Why does it buy below the asking price?": [
             {"type": "answer.progress", "text": "Counting its fills against the recorded book."},
             {"type": "answer.card", "label": "How its fills compare with the asking price",
