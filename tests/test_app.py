@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -291,7 +292,7 @@ def test_signals_reads_polymarket_only_unless_kalshi_is_switched_on(
     monkeypatch.setattr(engine, "SKILL_TEST", False)  # the default: the Leaderboard
     assert api.get("/api/config").json() == {
         "venues": ["polymarket"], "clerk_key": None, "alerts": False, "explore": False, "leaderboard": True,
-        "why": False, "posthog_key": None}
+        "why": False, "research": False, "posthog_key": None}
     api.get("/api/trading-now")
     api.get("/api/top")  # "all" means the venues Signals reads
     assert api.get("/api/top?venue=kalshi").status_code == 404
@@ -300,6 +301,20 @@ def test_signals_reads_polymarket_only_unless_kalshi_is_switched_on(
     assert asked == [("big", ("polymarket",)), ("top", "polymarket")]  # Kalshi was never asked for
     with_kalshi(monkeypatch)  # SIGNALS_VENUES=polymarket,kalshi
     assert api.get("/api/config").json()["venues"] == ["polymarket", "kalshi"]
+
+
+def test_breakdowns_stay_hidden_until_research_is_switched_on(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The tab, the ask bar and the phone tab open /research, which 404s until the research service and its Vercel
+    # rewrites are live: hidden by default, shown by the page only when /api/config says research (SIGNALS_RESEARCH=1).
+    assert api.get("/api/config").json()["research"] is False
+    page = api.get("/").text
+    links = re.findall(r"<(?:a|form)\b[^>]*/research/[^>]*>", page)
+    assert len(links) == 3 and all("data-research" in t and " hidden" in t for t in links), links
+    assert "[data-research][hidden] { display: none !important; }" in page
+    assert 'if (c.research) document.querySelectorAll("[data-research]")' in page
+    assert ">Breakdowns</a>" in page and 'aria-label="Ask in Breakdowns"' in page and "Investigations<" not in page
+    monkeypatch.setattr(engine, "RESEARCH_ON", True)
+    assert api.get("/api/config").json()["research"] is True
 
 
 def test_analytics_is_off_until_its_project_key_is_set(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
