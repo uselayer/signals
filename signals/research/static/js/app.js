@@ -10,7 +10,7 @@ import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
 import { Hatch } from './chart.js';
-import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets } from './format.js';
+import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets, count } from './format.js';
 
 const LOGO = html`<svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1" /><rect x="8.5" y="7" width="3" height="10" rx="1" /><rect x="14" y="3" width="3" height="14" rx="1" /></svg>`;
 const params = new URLSearchParams(location.search);
@@ -189,7 +189,18 @@ function Investigation({ api, id }) {
     setRaw: v => { ui.raw = v; redraw(); },
     highlight: f => { const ev = f.evidence || {}, sup = ev.supporting_window_ids || ev.supporting || [], ag = ev.against_window_ids || ev.against || []; ui.hl = { label: `${f.stat ? f.stat.text : ''} · ${f.title}`, match: new Set(sup), base: new Set([...sup, ...ag]) }; ui.stage = 'windows'; redraw(); },
     clearHl: () => { ui.hl = null; redraw(); },
+    filter: k => { ui.wf = k; redraw(); },
+    colourBy: k => { ui.colourBy = k; redraw(); },
   };
+
+  // The wallet's Signals record (the trader page's: every Polymarket position, not just these windows), read once
+  // from the engine's /api/worth/<wallet> as the trader page does. Not in the sample: no service there.
+  const wallet = (inv.subject && inv.subject.wallet) || ((inv.plans[inv.planOrder[0]] || {}).scope || {}).wallet || null;
+  useEffect(() => {
+    if (!wallet || api.fixtures || !/^0x[0-9a-f]{40}$/i.test(wallet)) return;
+    fetch(`/api/worth/${wallet.toLowerCase()}`).then(r => (r.ok ? r.json() : null)).then(r => { if (r && r.record) { st.current.record = r; redraw(); } }).catch(() => {});
+  }, [wallet]);
+  const rec = st.current.record;
 
   const totalProfit = inv.summaries.reduce((s, x) => s + (x.profit || 0), 0);
   const tabs = [['plan', 'Plan and data'], ['windows', `Windows${inv.summaries.length ? ' · ' + inv.summaries.length : ''}`]];
@@ -202,6 +213,7 @@ function Investigation({ api, id }) {
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}<span>BTC Up or Down 15m</span>
           ${inv.summaries.length > 0 && html`<span>· ${plural(inv.summaries.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
+        ${rec && html`<${RecordLine} r=${rec} wallet=${wallet} />`}
         <div class="acts"><button class="btn sm later" onClick=${() => { ui.laterOpen = !ui.laterOpen; redraw(); }}>Watch for new trades · later</button></div>
         ${ui.laterOpen && html`<div class="later-pop"><span class="tag plain" style="align-self:flex-start">Later, not in this version</span><b>Keep this breakdown up to date</b>
           <p>Re-run it when the wallet trades a new window, and tell you on Telegram when a pattern breaks or something new shows up. Those alerts will count in Signals' 20 a day.</p>
@@ -220,6 +232,17 @@ function Investigation({ api, id }) {
     </section>
     <${AgentColumn} inv=${inv} ui=${ui} act=${act} fixtures=${!!api.fixtures} />
   </div>`;
+}
+
+// The track record beside the breakdown, worded as the Leaderboard words it: a win rate is positions closed in
+// profit (from 10 closed), always with the average price paid beside it (a price is the market's chance, so paying
+// 97¢ wins about 97% of the time by buying alone), and it covers every market, not only these windows.
+const WIN_MIN = 10;
+function RecordLine({ r, wallet }) {
+  const w = r.win && (r.win['90d'] || r.win['30d'] || r.win['7d']);
+  const win = w && w.closed >= WIN_MIN ? `${Math.round(100 * w.won / w.closed)}% of positions closed in profit (${count(w.won)} of ${count(w.closed)}, last ${w.days} days)` : null;
+  const paid = r.paid_30d != null ? `pays ${cents(100 * r.paid_30d)} on average over 30 days` : null;
+  return html`<p class="recline muted small"><b>Its Signals record, every Polymarket market:</b> ${[win, paid].filter(Boolean).join('; ') || 'no win rate yet'}. <a class="link" href=${`/#/worth/${wallet.toLowerCase()}`}>See its record</a></p>`;
 }
 
 // Fixtures mode only: a pointed question answered from the window itself, observed facts only (readings of why are
