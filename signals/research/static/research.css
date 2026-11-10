@@ -74,13 +74,13 @@ p { margin: 0; }
 /* home */
 .home { max-width: 860px; margin: 0 auto; padding: 40px max(16px, env(safe-area-inset-left, 0px)) 60px; display: flex; flex-direction: column; gap: 28px; }
 .home h1 { font-size: 30px; letter-spacing: -0.025em; }
-/* example questions under the ask box: 3 across, 2 on a phone */
-.examples { display: flex; flex-direction: column; gap: 8px; }
-.ex-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+/* example questions under the ask box: four small cards in one row, two on a phone */
+.examples { display: flex; flex-direction: column; gap: 6px; }
+.ex-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 @media (max-width: 700px) { .ex-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.ex { text-align: left; font-size: 13.5px; line-height: 1.35; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: var(--fg); box-shadow: var(--shadow); }
-.ex:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
-.ex.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.ex { text-align: left; font-size: 12.5px; line-height: 1.3; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--muted); }
+.ex:hover { color: var(--fg); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
+.ex.on { color: var(--fg); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
 /* signed out: the teaser */
 .tag.new { align-self: flex-start; color: var(--accent); border: 1.5px dotted color-mix(in srgb, var(--accent) 75%, transparent); }
 .teaser .row { display: flex; gap: 10px; flex-wrap: wrap; }

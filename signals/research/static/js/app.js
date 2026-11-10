@@ -47,17 +47,14 @@ function App() {
     ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} />`)}`;
 }
 
-// Example questions under the ask box: they teach what to ask. A card fills the question (and the sample trader
-// when the wallet field is empty) and moves focus to Break it down; it never starts anything, so the plan and its
-// cost are still shown first. All BTC 15-minute, the only scope there is. The full address never shows on a card.
-const EXAMPLE_TRADER = { wallet: '0xb945945d5bcaf7b56834d4da8cdf8f8f94b2db68', name: 'l5Zn1bWoM8eTsK' };
+// Example questions under the ask box (owner, 10 Nov: four, small, one row): each names "this wallet", so it reads as
+// a question about the wallet in the field above. A card fills the question only and moves focus to Break it down; it
+// never starts anything, so the plan and its cost are still shown first. All BTC 15-minute, the only scope there is.
 const EXAMPLES = [
-  ['How does this trader make money?', 'How does this trader make money on BTC 15-minute markets?'],
-  ['Does it buy both Up and Down in the same window?', 'In BTC 15-minute markets, does it buy both Up and Down in the same window?'],
-  ['Is the profit steady, or from a few big windows?', 'Is its profit on BTC 15-minute markets steady, or does it come from a few big windows?'],
-  ['When does it buy: before the open, or after BTC moves?', 'In BTC 15-minute markets, when does it buy: before the window opens, or after BTC moves?'],
-  ['Replay its worst window step by step', 'Replay its worst BTC 15-minute window step by step.'],
-  ['Compare today with yesterday', 'Compare its BTC 15-minute trades today with yesterday.'],
+  ['How does this wallet make money?', 'How does this wallet make money on BTC 15-minute markets?'],
+  ['Does this wallet buy both Up and Down?', 'In BTC 15-minute markets, does this wallet buy both Up and Down in the same window?'],
+  ['When does this wallet buy in a window?', 'In BTC 15-minute markets, when does this wallet buy: before the window opens, or after BTC moves?'],
+  ["Is this wallet's profit steady?", "Is this wallet's profit on BTC 15-minute markets steady, or does it come from a few big windows?"],
 ];
 
 // Signed out: what a breakdown is, the recorded one to watch (no sign-in, no model run), and Sign in to ask your own.
@@ -77,10 +74,10 @@ function Teaser() {
 function Home({ api }) {
   const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
-  const go = useRef(), focusGo = useRef(false);
-  useEffect(() => { if (focusGo.current && go.current) { focusGo.current = false; go.current.focus(); } });
-  const pick = question => { if (!wallet.trim()) setWallet(EXAMPLE_TRADER.wallet); setQ(question); focusGo.current = true; };
-  const onSample = !wallet.trim() || wallet.trim().toLowerCase() === EXAMPLE_TRADER.wallet;
+  // after a card: focus Break it down, or the wallet field while it's empty (the card asks about "this wallet")
+  const go = useRef(), walletEl = useRef(), focusNext = useRef(null);
+  useEffect(() => { const el = focusNext.current; focusNext.current = null; if (el && el.current) el.current.focus(); });
+  const pick = question => { setQ(question); focusNext.current = wallet.trim() ? go : walletEl; };
   useEffect(() => { if (!SAMPLE) api.sessions().then(setList, e => setErr(e.message)); }, []);
   const start = async () => {
     if (!q.trim()) return; setBusy(true); setErr(null);
@@ -95,11 +92,11 @@ function Home({ api }) {
     <div style="display:flex;flex-direction:column;gap:10px"><h1>What do you want to find out?</h1>
       <p class="muted">${SAMPLE ? 'This is a sample: a breakdown recorded from a real run, with its question filled in. Press Break it down to watch it plan, read and chart the trades. Sign in to ask your own.' : 'Paste a wallet or name a trader, then ask in your own words. The agent shows its plan before it reads anything. Polymarket only; research, no trading.'}</p>
       <div class="compose-big">
-        <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => setWallet(e.target.value)} />
+        <input id="wallet" ref=${walletEl} aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => setWallet(e.target.value)} />
         <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
-        <p class="muted small">Not sure what to ask? Try one${onSample ? html` with <b>${EXAMPLE_TRADER.name}</b>, a trader active in BTC 15-minute markets` : ' about this wallet'}.</p>
+        <p class="muted small">Try asking</p>
         <div class="ex-grid">${EXAMPLES.map(([label, question]) => html`<button type="button" class=${'ex' + (q === question ? ' on' : '')} onClick=${() => pick(question)}>${label}</button>`)}</div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>

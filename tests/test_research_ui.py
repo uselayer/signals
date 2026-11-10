@@ -91,18 +91,17 @@ def test_sample_findings_have_the_contracts_fields() -> None:
 
 
 def test_example_questions_teach_without_running_anything() -> None:
-    """The cards under the ask box (owner, 10 Nov): BTC 15-minute only, research wording, the sample trader by name
-    (never the full address on a card), and a click only fills the form: Break it down still shows the plan first."""
+    """The cards under the ask box (owner, 10 Nov): four, each about "this wallet" (the one in the field above), BTC
+    15-minute only, research wording, and a click only fills the question: Break it down still shows the plan first."""
     js = (STATIC / "js" / "app.js").read_text()
     block = re.search(r"const EXAMPLES = \[(.*?)\n\];", js, re.S).group(1)
-    pairs = re.findall(r"\['([^']+)', '([^']+)'\]", block)
-    assert 4 <= len(pairs) <= 6
-    wallet = re.search(r"wallet: '(0x[0-9a-f]{40})'", js).group(1)
-    for label, question in pairs:
-        assert "BTC 15-minute" in question, question
+    pairs = re.findall(r"""\[(['"])(.+?)\1, (['"])(.+?)\3\]""", block)
+    assert len(pairs) == 4
+    for _, label, _, question in pairs:
+        assert "this wallet" in label and "this wallet" in question and "BTC 15-minute" in question, (label, question)
         for text in (label, question):
             low = text.lower()
-            assert wallet not in low and not re.search(r"\bbets?\b|you could|worth following|\broi\b|\bedge\b", low), text
+            assert not re.search(r"0x[0-9a-f]{6}|\bbets?\b|you could|worth following|\broi\b|\bedge\b", low), text
     pick = re.search(r"const pick = (.*?);\n", js).group(1)
-    assert "start" not in pick and "ask(" not in pick and "create(" not in pick
+    assert "start" not in pick and "ask(" not in pick and "create(" not in pick and "setWallet" not in pick
     assert "${!SAMPLE && html`<div class=\"examples\"" in js  # the locked sample plays one recorded question only
