@@ -201,7 +201,7 @@ def config() -> dict[str, Any]:
     key when signing in (to follow traders) is switched on, and PostHog's project key when analytics is. Both keys
     are public by design."""
     return {"venues": list(VENUES), "clerk_key": CLERK_KEY or None, "alerts": bool(TG_TOKEN), "explore": EXPLORE_ON,
-            "leaderboard": not SKILL_TEST, "why": bool(WHY_KEY),
+            "leaderboard": not SKILL_TEST, "why": bool(WHY_KEY), "research": RESEARCH_ON,
             "posthog_key": POSTHOG_KEY or None}
 
 
@@ -2089,6 +2089,9 @@ def why_lines(s: dict[str, Any]) -> dict[str, str | None]:
 # (STORED_FRESH_S), and "Check now" scores one on the spot, a few at a time (CHECKS_AT_ONCE, CHECKS_PER_CLIENT).
 
 EXPLORE_ON = os.environ.get("SIGNALS_EXPLORE") == "1"
+# The page's Investigations tab, ask bar and phone tab (they open /research, the research service): off until that
+# service and its Vercel rewrites are live, so the page never links to a 404 (README, "Research agent").
+RESEARCH_ON = os.environ.get("SIGNALS_RESEARCH") == "1"
 EXPLORE_PAGE = 50
 EXPLORE_MAX_OFFSET = 2000
 EXPLORE_TTL_S = 60  # a page of Explore, kept this long (the directory changes a few wallets a minute)

@@ -27,8 +27,8 @@ CASE_TOOLS: list[dict[str, Any]] = [
     {
         "name": "propose_plan",
         "description": (
-            "Shows the user your plan for this investigation and waits for them to press Start (or change it): "
-            "always first in a new investigation, and before a follow-up that widens the scope (more windows, a "
+            "Shows the user your plan for this breakdown and waits for them to press Start (or change it): "
+            "always first in a new breakdown, and before a follow-up that widens the scope (more windows, a "
             "longer range, another wallet). After calling it, end your turn without more text. steps: what you'll "
             "do, each with a short id, a title in plain words, its source in plain words ('Polymarket trades', "
             "'Layer's recorded order books', 'Binance') and estimate_s. scope: {wallet, family "
@@ -186,7 +186,7 @@ def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | 
     if context.get("trade_id"):
         fill = store.trade(sid, str(context["trade_id"]))
         if not fill:
-            raise ReadError("That trade isn't one of this investigation's fills.")
+            raise ReadError("That trade isn't one of this breakdown's fills.")
         slug = fill.get("slug")
         ready = store.window(sid, slug)["ready"] if slug else None
         drawn = next((t for t in (ready or {}).get("trades") or [] if t["trade_id"] == fill["id"]), None)
@@ -209,7 +209,7 @@ def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | 
     if context.get("finding_id"):
         f = store.finding(sid, str(context["finding_id"])) if hasattr(store, "finding") else None
         if not f:
-            raise ReadError("That finding isn't in this investigation.")
+            raise ReadError("That finding isn't in this breakdown.")
         return {"kind": "finding", "finding": f, "stat": context.get("stat")}
     raise ReadError("Point at a trade (trade_id), a moment (window_id and t) or a finding (finding_id).")
 
@@ -395,7 +395,7 @@ class Case:
         fid = inp.get("finding_id")
         old = self.store.finding(self.sid, str(fid)) if fid else None
         if fid and old is None:
-            raise ReadError(f"There's no finding {fid} in this investigation.")
+            raise ReadError(f"There's no finding {fid} in this breakdown.")
         ev = inp.get("evidence") or {}
         trades = [str(t) for t in ev.get("trade_ids") or []]
         unknown = [t for t in trades if not self.store.trade(self.sid, t)]
@@ -405,7 +405,7 @@ class Case:
         missing = sorted(w for w in windows if self.store.window(self.sid, str(w))["read"] is None
                          and not self.store.trades(self.sid, str(w)))  # fmt: skip
         if missing:
-            raise ReadError(f"These windows weren't read in this investigation: {', '.join(missing[:5])}.")
+            raise ReadError(f"These windows weren't read in this breakdown: {', '.join(missing[:5])}.")
         based_on = [str(b) for b in inp.get("based_on") or []]
         if label == "inferred":
             if not based_on:

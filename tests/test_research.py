@@ -574,7 +574,7 @@ def test_a_container_lost_while_code_waits_on_a_tool_ends_the_step() -> None:
     model = _model(_calls_tool(), ApiError(404, "container cont_1 not found"))
     events, store, sid = _ask(model)
     assert [e["message"] for e in events if e["type"] == "error"] == [
-        "The investigation stopped on an error. Try again in a minute."]  # fmt: skip
+        "The breakdown stopped on an error. Try again in a minute."]  # fmt: skip
     assert store.session(sid, "u1")["container"] is None  # type: ignore[index]  # the next question starts fresh
 
 

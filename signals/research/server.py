@@ -105,7 +105,7 @@ def sessions(user: str = Depends(auth.user_of)) -> JSONResponse:
 def _own(sid: str, user: str) -> dict[str, Any]:
     s = store.session(sid, user)
     if not s:
-        raise HTTPException(404, detail="No such investigation.")
+        raise HTTPException(404, detail="No such breakdown.")
     return s
 
 
@@ -130,7 +130,7 @@ def start_run(sid: str, user: str, text: str, *, context: dict[str, Any] | None 
     a = agent()
     with _lock:
         if sid in _running or user in _running.values():
-            raise HTTPException(409, detail="An investigation of yours is still running. Wait for it to finish.")
+            raise HTTPException(409, detail="A breakdown of yours is still running. Wait for it to finish.")
         if len(_running) >= AT_ONCE:
             raise HTTPException(429, detail="Research is busy right now. Try again in a minute.")
         _running[sid] = user
@@ -264,7 +264,7 @@ def window(sid: str, slug: str, user: str = Depends(auth.user_of)) -> JSONRespon
     kept = store.window(sid, slug)["ready"]
     if kept is None:
         if not (store.session_any(sid) or {}).get("wallet"):
-            raise HTTPException(404, detail="This investigation hasn't read a wallet yet.")
+            raise HTTPException(404, detail="This breakdown hasn't read a wallet yet.")
         from signals.research.data import ReadError, reads
 
         try:

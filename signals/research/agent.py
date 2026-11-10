@@ -44,7 +44,7 @@ PRICE = {"input": 4.0, "output": 20.0, "cache_read": 0.20, "cache_write": 5.0}
 CONTAINER_USD_PER_HOUR = 0.05
 CONTAINER_MIN_S = 300
 CONTAINER_MAX_AGE_S = 29 * 86_400  # containers expire 30 days after they're made: start a new one a day before
-REBUILT = ("The code sandbox from earlier in this investigation has expired, so its variables and files are gone. "
+REBUILT = ("The code sandbox from earlier in this breakdown has expired, so its variables and files are gone. "
            "Read again with the tools whatever you need from earlier turns before you answer.")  # fmt: skip
 BETAS = ["server-side-fallback-2026-07-01", "task-budgets-2026-03-13", "thinking-display-updates-2026-08-18"]
 STDOUT_SHOWN = 4_000  # characters of a code run's output put in its event
@@ -98,7 +98,8 @@ your code runs and between the trader's questions: reuse them instead of reading
 Start (or asks for changes; then propose a new plan).
 - After Start: work through the plan, marking each step running and done with step_status. The server puts the \
 approved scope's windows on the page itself as soon as Start is pressed; read the wallet's trades in your code and \
-group them by window for your own counting. Use show_windows only for windows outside the approved scope. Add each finding the moment you've counted it, so the trader reads while you work: observed \
+group them by window for your own counting. Use show_windows only for windows outside the approved scope. Add each finding the moment you've counted it, one at a time (count one pattern, call finding, then the next; \
+never save them up for a batch at the end), so the trader reads while you work: observed \
 first, then inferred readings resting on them. Aim to answer within about 8 minutes; if you're told time is \
 nearly up, answer at once from what you have. Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \
 about) and focus on it. Offer what you'd look at next with propose. Always finish with answer: the pattern in one \
@@ -315,7 +316,7 @@ class Agent:
         except Exception as e:  # noqa: BLE001 - the page gets a sentence, the log the detail
             print(f"research: run {run} failed: {type(e).__name__}: {e}", flush=True)
             if not self._fallback_answer(sid, run, "It stopped on an error.", phases, emit):
-                emit({"type": "error", "message": "The investigation stopped on an error. Try again in a minute."})
+                emit({"type": "error", "message": "The breakdown stopped on an error. Try again in a minute."})
             self.store.update_run(run, error=f"{type(e).__name__}: {e}"[:500])
         finally:
             if pre is not None and pre.is_alive():  # its tiles belong to this run's events
@@ -364,7 +365,7 @@ class Agent:
             nonlocal container
             container = None
             self.store.set_container(sid, None)
-            emit({"type": "notice", "text": "This investigation's earlier working state had expired, so it's being "
+            emit({"type": "notice", "text": "This breakdown's earlier working state had expired, so it's being "
                                              "rebuilt from the data: earlier figures are read again."})  # fmt: skip
             note = {"role": "system", "content": REBUILT}  # right after the question: a mid-conversation system message
             messages.append(note)
@@ -376,15 +377,15 @@ class Agent:
         while True:
             elapsed = time.time() - state["t0"]
             if elapsed >= MAX_SECONDS:
-                raise OverBudget(f"The investigation reached its {MAX_SECONDS // 60}-minute limit.")
+                raise OverBudget(f"The breakdown reached its {MAX_SECONDS // 60}-minute limit.")
             if elapsed >= WRAP_AT * MAX_SECONDS and not state["wrapped"] and not _code_waiting(messages):
                 state["wrapped"] = True  # once: stop exploring, answer from the findings so far
                 messages.append({"role": "system", "content": WRAP_UP})
                 self.store.add_message(sid, "system", WRAP_UP, hidden=True)
             if state["rounds"] >= MAX_ROUNDS:
-                raise OverBudget(f"The investigation used its {MAX_ROUNDS} steps without finishing. Ask a narrower question.")
+                raise OverBudget(f"The breakdown used its {MAX_ROUNDS} steps without finishing. Ask a narrower question.")
             if state["cost"] >= MAX_USD:
-                raise OverBudget(f"The investigation reached its ${MAX_USD:.2f} limit without finishing. Ask a narrower question.")
+                raise OverBudget(f"The breakdown reached its ${MAX_USD:.2f} limit without finishing. Ask a narrower question.")
             try:
                 resp = self._request(messages, container)
             except ContainerGone:
@@ -470,7 +471,7 @@ class Agent:
             stat = (f.get("stat") or {}).get("text")
             return f"{f['title']}: {stat}" if stat else str(f["title"])
 
-        emit({"type": "answer.card", "ask_id": run, "label": "Where the investigation got to", "partial": True,
+        emit({"type": "answer.card", "ask_id": run, "label": "Where the breakdown got to", "partial": True,
               "observed": [line(f) for f in fs if f.get("label") == "observed"],
               "inferred": [line(f) for f in fs if f.get("label") == "inferred"],
               "annotations": [], "focus": None, "finding_ids": [f["finding_id"] for f in fs],
