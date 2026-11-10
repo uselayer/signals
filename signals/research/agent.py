@@ -51,6 +51,13 @@ STDOUT_SHOWN = 4_000  # characters of a code run's output put in its event
 EVENT_VERSION = 2  # 2: the case file's events (docs/research-contract.md)
 WALLET_IN = re.compile(r"0x[0-9a-fA-F]{40}")
 CHECK_NOTE = "Signals' number check:"  # starts the note sent back for an untraced number; never itself a source
+# The case file draws everything from data; Vega-Lite charts wait for the later "+ New view" (make_chart stays built).
+DATA_TOOLS = [t for t in T.TOOLS if t["name"] != "make_chart"]
+
+
+def short_title(text: str) -> str:
+    """A title for the investigations list: wallets shortened (0xb945…db68), at most 120 characters."""
+    return WALLET_IN.sub(lambda m: f"{m.group(0)[:6]}…{m.group(0)[-4:]}", text)[:120]
 EVENTS = """start, progress (the agent's notes between steps), code (what it runs), tool_call, tool_result (a
 summary: counts, coverage, errors), code_result (output), chart (a Vega-Lite spec), check (the number check),
 answer, usage, error, done"""
@@ -199,7 +206,7 @@ class Agent:
     def _request(self, messages: list[dict[str, Any]], container: str | None) -> dict[str, Any]:
         kw: dict[str, Any] = dict(
             model=self.model, max_tokens=MAX_TOKENS, system=SYSTEM, messages=messages,
-            tools=[T.CODE_EXECUTION, *T.TOOLS, *CASE_TOOLS], thinking={"type": "adaptive", "display": "updates"},
+            tools=[T.CODE_EXECUTION, *DATA_TOOLS, *CASE_TOOLS], thinking={"type": "adaptive", "display": "updates"},
             output_config={"effort": EFFORT, "task_budget": {"type": "tokens", "total": TASK_BUDGET}},
             cache_control={"type": "ephemeral"}, betas=BETAS, fallbacks="default",
         )  # fmt: skip
@@ -234,7 +241,7 @@ class Agent:
         state = {"rounds": 0, "tool_calls": 0, "cost": 0.0, "code_runs": 0, "container_from": None}
         if not self.store.messages(sid):  # the investigation's first question
             w = WALLET_IN.search(question)
-            emit({"type": "investigation.created", "id": sid, "title": question[:120], "question": question,
+            emit({"type": "investigation.created", "id": sid, "title": short_title(question), "question": question,
                   "subject": {"wallet": w.group(0).lower() if w else None, "name": None}, "scope": None,
                   "origin": origin})  # fmt: skip
         emit({"type": "ask.started", "ask_id": run, "text": question, "context": context})
@@ -279,7 +286,7 @@ class Agent:
         container = session.get("container")
         messages = self.store.messages(sid)
         if not messages:
-            self.store.set_title(sid, question[:120])
+            self.store.set_title(sid, short_title(question))
         text = {"type": "text", "text": question}
         last = messages[-1] if messages else None
         if last and last["role"] == "user" and isinstance(last["content"], list) and last["content"] \
