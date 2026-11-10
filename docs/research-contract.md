@@ -51,7 +51,10 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   warnings: [{kind, text, window_ids}]}`
 - `tool.call` `{id, tool, args, started_at}` and `tool.result` `{id, tool, ok, rows, limit_hit, ms, summary}`: the
   activity log. Code runs are `tool: "code"` with `args.code`, and their result carries `stdout` (cut at 4,000
-  characters, `cut`), `stderr`, `return_code`. `limit_hit` true means a wallet's history is partial.
+  characters, `cut`), `stderr`, `return_code`. `limit_hit` true means a wallet's history is partial. `summary` is
+  the tool's own short figures, an object whose keys depend on the tool (`wallet_trades` `{rows, windows,
+  complete, limit_hit, ms}`, `finding` `{finding_id}`, `step_status` `{step_id, status}`, `propose_plan` `{steps}`,
+  a failure `{error}`…); the page puts it in words (`resultText` in `static/js/store.js`), never prints the object.
 - `answer.progress` `{ask_id, text}`: the agent's notes between steps.
 
 ### Data the workspace draws
@@ -130,6 +133,15 @@ dates, wallet addresses and slugs aren't checked.
   told to answer from the findings so far. A run that stops (time, steps, money, an error) with findings but no
   answer ends on an `answer.card` built from the findings that counted, with `partial: true`, then a `notice` saying
   why, never on an `error`. An `error` means there was nothing to show.
+- The time budget is a wall clock (a watchdog in the service), not only checked between model rounds: a model
+  request or a read that's blocked or slow still ends the run at the limit, the same way.
+- A run the service stops (a deploy: SIGTERM) ends the same way, its findings kept, with the `notice` "This breakdown
+  was interrupted by an update. Ask again to finish it." (also when there are no findings, then without a card), then
+  `done`. A run the process died in before it could (killed, crashed) gets those events when the service next
+  starts, so a reloaded breakdown never stays "Working". Asking again goes on in the same conversation; tool calls
+  the cut-off run left unanswered are answered as not run.
+- `GET /api/research/health` `{ok, model_key, running}`: `running` is how many breakdowns are going. Deploy only at
+  0 (README, "Hosting Breakdowns").
 
 ## Client calls
 - **Ask** `POST /api/research/sessions/{id}/ask` `{question, context?, origin?}`. `context`: none, `{trade_id}`,

@@ -53,6 +53,11 @@ EVENT_VERSION = 2  # 2: the case file's events (docs/research-contract.md)
 WALLET_IN = re.compile(r"0x[0-9a-fA-F]{40}")
 MAX_SECONDS = int(os.environ.get("RESEARCH_MAX_SECONDS", "600"))  # a question's wall-time budget
 WRAP_AT = 0.8  # at this share of it the agent is told to answer from what it has
+# How a run cut off by the service stopping (a deploy) ends: at shutdown (SIGTERM), or at the next start for a run the
+# process died in. Its findings so far are kept and become the answer card.
+INTERRUPTED = "This breakdown was interrupted by an update. Ask again to finish it."
+NOT_RUN = "Not run: this breakdown was stopped before this step ran. Read again what you need."
+STOP_WAIT_S = 3.0  # at shutdown, how long to wait for the running breakdowns to write where they got to
 WRAP_UP = ("Time is nearly up for this question. Stop exploring: finish any finding you've counted, then call answer "
            "now from the findings so far, saying in one line what you didn't get to.")  # fmt: skip
 # The phases a run's usage reports (seconds from its start): the targets for a 1-day investigation are plan < 15 s,
@@ -241,6 +246,78 @@ def _container_refused(e: Exception) -> bool:
     return getattr(e, "status_code", None) in (400, 404) and "container" in str(e).lower()
 
 
+class _Stopped(Exception):
+    """The run was ended from outside (its time limit, a shutdown) while its worker was still going."""
+
+
+class _Run:
+    """Who ends one run, decided once: the run itself, the watchdog at MAX_SECONDS, or a shutdown. Whoever claims
+    it writes the end (answer card, usage, done); from then on events from the run's other threads are dropped, and
+    its worker writes nothing more to the conversation."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.owner: int | None = None  # the thread that claimed the end
+        self.ended = threading.Event()
+        self.stream: Any = None  # the model request in flight, closed when the run is stopped from outside
+        self.stop: Callable[[str, str | None, str], None] = lambda why, notice, kind: None
+
+    def claim(self) -> bool:
+        with self.lock:
+            if self.owner is not None:
+                return False
+            self.owner = threading.get_ident()
+            return True
+
+    @property
+    def taken(self) -> bool:
+        """Ended (or being ended) by another thread than this one."""
+        return self.owner is not None and self.owner != threading.get_ident()
+
+
+def partial_card(store: Store, sid: str, run: int) -> dict[str, Any] | None:
+    """An answer card made from the investigation's findings that counted (their numbers already checked), for a run
+    that stopped before it answered. None when there's nothing to say."""
+    fs = [f for f in store.findings(sid) if f.get("counts")]
+    if not fs:
+        return None
+
+    def line(f: dict[str, Any]) -> str:
+        stat = (f.get("stat") or {}).get("text")
+        return f"{f['title']}: {stat}" if stat else str(f["title"])
+
+    return {"type": "answer.card", "ask_id": run, "label": "Where the breakdown got to", "partial": True,
+            "observed": [line(f) for f in fs if f.get("label") == "observed"],
+            "inferred": [line(f) for f in fs if f.get("label") == "inferred"],
+            "annotations": [], "focus": None, "finding_ids": [f["finding_id"] for f in fs],
+            "number_check": {"passed": True, "flagged": {}}}  # fmt: skip
+
+
+def recover(store: Store) -> int:
+    """At startup: every run the store still has as running died with the last process (a deploy replaced it, or it
+    crashed). Each ends now as interrupted: its findings so far as an answer card, the notice, done, so reloading it
+    never shows "Working". A session's older unfinished runs (a later run already went on) are only closed in the
+    store. Returns how many runs were closed."""
+    rows = store.unfinished_runs()
+    latest = store.latest_runs({r["session"] for r in rows})
+    for r in rows:
+        sid, run = r["session"], r["id"]
+        if latest.get(sid) == run:
+
+            def emit(e: dict[str, Any], sid: str = sid, run: int = run) -> None:
+                store.add_event(sid, {**e, "v": EVENT_VERSION, "run": run})
+
+            answered = any(e.get("type") == "answer.card" and e.get("run") == run for e in store.events(sid))
+            card = None if answered else partial_card(store, sid, run)
+            if card:
+                emit(card)
+            emit({"type": "notice", "text": INTERRUPTED})
+            emit({"type": "done"})
+        store.update_run(run, ended=time.time(), error="interrupted")
+        print(f"research: run {run} session {sid} was cut off by a restart; closed as interrupted", flush=True)
+    return len(rows)
+
+
 class Agent:
     def __init__(self, reads: Reads, store: Store, client: Any = None, *, model: str = MODEL) -> None:
         if client is None:
@@ -249,8 +326,23 @@ class Agent:
             client = anthropic.Anthropic(max_retries=2, timeout=REQUEST_TIMEOUT_S)
         self.reads, self.store, self.client, self.model = reads, store, client, model
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="research-tool")
+        self.timer: Callable[..., Any] = threading.Timer  # the wall-clock watchdog (tests fake it)
+        self.live: dict[int, _Run] = {}  # run -> its control, while it runs
+        self._live_lock = threading.Lock()
 
-    def _request(self, messages: list[dict[str, Any]], container: str | None) -> dict[str, Any]:
+    def stop_all(self, notice: str = INTERRUPTED, wait_s: float = STOP_WAIT_S) -> int:
+        """Shutdown: every running breakdown ends now with where it got to (answer card from its findings, the
+        notice, done). Waits at most ``wait_s`` in all. Returns how many were stopped."""
+        with self._live_lock:
+            runs = list(self.live.values())
+        for ctl in runs:
+            ctl.stop("It was interrupted by an update.", notice, "interrupted")
+        deadline = time.monotonic() + wait_s
+        for ctl in runs:
+            ctl.ended.wait(max(0.0, deadline - time.monotonic()))
+        return len(runs)
+
+    def _request(self, messages: list[dict[str, Any]], container: str | None, ctl: _Run | None = None) -> dict[str, Any]:
         kw: dict[str, Any] = dict(
             model=self.model, max_tokens=MAX_TOKENS, system=SYSTEM, messages=messages,
             tools=[T.CODE_EXECUTION, *DATA_TOOLS, *CASE_TOOLS], thinking={"type": "adaptive", "display": "updates"},
@@ -262,13 +354,23 @@ class Agent:
         t0 = time.monotonic()
         try:
             with self.client.beta.messages.stream(**kw) as stream:
-                out = _d(stream.get_final_message())
+                if ctl is not None:
+                    ctl.stream = stream  # a stop from outside closes it, so a blocked request ends with the run
+                    if ctl.taken:
+                        raise _Stopped
+                try:
+                    out = _d(stream.get_final_message())
+                finally:
+                    if ctl is not None:
+                        ctl.stream = None
             took = time.monotonic() - t0
             if took > SLOW_REQUEST_S:  # 10 Nov: one resume took ~37 min (timeouts + retries); see what it was
                 print(f"research: slow model request {took:.0f} s, {len(messages)} messages, "
                       f"container {container}, stop {out.get('stop_reason')}", flush=True)  # fmt: skip
             return out  # type: ignore[no-any-return]
         except Exception as e:
+            if ctl is not None and ctl.taken:
+                raise _Stopped from e
             if container and _container_refused(e):
                 global _container_error_logged
                 if not _container_error_logged:  # the API's exact words, once, to tighten _container_refused
@@ -282,86 +384,148 @@ class Agent:
             context: dict[str, Any] | None = None, facts: dict[str, Any] | None = None,
             origin: str | None = None) -> None:  # fmt: skip
         """Answers ``question`` in session ``sid``, calling ``emit`` with each event as it happens. Every event has
-        ``type`` and ``v`` (EVENT_VERSION: a page can tell a shape it doesn't know) and the question's ``run``."""
+        ``type`` and ``v`` (EVENT_VERSION: a page can tell a shape it doesn't know) and the question's ``run``.
+
+        The run works in its own thread; this returns when the run has ended: on its own, at MAX_SECONDS by the
+        wall-clock watchdog (even while a model request or a read is blocked), or stopped by ``stop_all``."""
         run = self.store.start_run(sid, user)
         out = emit
         t0 = time.time()
         phases: dict[str, float] = {}  # seconds from the start to each phase (PHASES), for the usage event and logs
+        ctl = _Run()
 
         def emit(e: dict[str, Any]) -> None:  # noqa: F811 - each event stamped, its phase timed
-            at = round(time.time() - t0, 1)
-            phase = PHASES.get(e.get("type", ""))
-            if phase and phase not in phases:
-                phases[phase] = at
-            if e.get("type") == "window.summary":
-                phases["tiles_done"] = at  # the last tile so far
-            out({**e, "v": EVENT_VERSION, "run": run})
+            with ctl.lock:
+                if ctl.owner is not None and ctl.owner != threading.get_ident():
+                    return  # the run was ended by another thread (time, a shutdown): nothing more from this one
+                at = round(time.time() - t0, 1)
+                phase = PHASES.get(e.get("type", ""))
+                if phase and phase not in phases:
+                    phases[phase] = at
+                if e.get("type") == "window.summary":
+                    phases["tiles_done"] = at  # the last tile so far
+                out({**e, "v": EVENT_VERSION, "run": run})
 
         totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}
         # container_from: when this question's code container was first in use (its time is billed from then).
-        state = {"rounds": 0, "tool_calls": 0, "cost": 0.0, "code_runs": 0, "container_from": None, "t0": t0,
-                 "wrapped": False}  # fmt: skip
-        if not self.store.messages(sid):  # the investigation's first question
-            w = WALLET_IN.search(question)
-            emit({"type": "investigation.created", "id": sid, "title": short_title(question), "question": question,
-                  "subject": {"wallet": w.group(0).lower() if w else None, "name": None}, "scope": None,
-                  "origin": origin})  # fmt: skip
-        emit({"type": "ask.started", "ask_id": run, "text": question, "context": context})
-        pre: threading.Thread | None = None
-        try:
-            if self.store.spent_today() >= DAILY_USD or self.store.spent_today(user) >= USER_DAILY_USD:
-                raise OverBudget("Research has reached today's limit. It resets at 00:00 UTC.")
-            said = question
-            if facts:  # what the user pointed at, as the server read it from the data
-                said += "\n\nThe user is pointing at this (from the data):\n" + json.dumps(facts, default=str)
-            scope = self.store.scope(sid) if (context or {}).get("action") == "approve" else None
-            if scope_ok(scope):  # only then is the agent told the tiles are coming (else it shows them itself)
-                # Start: the server builds the approved scope's tiles at once, while the agent is still thinking.
-                pre = threading.Thread(target=self._prebuild, args=(sid, scope, emit), name=f"prebuild-{sid}",
-                                       daemon=True)  # fmt: skip
-                pre.start()
-                said += PREBUILD_NOTE
-            ok = self._ask(sid, run, said, emit, totals, state)
-            self.store.update_run(run, check_ok=int(ok))
-        except OverBudget as e:
-            # Never end on an error with findings and no answer: the answer is then what the findings say.
-            if not self._fallback_answer(sid, run, str(e), phases, emit):
-                emit({"type": "error", "message": str(e)})
-            self.store.update_run(run, error="over_budget")
-        except Exception as e:  # noqa: BLE001 - the page gets a sentence, the log the detail
-            print(f"research: run {run} failed: {type(e).__name__}: {e}", flush=True)
-            if not self._fallback_answer(sid, run, "It stopped on an error.", phases, emit):
-                emit({"type": "error", "message": "The breakdown stopped on an error. Try again in a minute."})
-            self.store.update_run(run, error=f"{type(e).__name__}: {e}"[:500])
-        finally:
-            if pre is not None and pre.is_alive():  # its tiles belong to this run's events
-                pre.join(timeout=60)
-            if pre is None or not pre.is_alive():  # every window the agent read where the wallet traded gets a tile
+        state: dict[str, Any] = {"rounds": 0, "tool_calls": 0, "cost": 0.0, "code_runs": 0, "container_from": None, "t0": t0,
+                 "wrapped": False, "ctl": ctl}  # fmt: skip
+
+        def finish(stopped: str | None = None, notice: str | None = None, kind: str | None = None) -> None:
+            """The run's end, written once by whoever claimed it: for a stop from outside, where it got to (an answer
+            card from the findings, then the notice; an error when there's nothing to show), then usage and done."""
+            try:
+                if stopped is not None:
+                    if not self._fallback_answer(sid, run, stopped, phases, emit, notice=notice):
+                        if notice:
+                            emit({"type": "notice", "text": notice})
+                        else:
+                            emit({"type": "error", "message": stopped})
+                    self.store.update_run(run, error=kind)
+                # Container time: from its first use in this question to the end, at least the billed 5 minutes.
+                # An estimate (Anthropic bills execution time; a paused container waiting on our tools may count).
+                used = state["container_from"] is not None
+                container_s = max(CONTAINER_MIN_S, round(time.time() - state["container_from"])) if used else 0
+                container_usd = container_s / 3600 * CONTAINER_USD_PER_HOUR
+                usage = {**totals, "token_usd": round(state["cost"], 4), "code_runs": state["code_runs"],
+                         "container_s": container_s, "container_usd": round(container_usd, 4),
+                         "cost_usd": round(state["cost"] + container_usd, 4), "rounds": state["rounds"],
+                         "tool_calls": state["tool_calls"], "seconds": round(time.time() - t0, 1),
+                         "phases": dict(phases)}  # fmt: skip
+                emit({"type": "usage", **usage})
+                self.store.update_run(
+                    run, ended=time.time(), input_tokens=totals["input_tokens"], output_tokens=totals["output_tokens"],
+                    cache_read=totals["cache_read_input_tokens"], cache_write=totals["cache_creation_input_tokens"],
+                    cost_usd=state["cost"] + container_usd, rounds=state["rounds"], tool_calls=state["tool_calls"],
+                    code_runs=state["code_runs"], container_s=container_s, container_usd=container_usd,
+                )  # fmt: skip
+                print(f"research: run {run} session {sid} {json.dumps(usage)}", flush=True)
+                emit({"type": "done"})
+            finally:
+                ctl.ended.set()
+
+        def stop(why: str, notice: str | None, kind: str) -> None:
+            """Ends the run from outside its worker (the watchdog, a shutdown), whatever the worker is blocked on."""
+            if not ctl.claim():
+                return  # it's already ending
+            print(f"research: run {run} session {sid} stopped: {kind}", flush=True)
+            stream = ctl.stream
+            if stream is not None and hasattr(stream, "close"):
                 try:
-                    n = fill_tiles(self.store, self.reads, sid, emit)
-                    if n:
-                        print(f"research: run {run} added {n} tiles the run hadn't shown", flush=True)
-                except Exception as e:  # noqa: BLE001 - the answer stands without them
-                    print(f"research: run {run} tile sweep failed: {type(e).__name__}: {e}", flush=True)
-            # Container time: from its first use in this question to the end, at least the billed 5 minutes. An
-            # estimate (Anthropic bills execution time; a paused container waiting on our tools may count).
-            used = state["container_from"] is not None
-            container_s = max(CONTAINER_MIN_S, round(time.time() - state["container_from"])) if used else 0
-            container_usd = container_s / 3600 * CONTAINER_USD_PER_HOUR
-            usage = {**totals, "token_usd": round(state["cost"], 4), "code_runs": state["code_runs"],
-                     "container_s": container_s, "container_usd": round(container_usd, 4),
-                     "cost_usd": round(state["cost"] + container_usd, 4), "rounds": state["rounds"],
-                     "tool_calls": state["tool_calls"], "seconds": round(time.time() - t0, 1),
-                     "phases": dict(phases)}  # fmt: skip
-            emit({"type": "usage", **usage})
-            self.store.update_run(
-                run, ended=time.time(), input_tokens=totals["input_tokens"], output_tokens=totals["output_tokens"],
-                cache_read=totals["cache_read_input_tokens"], cache_write=totals["cache_creation_input_tokens"],
-                cost_usd=state["cost"] + container_usd, rounds=state["rounds"], tool_calls=state["tool_calls"],
-                code_runs=state["code_runs"], container_s=container_s, container_usd=container_usd,
-            )  # fmt: skip
-            print(f"research: run {run} session {sid} {json.dumps(usage)}", flush=True)
-            emit({"type": "done"})
+                    stream.close()  # a blocked model request ends now; the worker then sees it was stopped
+                except Exception:  # noqa: BLE001, S110 - the run ends either way
+                    pass
+            finish(why, notice, kind)
+
+        ctl.stop = stop
+
+        def work() -> None:
+            pre: threading.Thread | None = None
+            try:
+                if not self.store.messages(sid):  # the investigation's first question
+                    w = WALLET_IN.search(question)
+                    emit({"type": "investigation.created", "id": sid, "title": short_title(question),
+                          "question": question, "subject": {"wallet": w.group(0).lower() if w else None, "name": None},
+                          "scope": None, "origin": origin})  # fmt: skip
+                emit({"type": "ask.started", "ask_id": run, "text": question, "context": context})
+                if self.store.spent_today() >= DAILY_USD or self.store.spent_today(user) >= USER_DAILY_USD:
+                    raise OverBudget("Research has reached today's limit. It resets at 00:00 UTC.")
+                said = question
+                if facts:  # what the user pointed at, as the server read it from the data
+                    said += "\n\nThe user is pointing at this (from the data):\n" + json.dumps(facts, default=str)
+                scope = self.store.scope(sid) if (context or {}).get("action") == "approve" else None
+                if scope_ok(scope):  # only then is the agent told the tiles are coming (else it shows them itself)
+                    # Start: the server builds the approved scope's tiles at once, while the agent is still thinking.
+                    pre = threading.Thread(target=self._prebuild, args=(sid, scope, emit), name=f"prebuild-{sid}",
+                                           daemon=True)  # fmt: skip
+                    pre.start()
+                    said += PREBUILD_NOTE
+                ok = self._ask(sid, run, said, emit, totals, state)
+                if not ctl.taken:
+                    self.store.update_run(run, check_ok=int(ok))
+            except _Stopped:
+                pass  # whoever stopped it wrote the end
+            except OverBudget as e:
+                if not ctl.taken:
+                    # Never end on an error with findings and no answer: the answer is then what the findings say.
+                    if not self._fallback_answer(sid, run, str(e), phases, emit):
+                        emit({"type": "error", "message": str(e)})
+                    self.store.update_run(run, error="over_budget")
+            except Exception as e:  # noqa: BLE001 - the page gets a sentence, the log the detail
+                if not ctl.taken:
+                    print(f"research: run {run} failed: {type(e).__name__}: {e}", flush=True)
+                    if not self._fallback_answer(sid, run, "It stopped on an error.", phases, emit):
+                        emit({"type": "error", "message": "The breakdown stopped on an error. Try again in a minute."})
+                    self.store.update_run(run, error=f"{type(e).__name__}: {e}"[:500])
+            finally:
+                if pre is not None and pre.is_alive() and not ctl.taken:  # its tiles belong to this run's events
+                    pre.join(timeout=60)
+                if ctl.claim():
+                    try:
+                        if pre is None or not pre.is_alive():  # every window the agent read where it traded: a tile
+                            try:
+                                n = fill_tiles(self.store, self.reads, sid, emit)
+                                if n:
+                                    print(f"research: run {run} added {n} tiles the run hadn't shown", flush=True)
+                            except Exception as e:  # noqa: BLE001 - the answer stands without them
+                                print(f"research: run {run} tile sweep failed: {type(e).__name__}: {e}", flush=True)
+                    finally:
+                        finish()
+
+        with self._live_lock:
+            self.live[run] = ctl
+        try:
+            threading.Thread(target=work, name=f"research-run-{run}", daemon=True).start()
+            left = max(0.0, MAX_SECONDS - (time.time() - t0))
+            watchdog = self.timer(left, stop, args=(f"The breakdown reached its {MAX_SECONDS // 60}-minute limit.",
+                                                    None, "over_time"))  # fmt: skip
+            watchdog.daemon = True
+            watchdog.start()
+            ctl.ended.wait()
+            watchdog.cancel()
+        finally:
+            with self._live_lock:
+                self.live.pop(run, None)
 
     def _ask(self, sid: str, run: int, question: str, emit: Callable[[dict[str, Any]], None],
              totals: dict[str, int], state: dict[str, Any]) -> bool:  # fmt: skip
@@ -372,6 +536,16 @@ class Agent:
             self.store.set_title(sid, short_title(question))
         text = {"type": "text", "text": question}
         last = messages[-1] if messages else None
+        pending = [b for b in last["content"] if b.get("type") == "tool_use"] \
+            if last and last["role"] == "assistant" and isinstance(last["content"], list) else []  # fmt: skip
+        if pending:
+            # The last run was cut off (a restart, its time limit) while the agent waited on tools: answer those
+            # calls as not run, so the conversation goes on (the API needs a result for every call).
+            results = [{"type": "tool_result", "tool_use_id": b["id"], "content": NOT_RUN, "is_error": True}
+                       for b in pending]  # fmt: skip
+            messages.append({"role": "user", "content": results})
+            self.store.add_message(sid, "user", results, hidden=True)
+            last = messages[-1]
         if last and last["role"] == "user" and isinstance(last["content"], list) and last["content"] \
                 and all(b.get("type") == "tool_result" for b in last["content"]):  # fmt: skip
             # The last run ended on a tool's result (a plan waiting for Start): the user's words join that turn.
@@ -396,7 +570,10 @@ class Agent:
         if container and time.time() - (session.get("container_at") or time.time()) > CONTAINER_MAX_AGE_S:
             rebuild()
         retried = False
+        ctl: _Run = state.get("ctl") or _Run()
         while True:
+            if ctl.taken:
+                raise _Stopped
             elapsed = time.time() - state["t0"]
             if elapsed >= MAX_SECONDS:
                 raise OverBudget(f"The breakdown reached its {MAX_SECONDS // 60}-minute limit.")
@@ -409,7 +586,7 @@ class Agent:
             if state["cost"] >= MAX_USD:
                 raise OverBudget(f"The breakdown reached its ${MAX_USD:.2f} limit without finishing. Ask a narrower question.")
             try:
-                resp = self._request(messages, container)
+                resp = self._request(messages, container, ctl)
             except ContainerGone:
                 last = messages[-1]["content"]
                 if isinstance(last, list) and last and all(b.get("type") == "tool_result" for b in last):
@@ -420,6 +597,8 @@ class Agent:
                 print(f"research: session {sid} container expired; starting a new one", flush=True)
                 rebuild()
                 continue
+            if ctl.taken:
+                raise _Stopped  # stopped while the model answered: nothing of this turn is kept
             state["rounds"] += 1
             u = resp.get("usage") or {}
             for k in totals:
@@ -446,6 +625,8 @@ class Agent:
             pending = [b for b in content if b.get("type") == "tool_use"]
             if stop == "tool_use" and pending:
                 results = self._run_tools(sid, case, pending, emit, state)
+                if ctl.taken:
+                    raise _Stopped  # the next run answers these calls as not run
                 messages.append({"role": "user", "content": results})
                 self.store.add_message(sid, "user", results, hidden=True)
                 if case.waiting or case.answered:  # a plan waits for Start, or the answer card is out: the run ends
@@ -481,25 +662,18 @@ class Agent:
             print(f"research: prebuild for {sid} failed: {type(e).__name__}: {e}", flush=True)
 
     def _fallback_answer(self, sid: str, run: int, why: str, phases: dict[str, float],
-                         emit: Callable[[dict[str, Any]], None]) -> bool:  # fmt: skip
-        """When a run stops (time, steps, money, an error) with findings but no answer: an answer card made from the
-        findings that counted (their numbers already checked), saying it stopped. False when there's nothing to say."""
+                         emit: Callable[[dict[str, Any]], None], notice: str | None = None) -> bool:  # fmt: skip
+        """When a run stops (time, steps, money, an error, a shutdown) with findings but no answer: an answer card
+        made from the findings that counted, then a notice saying why (``notice``, else one made from ``why``).
+        False when there's nothing to say."""
         if "answer" in phases:
             return True
-        fs = [f for f in self.store.findings(sid) if f.get("counts")]
-        if not fs:
+        card = partial_card(self.store, sid, run)
+        if card is None:
             return False
-        def line(f: dict[str, Any]) -> str:
-            stat = (f.get("stat") or {}).get("text")
-            return f"{f['title']}: {stat}" if stat else str(f["title"])
-
-        emit({"type": "answer.card", "ask_id": run, "label": "Where the breakdown got to", "partial": True,
-              "observed": [line(f) for f in fs if f.get("label") == "observed"],
-              "inferred": [line(f) for f in fs if f.get("label") == "inferred"],
-              "annotations": [], "focus": None, "finding_ids": [f["finding_id"] for f in fs],
-              "number_check": {"passed": True, "flagged": {}}})  # fmt: skip
-        emit({"type": "notice", "text": f"{why} This answer is built from the findings so far; ask a narrower "
-                                        "question to go further."})  # fmt: skip
+        emit(card)
+        emit({"type": "notice", "text": notice or f"{why} This answer is built from the findings so far; ask a "
+                                                  "narrower question to go further."})  # fmt: skip
         return True
 
     def _emit_blocks(self, run: int, content: list[dict[str, Any]], emit: Callable[[dict[str, Any]], None]) -> None:
@@ -528,8 +702,12 @@ class Agent:
             charts.append({"type": "chart", "chart_id": cid, "title": title, "caption": caption, "spec": spec})
             return cid
 
+        ctl: _Run | None = state.get("ctl")
+
         def one(b: dict[str, Any]) -> tuple[str, bool, dict[str, Any]]:
             name, inp = b.get("name", ""), b.get("input") or {}
+            if ctl is not None and ctl.owner is not None:  # the run was stopped: no more reads or cards
+                return NOT_RUN, True, {"error": "stopped"}
             if name in CASE_NAMES:
                 return case.handle(name, inp)
             return T.run(name, inp, self.reads, save, store=self.store, sid=sid)

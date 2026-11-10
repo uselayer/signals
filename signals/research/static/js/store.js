@@ -21,7 +21,37 @@ const workLine = (s, text) => { let w = working(s); if (!w) { w = { type: 'worki
 const closeWork = s => { const w = working(s); if (w) { w.closed = true; s.feed = s.feed.filter(x => x !== w); } };
 export const KNOWN_V = 2;
 const ctxLabel = c => c.trade_id ? 'a trade' : c.window_id && c.t != null ? 'a moment' : c.finding_id ? 'a finding' : '';
-const toolName = n => ({ wallet_trades: 'Read its trades', wallet_profile: "Read its Signals record", window: 'Built a window', outside_prices: 'Read Binance and Chainlink prices', code: 'Ran a calculation', make_chart: 'Drew a chart' }[n] || n);
+const toolName = n => ({ wallet_trades: 'Read its trades', wallet_profile: "Read its Signals record", window: 'Built a window', outside_prices: 'Read Binance and Chainlink prices', code: 'Ran a calculation', make_chart: 'Drew a chart',
+  propose_plan: 'Proposed a plan', step_status: 'Updated a step', show_windows: 'Showed windows', focus: 'Moved the view', walkthrough: 'Wrote a walkthrough', finding: 'Added a finding', answer: 'Wrote the answer', propose: 'Offered a next step' }[n] || n);
+const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+const scalars = o => Object.entries(o).filter(([k, v]) => v != null && typeof v !== 'object' && k !== 'ms').map(([k, v]) => `${k} ${v}`).join(', ');
+// A tool result's line in the activity log. `summary` is the tool's own short figures, an object whose shape depends
+// on the tool (docs/research-contract.md, tool.result): put it in words, never print the object itself.
+export function resultText(e) {
+  const s = e.summary, tool = e.tool || e.name;
+  if (typeof s === 'string') return s || (e.ok === false ? 'failed' : 'done');
+  if (!s || typeof s !== 'object') return e.rows != null ? count(e.rows, 'row', 'rows') : e.ok === false ? 'failed' : 'done';
+  if (typeof s.text === 'string' && s.text) return s.text;
+  if (e.ok === false || s.error) return s.error === 'stopped' ? 'not run: the breakdown was stopped' : `failed${typeof s.error === 'string' ? `: ${s.error}` : ''}`;
+  const checked = s.number_check === false ? ', a number flagged' : '';
+  switch (tool) {
+    case 'wallet_trades': if (s.rows != null) return `${count(s.rows, 'trade', 'trades')}${s.windows != null ? ` in ${count(s.windows, 'window', 'windows')}` : ''}`; break;
+    case 'wallet_profile': return s.name ? `found ${s.name}` : 'no Polymarket name';
+    case 'window': if (s.slug) return `${s.slug}${s.result ? `, ended ${s.result}` : ''}`; break;
+    case 'outside_prices': if (s.points != null) return s.available === false ? `${s.source || 'prices'}: not available` : `${count(s.points, 'price', 'prices')}${s.source ? ` from ${s.source}` : ''}`; break;
+    case 'make_chart': if (s.title) return s.title; break;
+    case 'propose_plan': if (s.steps != null) return count(s.steps, 'step', 'steps'); break;
+    case 'step_status': if (s.step_id != null) return `step ${s.step_id} ${s.status || ''}`.trim(); break;
+    case 'show_windows': if (s.rows != null) return `${count(s.rows, 'window', 'windows')}${s.failed ? `, ${s.failed} couldn't be built` : ''}`; break;
+    case 'focus': if (s.stage) return `to ${s.stage}`; break;
+    case 'walkthrough': if (s.steps != null) return count(s.steps, 'step', 'steps') + checked; break;
+    case 'finding': if (s.finding_id) return s.finding_id; break;
+    case 'answer': return 'shown' + checked;
+    case 'propose': if (s.proposal_id) return s.proposal_id; break;
+    default: break;
+  }
+  return scalars(s) || (e.rows != null ? count(e.rows, 'row', 'rows') : 'done');
+}
 const argsText = e => { const a = e.args ?? e.args_plain ?? e.summary; if (!a) return ''; if (typeof a === 'string') return a; if (a.code) return ''; return Object.entries(a).filter(([, v]) => v != null && typeof v !== 'object').map(([k, v]) => `${k} ${v}`).join(', ').slice(0, 140); };
 const at = e => (e.started_at || e.at) ? new Date(((e.started_at || e.at) > 1e12 ? (e.started_at || e.at) : (e.started_at || e.at) * 1000)).toISOString().slice(11, 19) : '';
 
@@ -61,7 +91,7 @@ export function apply(s, e, ui) {
       break;
     case 'tool.result': case 'tool_result': {
       const c = s.tools.find(x => x.id === e.id); if (c) Object.assign(c, { rows: e.rows, ok: e.ok !== false, limit_hit: e.limit_hit });
-      s.log.push({ at: at(e), text: `${toolName(e.tool || e.name || 'result')}: ${e.summary || (e.rows != null ? e.rows + ' rows' : (e.ok === false ? 'failed' : 'done'))}${e.ms ? ` (${(e.ms / 1000).toFixed(1)} s)` : ''}${e.limit_hit ? '. Stopped at the read limit: the history is partial.' : ''}`, flagged: e.ok === false || e.limit_hit });
+      s.log.push({ at: at(e), text: `${toolName(e.tool || e.name || 'result')}: ${resultText(e)}${e.ms ? ` (${(e.ms / 1000).toFixed(1)} s)` : ''}${e.limit_hit ? '. Stopped at the read limit: the history is partial.' : ''}`, flagged: e.ok === false || e.limit_hit });
       if (e.limit_hit) s.partial = true;
       break;
     }

@@ -6,6 +6,8 @@ import copy
 import json
 import os
 import tempfile
+import threading
+import time
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -1162,3 +1164,218 @@ def test_the_request_through_the_real_anthropic_sdk() -> None:
     assert all(x in sent["beta"] for x in A.BETAS)
     assert [e for e in events if e["type"] == "answer.card"][0]["text"] == "Observed: 3 trades."
     assert store.session(sid, "u1")["container"] == "cont_9"  # type: ignore[index]
+
+
+# ---- runs cut off: a restart, the wall clock, a shutdown ----
+
+
+class FakeTimer:
+    """The watchdog's timer, fired by the test: a faked clock."""
+
+    made: list[FakeTimer] = []
+
+    def __init__(self, interval: float, fn: Any, args: tuple[Any, ...] = ()) -> None:
+        self.interval, self.fn, self.args, self.daemon, self.cancelled = interval, fn, args, False, False
+        FakeTimer.made.append(self)
+
+    def start(self) -> None:
+        pass
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+    def fire(self) -> None:
+        self.fn(*self.args)
+
+
+class BlockedModel:
+    """A model request that never answers on its own: it ends only when the run closes its stream."""
+
+    def __init__(self) -> None:
+        self.entered, self.closed, self.requests = threading.Event(), threading.Event(), 0
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
+
+    def _stream(self, **kw: Any) -> Any:
+        self.requests += 1
+        model = self
+
+        class Ctx:
+            def __enter__(self) -> Any:
+                return self
+
+            def __exit__(self, *a: Any) -> None:
+                pass
+
+            def close(self) -> None:
+                model.closed.set()
+
+            def get_final_message(self) -> Any:
+                model.entered.set()
+                model.closed.wait(30)
+                raise httpx.ReadError("stream closed")
+
+        return Ctx()
+
+
+def _session_with_findings() -> tuple[Store, str]:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    store.add_finding(sid, {"label": "observed", "title": "Two-sided in 93 of 94 windows", "counts": True,
+                            "stat": {"text": "93 of 94 windows"}})  # fmt: skip
+    store.add_finding(sid, {"label": "inferred", "title": "Seems to buy once the outcome looks settled", "counts": True})
+    store.add_finding(sid, {"label": "observed", "title": "Made-up", "counts": False})
+    return store, sid
+
+
+def _asking(agent: A.Agent, sid: str, events: list[dict[str, Any]]) -> threading.Thread:
+    t = threading.Thread(target=agent.ask, args=(sid, "u1", "Go", events.append), daemon=True)
+    t.start()
+    return t
+
+
+def _worker(run: int) -> threading.Thread | None:
+    return next((t for t in threading.enumerate() if t.name == f"research-run-{run}"), None)
+
+
+def test_the_watchdog_ends_a_run_blocked_on_the_model_at_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """RESEARCH_MAX_SECONDS is a wall clock, not a check between rounds: a request that never comes back still ends
+    the run at the limit, with its findings as a partial answer."""
+    FakeTimer.made.clear()
+    store, sid = _session_with_findings()
+    model = BlockedModel()
+    agent = A.Agent(FakeReads(), store, model)  # type: ignore[arg-type]
+    agent.timer = FakeTimer
+    events: list[dict[str, Any]] = []
+    asking = _asking(agent, sid, events)
+    assert model.entered.wait(5)
+    timer = FakeTimer.made[-1]
+    assert timer.interval == pytest.approx(A.MAX_SECONDS, abs=1)  # set for the whole budget from the start
+    asking.join(0.3)
+    assert asking.is_alive() and "done" not in [e["type"] for e in events]  # nothing ends it but the clock
+    timer.fire()  # the limit
+    asking.join(5)
+    assert not asking.is_alive()
+    kinds = [e["type"] for e in events]
+    assert kinds[-4:] == ["answer.card", "notice", "usage", "done"] and "error" not in kinds
+    card = events[kinds.index("answer.card")]
+    assert card["partial"] and card["finding_ids"] == ["F1", "F2"]
+    assert card["observed"] == ["Two-sided in 93 of 94 windows: 93 of 94 windows"]
+    assert card["inferred"] == ["Seems to buy once the outcome looks settled"]
+    assert "10-minute limit" in events[kinds.index("notice")]["text"]
+    assert model.closed.is_set()  # the blocked request was closed, not left running
+    run = store.runs()[0]
+    assert run["error"] == "over_time" and run["ended"]
+    w = _worker(events[0]["run"])
+    if w:
+        w.join(5)
+    assert [m["role"] for m in store.messages(sid)] == ["user"]  # nothing of the stopped turn was kept
+    assert len(events) == len(kinds)  # nothing after done
+
+
+def test_the_watchdog_ends_a_run_blocked_on_a_read_and_the_read_returning_later_adds_nothing() -> None:
+    FakeTimer.made.clear()
+    store, sid = _session_with_findings()
+    release, reading = threading.Event(), threading.Event()
+
+    class SlowReads(FakeReads):
+        def wallet_trades(self, *a: Any) -> dict[str, Any]:
+            reading.set()
+            release.wait(30)
+            return super().wallet_trades(*a)
+
+    model = _model(_calls_tool(), _answers("Observed: 3 trades."))
+    agent = A.Agent(SlowReads(), store, model)  # type: ignore[arg-type]
+    agent.timer = FakeTimer
+    events: list[dict[str, Any]] = []
+    asking = _asking(agent, sid, events)
+    assert reading.wait(5)
+    FakeTimer.made[-1].fire()
+    asking.join(5)
+    assert not asking.is_alive() and events[-1]["type"] == "done"
+    n_events, n_messages = len(events), len(store.messages(sid))
+    release.set()  # the read comes back after the run ended
+    w = _worker(events[0]["run"])
+    if w:
+        w.join(5)
+    assert len(events) == n_events and len(store.messages(sid)) == n_messages and len(model.requests) == 1
+    # the conversation ends on the agent's call: the next question answers it as not run, then goes on
+    agent.timer = threading.Timer
+    A.Agent(FakeReads(), store, model).ask(sid, "u1", "Ask again", lambda e: None)  # type: ignore[arg-type]
+    last = model.requests[1]["messages"][-1]
+    assert [b["type"] for b in last["content"]] == ["tool_result", "text"]
+    assert last["content"][0]["tool_use_id"] == "tu_1" and last["content"][0]["is_error"]
+    assert last["content"][0]["content"] == A.NOT_RUN and last["content"][1]["text"] == "Ask again"
+
+
+def test_a_run_the_last_process_died_in_ends_as_interrupted_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """10 Nov ~17:00 UTC: a deploy replaced the container mid-run. At the next start the run gets its findings as a
+    partial answer, the interrupted notice and done, so the page never stays "Working"."""
+    from fastapi.testclient import TestClient
+
+    from signals.research import server
+
+    store, sid = _session_with_findings()
+    run = store.start_run(sid, "u1")  # the killed process's run: never ended
+    store.add_event(sid, {"type": "ask.started", "v": 2, "run": run, "ask_id": run, "text": "Go", "context": None})
+    store.add_event(sid, {"type": "finding.added", "v": 2, "run": run, "finding_id": "F1"})
+    other = store.new_session("u2")  # a session whose cut-off run was followed by a finished one
+    old = store.start_run(other, "u2")
+    newer = store.start_run(other, "u2")
+    store.update_run(newer, ended=time.time())
+    monkeypatch.setattr(server, "store", store)
+    with TestClient(server.app):  # startup
+        pass
+    evs = store.events(sid)
+    assert [e["type"] for e in evs] == ["ask.started", "finding.added", "answer.card", "notice", "done"]
+    card, notice = evs[2], evs[3]
+    assert card["partial"] and card["finding_ids"] == ["F1", "F2"] and card["run"] == run and card["v"] == A.EVENT_VERSION
+    assert notice["text"] == "This breakdown was interrupted by an update. Ask again to finish it."
+    assert store.events(other) == []  # a later run went on: only closed in the store
+    ended = {r["id"]: r for r in store.runs()}
+    assert ended[run]["error"] == "interrupted" and ended[run]["ended"] and ended[old]["error"] == "interrupted"
+    assert A.recover(store) == 0  # once only
+    server.app.dependency_overrides[server.auth.user_of] = lambda: "u1"
+    try:
+        s = TestClient(server.app).get(f"/api/research/sessions/{sid}").json()
+    finally:
+        server.app.dependency_overrides.clear()
+    assert s["running"] is False and s["events"][-1]["type"] == "done"
+
+
+def test_an_interrupted_run_without_findings_still_says_so() -> None:
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    run = store.start_run(sid, "u1")
+    assert A.recover(store) == 1
+    assert [(e["type"], e.get("text")) for e in store.events(sid)] == [("notice", A.INTERRUPTED), ("done", None)]
+    assert store.events(sid)[0]["run"] == run
+
+
+def test_sigterm_ends_running_breakdowns_then_hands_over(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Railway's SIGTERM: running breakdowns write where they got to and end before uvicorn's own handler runs."""
+    import signal
+
+    from signals.research import server
+
+    store, sid = _session_with_findings()
+    model = BlockedModel()
+    agent = A.Agent(FakeReads(), store, model)  # type: ignore[arg-type]
+    monkeypatch.setattr(server, "_agent", agent)
+    events: list[dict[str, Any]] = []
+    asking = _asking(agent, sid, events)
+    assert model.entered.wait(5)
+    handed: list[int] = []
+    original = signal.signal(signal.SIGTERM, lambda sig, frame: handed.append(sig))  # stands in for uvicorn's
+    try:
+        server._on_sigterm()
+        signal.raise_signal(signal.SIGTERM)
+    finally:
+        signal.signal(signal.SIGTERM, original)
+    assert handed == [signal.SIGTERM]
+    asking.join(5)
+    assert not asking.is_alive()
+    kinds = [e["type"] for e in events]
+    assert kinds[-4:] == ["answer.card", "notice", "usage", "done"]
+    assert events[kinds.index("notice")]["text"] == A.INTERRUPTED
+    assert store.runs()[0]["error"] == "interrupted"
+    assert A.recover(store) == 0  # already closed: nothing for the next start

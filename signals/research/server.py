@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -32,8 +34,55 @@ HEARTBEAT_S = 15.0
 if HOSTED and not auth.clerk_frontend_api(auth.CLERK_KEY):
     raise SystemExit("research: RESEARCH_HOSTED=1 needs CLERK_PUBLISHABLE_KEY (sign-in), refusing to start open.")
 
-app = FastAPI(title="Signals research", docs_url=None, redoc_url=None)
 store = Store()
+
+
+def recover() -> int:
+    """Runs the store still has as running died with the last process (a deploy replaced the container): each ends
+    as interrupted, its findings so far kept as a partial answer (``agent.recover``)."""
+    from signals.research.agent import recover as close_unfinished
+
+    return close_unfinished(store)
+
+
+def interrupt_all() -> int:
+    """Shutdown: every running breakdown writes where it got to and ends now, so its page never stays "Working"."""
+    return _agent.stop_all() if _agent is not None else 0
+
+
+def _on_sigterm() -> None:
+    """Before uvicorn's own SIGTERM handling (which waits for open event streams), end the running breakdowns: their
+    streams then close at once. Bounded, so a stuck write can't hold up the exit; a run the process dies in anyway is
+    closed by ``recover`` at the next start."""
+    if threading.current_thread() is not threading.main_thread():
+        return
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def handle(sig: int, frame: Any) -> None:
+        from signals.research.agent import STOP_WAIT_S
+
+        t = threading.Thread(target=interrupt_all, name="research-shutdown", daemon=True)
+        t.start()
+        t.join(timeout=STOP_WAIT_S + 1)
+        if callable(previous):
+            previous(sig, frame)
+        else:  # nothing else was listening: exit as the signal would have
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    signal.signal(signal.SIGTERM, handle)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    n = recover()
+    if n:
+        print(f"research: closed {n} breakdowns the last process was running", flush=True)
+    _on_sigterm()  # uvicorn has installed its handlers by now: this one runs first, then hands over
+    yield
+
+
+app = FastAPI(title="Signals research", docs_url=None, redoc_url=None, lifespan=lifespan)
 _agent: Any = None
 _reads: Any = None  # the service's reads when no agent is running yet (tests set it)
 _running: dict[str, str] = {}  # session -> user, while a run is going
