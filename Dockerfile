@@ -5,7 +5,7 @@
 # own Railway service, in a region Polymarket takes orders from, with no volume.
 
 # The /copy page (copy-web: React, Privy, Polymarket's client), built into static/copy.
-FROM node:22-slim AS copyweb
+FROM node:24-slim AS copyweb
 WORKDIR /web
 COPY copy-web/package.json copy-web/package-lock.json ./
 RUN npm ci --legacy-peer-deps --no-audit --no-fund
