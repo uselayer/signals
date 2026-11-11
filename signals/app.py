@@ -56,7 +56,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import basket, monitoring, owner_alerts, records, us_match, watch, welcome, why
+from signals import basket, copying, monitoring, owner_alerts, records, us_match, watch, welcome, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -3995,6 +3995,85 @@ def find_trader(q: str = "") -> dict[str, Any]:
     return {"wallet": None, "results": list(out.values())[:FIND_LIMIT]}
 
 
+class CopyStart(BaseModel):
+    owner: str
+    country: str | None = None
+    blocked: bool
+
+
+class CopyFinish(BaseModel):
+    wallet: str
+
+
+class BuilderSign(BaseModel):
+    method: str
+    path: str
+    body: str | None = None
+
+
+_EVM = re.compile(r"0x[0-9a-fA-F]{40}")
+
+
+def copy_user(request: Request) -> str:
+    """Signed in, and one-tap copy is on for this account (the owner's flag, SIGNALS_COPY_USERS); else 404."""
+    uid = _session(request, "Sign in to copy trades.")
+    if not copying.on_for(uid):
+        raise HTTPException(404, detail="Not found.")
+    return uid
+
+
+@app.get("/api/me/copy")
+def copy_state(response: Response, uid: str = Depends(copy_user)) -> dict[str, Any]:
+    """Where this account is in setting up copying: none, key (a trading key made, not approved yet) or ready."""
+    response.headers["Cache-Control"] = "no-store"
+    with _db() as con:
+        w = copying.wallet_of(con, uid)
+    return {"state": w["state"] if w else "none", "signer": w and w["signer"], "wallet": w and w["wallet"],
+            "owner": w and w["owner"], "usd": copying.COPY_USD, "collar": copying.COLLAR,
+            "privy_app_id": copying.PRIVY_APP_ID, "builder_code": copying.BUILDER_CODE or None}  # fmt: skip
+
+
+@app.post("/api/me/copy/start")
+def copy_start(req: CopyStart, response: Response, uid: str = Depends(copy_user)) -> dict[str, Any]:
+    """After the page asked Polymarket's geoblock from the follower's browser: their Signals trading key's address.
+    Refused where Polymarket doesn't let people open positions."""
+    response.headers["Cache-Control"] = "no-store"
+    if req.blocked:
+        raise HTTPException(403, detail="Polymarket doesn't allow new trades where you are, so copying isn't available.")
+    if not _EVM.fullmatch(req.owner):
+        raise HTTPException(400, detail="That isn't a wallet address.")
+    try:
+        with _db() as con:
+            signer = copying.start(con, uid, req.owner, (req.country or "")[:8] or None)
+    except copying.CopyError as e:
+        raise HTTPException(409, detail=str(e)) from e
+    return {"signer": signer}
+
+
+@app.post("/api/me/copy/finish")
+def copy_finish(req: CopyFinish, response: Response, uid: str = Depends(copy_user)) -> dict[str, Any]:
+    """The page's last step: the Deposit Wallet is deployed, trading approved and the trading key authorized."""
+    response.headers["Cache-Control"] = "no-store"
+    if not _EVM.fullmatch(req.wallet):
+        raise HTTPException(400, detail="That isn't a wallet address.")
+    try:
+        with _db() as con:
+            copying.finish(con, uid, req.wallet)
+    except copying.CopyError as e:
+        raise HTTPException(409, detail=str(e)) from e
+    ph("copy set up", uid, {})
+    return {"state": "ready"}
+
+
+@app.post("/api/copy/builder-sign")
+def copy_builder_sign(req: BuilderSign, uid: str = Depends(copy_user)) -> dict[str, str]:
+    """Builder headers for one relayer call the set-up page makes (the SDK's remoteBuilderSigning)."""
+    try:
+        return copying.builder_headers(uid, req.method, req.path, req.body)
+    except copying.CopyError as e:
+        raise HTTPException(403, detail=str(e)) from e
+
+
 @app.post("/api/me/telegram")
 def connect_telegram(response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
     """A one-time link to our Telegram bot: Start there connects that chat to your alerts (CODE_TTL_S)."""
@@ -4268,11 +4347,15 @@ def _on_update(u: dict[str, Any]) -> None:
     if cb:  # a button under an alert: "Useful" / "Not useful", or "Stop alerts from …"
         chat = str(((cb.get("message") or {}).get("chat") or {}).get("id") or "")
         data = str(cb.get("data") or "")
-        ack = _vote(chat, data) if data.startswith("v:") else None
+        ack = _vote(chat, data) if data.startswith("v:") else "Buying…" if data.startswith("cp:") else None
         try:  # quietly: a small note on the tap, no message in the chat
             tg("answerCallbackQuery", callback_query_id=cb.get("id"), **({"text": ack} if ack else {}))
         except RuntimeError:
             pass
+        if chat and data.startswith("cp:"):  # "Copy $25" (signals/copying.py): off the bot's loop, an order takes seconds
+            mid = (cb.get("message") or {}).get("message_id")
+            threading.Thread(target=_on_copy, args=(chat, data[3:], mid), daemon=True, name="copy").start()
+            return
         if chat and data.startswith(("few:", "am:")):  # under alerts sent before the alert rules (10 Nov): still work
             _on_choice(chat, data, (cb.get("message") or {}).get("message_id"))
             return
@@ -4431,6 +4514,38 @@ def _chat_owner(chat: str) -> str | None:
     return next((uid for uid, x in _load_follows()["users"].items() if x.get("chat") == chat), None)
 
 
+def _on_copy(chat: str, alert_id: str, message_id: int | None = None) -> None:
+    """A tap on "Copy $25" under an alert (signals/copying.py): the order is kept as placing (a second tap never
+    buys twice), the order service places it from the follower's own wallet, and the reply under the alert says what
+    was bought, or plainly why nothing was."""
+    uid = _chat_owner(chat)
+    reply = {"reply_to_message_id": message_id} if message_id else {}
+    if not copying.on_for(uid):
+        _say(chat, "Copying isn't on for your account.", **reply)
+        return
+    assert uid is not None
+    try:
+        with _db() as con:
+            order = copying.claim(con, alert_id, uid)
+    except copying.CopyError as e:
+        _say(chat, html.escape(str(e), quote=False), **reply)
+        return
+    answer, error = None, None
+    try:
+        answer = copying.service("/order", {k: order[k] for k in ("enc", "wallet", "token", "usd", "max_price")})
+    except copying.CopyError as e:
+        error = str(e)
+    with _db() as con:
+        copying.record(con, alert_id, answer, error)
+    filled = bool(answer and answer.get("ok"))
+    ph("telegram copy tapped", uid, {"filled": filled, "code": None if filled else (answer or {}).get("code") or "error"}
+       | _alert_facts(alert_id)[1])  # fmt: skip
+    try:
+        _say(chat, html.escape(copying.result_text(order, answer, error), quote=False), **reply)
+    except RuntimeError:
+        pass
+
+
 # ---- what alerts keep: alerts.db in the store ----
 # alerts: every alert sent (and the day's "limit reached" message), per account, with its Telegram message, so
 # the daily cap can count them, a grouped alert can be edited in place and a vote names its alert.
@@ -4475,7 +4590,7 @@ CREATE TABLE IF NOT EXISTS seen_trades (trader TEXT NOT NULL, trade_id TEXT NOT 
 CREATE TABLE IF NOT EXISTS pace (trader TEXT PRIMARY KEY, per_day REAL NOT NULL, usd REAL, days REAL NOT NULL,
   at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS typing (chat TEXT PRIMARY KEY, trader TEXT NOT NULL, flow TEXT NOT NULL, at REAL NOT NULL);
-"""
+""" + copying.SCHEMA
 
 
 def alerts_db() -> Path:
@@ -4525,13 +4640,16 @@ def _sent_today(uid: str, kinds: tuple[str, ...] = COUNTED, trader: str | None =
         return int(con.execute(q, (uid, _today(), *kinds)).fetchone()[0])
 
 
-def _keyboard(alert_id: str, stop: str | None = None, text: str = "") -> dict[str, Any]:
+def _keyboard(alert_id: str, stop: str | None = None, text: str = "", copy: bool = False) -> dict[str, Any]:
     """Under every alert: when it's about one trader you follow (``stop``), "Edit rule" (their alert rule, where
     "Stop alerts from <name>" now is: _on_rule) and "Pause 24 h"; then Useful / Not useful. With signing in from alerts
     on (TG_LOGIN) and a "Check current price" link in the alert's ``text``, that link as a login button first
     (``/tg/in``). Alerts sent before 10 Nov carry "Stop alerts from …" (``unf:``) and "Fewer alerts" (``few:``): both
-    still work."""
+    still work. With ``copy`` (one-tap copy is on for this account and set up: signals/copying.py), "Copy $25"
+    first: a tap buys it (_on_copy)."""
     rows: list[list[dict[str, Any]]] = []
+    if copy:
+        rows.append([{"text": f"Copy ${copying.COPY_USD:g}", "callback_data": f"cp:{alert_id}"}])
     if _tg_login_on() and f"/go/{alert_id}/check?" in text:
         rows.append([{"text": "Check current price on Signals", "login_url": {"url": f"{SITE}/tg/in/{alert_id}"}}])
     if stop:
@@ -4556,7 +4674,7 @@ RETRY_S = (30.0, 60.0, 120.0, 240.0)  # waits before each try again of a tempora
 
 def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, trader: str | None = None,
           outcome: str | None = None, trade_at: float | None = None, stop: str | None = None,
-          trigger_at: float | None = None,
+          trigger_at: float | None = None, copy: tuple[str, float] | None = None,
           on_queue: Callable[[sqlite3.Connection], Any] | None = None) -> str | None:  # fmt: skip
     """Send one alert if today's cap allows it; its id when it went out now, else None (not sent, or sent later by
     a retry). At the cap, the first alert that doesn't fit sends cap_text (the limit, and when alerts resume) instead,
@@ -4564,7 +4682,8 @@ def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, tra
     ``text_for`` gets the alert's id (its links can name it). ``trade_at``: when the alert's buys began (a group's
     first buy); ``trigger_at``: when the buy that sent it was made (defaults to ``trade_at``). ``on_queue`` runs in
     the transaction that keeps the alert (a summary clears what it sums up there: kept and cleared together, or
-    neither). Whether a trade is sent at all, held for a summary or left to the Feed is the person's choice for that
+    neither). ``copy`` (the outcome token and the price the alert shows): a "Copy" button when the account has
+    one-tap copy on and set up, and what it buys kept (copying.offer). Whether a trade is sent at all, held for a summary or left to the Feed is the person's choice for that
     trader (_wants), decided before this.
 
     Never twice, across any crash or failure (Telegram can't tell a repeat): the alert is kept (queued, with its
@@ -4586,10 +4705,16 @@ def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, tra
     now = time.time()
     aid = secrets.token_urlsafe(6)  # 8 characters: fits Telegram's 64-byte button data with room to spare
     text = text_for(aid)
-    body = json.dumps({"text": text, "markup": _keyboard(aid, stop, text)})
+    can_copy = False
+    if copy and copying.on_for(uid):
+        with _db() as con:
+            can_copy = copying.ready(con, uid)
+    body = json.dumps({"text": text, "markup": _keyboard(aid, stop, text, can_copy)})
     with _db() as con:
         if on_queue is not None:
             on_queue(con)
+        if can_copy and copy:
+            copying.offer(con, aid, uid, copy[0], copy[1])
         con.execute("INSERT INTO alerts (id, uid, chat, kind, trader, outcome, message_id, sent_at, trade_at, day,"
                     " trigger_at, state, tries, queued_at, next_at, body) VALUES"
                     " (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)",
@@ -5657,7 +5782,7 @@ def _deliver(uid: str, chat: str, b: NewBuy, category: str | None, tag: str = ""
                     trade_at=first[0][2], trigger_at=b.at)  # fmt: skip
         return 1 if aid else 0
     aid = _send(uid, chat, "buy", lambda aid: tag + b.text(aid), trader=b.wallet, outcome=b.outcome, trade_at=b.at,
-                stop=b.wallet)  # fmt: skip
+                stop=b.wallet, copy=(b.t.token, b.now) if b.t.token and b.now else None)  # fmt: skip
     return 1 if aid else 0
 
 
@@ -6330,6 +6455,17 @@ def metrics(request: Request, response: Response, days: int = 30) -> dict[str, A
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(HERE / "static" / "index.html")
+
+
+@app.get("/copy")
+@app.get("/copy/")
+def copy_page() -> FileResponse:
+    """Setting up one-tap copy (web/copy, built into static/copy by the Dockerfile). Shows nothing to accounts
+    without the flag: the page asks /api/me/copy first."""
+    page = HERE / "static" / "copy" / "index.html"
+    if not page.exists():
+        raise HTTPException(404, detail="Not found.")
+    return FileResponse(page, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/favicon.ico")

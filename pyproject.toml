@@ -10,6 +10,7 @@ dependencies = [
   "pyjwt[crypto]>=2.8",
   "anthropic>=2.7",  # the research agent (signals/research): Claude API with code execution and programmatic tool calls
   "brotli>=1.1",
+  "polymarket-client==0.18.0",
 ]
 
 [project.scripts]

@@ -42,7 +42,7 @@ export function PlanStage({ inv, act }) {
 // ---------- tiles
 export function WindowsStage({ inv, ui, act }) {
   const all = inv.summaries;
-  if (!all.length) return html`<div class="ghostbox">Windows appear here as the agent draws them.</div>`;
+  if (!all.length) return html`<div class="ghostbox">${inv.winsLoading ? 'Loading its windows…' : 'Windows appear here as the agent draws them.'}</div>`;
   const hl = ui.hl, n = tally(all), tiles = filterTiles(all, ui.wf), lean = leanLine(buyPoints(all).pts);
   const fl = FILTERS.find(f => f[0] === ui.wf);
   return html`<div class="ov">
