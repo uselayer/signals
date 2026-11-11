@@ -312,3 +312,7 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 /* the list: a running breakdown's row */
 .list .r.run { color: var(--fg); display: inline-flex; align-items: center; gap: 7px; }
 .list .r.ready { color: var(--accent); font-weight: 600; }
+/* a Start that waits for your other breakdown */
+.list .r.queued { color: var(--ink); }
+.waitnote { display: flex; gap: 10px; align-items: flex-start; border-radius: 12px; padding: 10px 12px; background: var(--ink-soft); font-size: 14px; }
+.waitnote .dot { margin-top: 6px; }

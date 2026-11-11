@@ -98,6 +98,7 @@ function rowLabel(s) {
   const st = rowState(s, readLs(OPENED, {}), since());
   if (st === 'running') return html`<span class="r run"><span class="dot live"></span>${rowProgress(s.progress)}</span>`;
   if (st === 'ready') return html`<span class="r ready">✓ Ready</span>`;
+  if (st === 'queued') return html`<span class="r queued">Queued · starts after your current one</span>`;
   return html`<span class="r">${st === 'stopped' ? 'Stopped' : 'Saved'}</span>`;
 }
 
@@ -208,9 +209,22 @@ function Investigation({ api, id }) {
   if (ui.win && !cur) loadWin(ui.win);
   const steps = cur && cur.id ? stepsOf(cur) : [];
 
+  // A plan waiting for Start while another breakdown of yours works: Start becomes "Queue it", with where that one is
+  // (the list's row for it, read every 15 s while this plan waits).
+  const lastPlan = inv.plans[inv.planOrder[inv.planOrder.length - 1]];
+  const mayQueue = !api.fixtures && !inv.running && !!lastPlan && lastPlan.status === 'proposed';
+  useEffect(() => {
+    if (!mayQueue) { if (st.current.other) { st.current.other = null; redraw(); } return undefined; }
+    const look = () => api.sessions().then(rows => { st.current.other = rows.find(r => r.running && r.id !== id) || null; redraw(); }, () => {});
+    look();
+    const t = setInterval(look, 15000);
+    return () => clearInterval(t);
+  }, [mayQueue, id]);
+
   const runCall = async p => { try { await p; startFollow(); } catch (e) { inv.feed.push({ type: 'error', text: e.message }); redraw(); } };
   const act = {
     scopeOpts: st.current.scope,
+    other: st.current.other || null,
     toggleScope: (oid, on) => { on ? st.current.scope.add(oid) : st.current.scope.delete(oid); redraw(); },
     approve: pid => runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])),
     editPlan: pid => { ui.composeFocus = true; ui.composeText = 'Change the plan: '; ui.editing = pid; redraw(); },

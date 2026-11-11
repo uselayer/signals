@@ -11,11 +11,12 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
   const feedRef = useRef(), n = inv.feed.length;
   useEffect(() => { const el = feedRef.current; if (el && ui.tab === 'findings') el.scrollTop = el.scrollHeight; }, [n, ui.tab]);
   const working = inv.running;
-  const last = inv.plans[inv.planOrder[inv.planOrder.length - 1]], waiting = !working && last && last.status === 'proposed';
+  const last = inv.plans[inv.planOrder[inv.planOrder.length - 1]];
+  const queued = !working && last && last.status === 'queued', waiting = queued || (!working && last && last.status === 'proposed');
   const nCards = inv.feed.filter(x => (x.type === 'finding' && (inv.findings[x.id] || {}).counts !== false) || x.type === 'answer').length;
   return html`<aside class="agent" aria-label="The research agent">
     <div class="agent-head"><span class=${'dot ' + (working ? 'live' : inv.done && !waiting ? 'ok' : '')}></span>
-      <div><div class="t">Signals agent</div><div class="s">${working ? html`Working · <${RunProgress} inv=${inv} />` : inv.error ? 'Stopped on an error' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
+      <div><div class="t">Signals agent</div><div class="s">${working ? html`Working · <${RunProgress} inv=${inv} />` : inv.error ? 'Stopped on an error' : queued ? 'Queued · starts when your other breakdown finishes' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
     <div class="atabs" role="tablist"><button role="tab" class=${ui.tab === 'findings' ? 'on' : ''} onClick=${() => act.tab('findings')}>Findings${nCards ? ` · ${nCards}` : ''}</button>
       <button role="tab" class=${ui.tab === 'activity' ? 'on' : ''} onClick=${() => act.tab('activity')}>Activity and data</button></div>
     <div class="feed" ref=${feedRef}>${ui.tab === 'activity' ? html`<${Activity} inv=${inv} />` : html`
