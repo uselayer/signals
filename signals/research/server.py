@@ -180,11 +180,15 @@ def run_progress(events: list[dict[str, Any]]) -> dict[str, Any]:
 @app.get("/api/research/sessions")
 def sessions(user: str = Depends(auth.user_of)) -> JSONResponse:
     """Your breakdowns, newest first; one still running says so, with where it has got to (``run_progress``)."""
-    rows = store.sessions(user)
+    rows, last = store.sessions(user), store.last_runs(user)
     for r in rows:
         if r["id"] in _running:
             r["running"] = True
             r["progress"] = run_progress(store.events(r["id"]))
+        elif (lr := last.get(r["id"])) and lr["ended"]:
+            r["ended"] = lr["ended"]  # its latest run's end: Ready (not opened since) on the pages, from this
+            if lr["error"]:
+                r["stopped"] = lr["error"]
     return _private({"sessions": rows})
 
 
@@ -208,6 +212,32 @@ def _emit(sid: str, event: dict[str, Any]) -> None:
     store.add_event(sid, {"v": EVENT_VERSION, "run": None, **event})
     with _changed:
         _changed.notify_all()
+
+
+def tell_ready(sid: str, user: str) -> bool:
+    """A Started plan that ran to its end: the engine sends its owner "Your breakdown is ready" on Telegram, if they
+    connected it (``/api/research-ready``; the engine owns the bot and the chats). Off without RESEARCH_NOTIFY_KEY,
+    the same key on both services. A run that stopped (an error, the time limit, a shutdown) sends nothing. Never in
+    the way: a failure is logged and dropped. Whether the engine took it."""
+    import urllib.request
+
+    from signals.research.data import ENGINE
+
+    key = os.environ.get("RESEARCH_NOTIFY_KEY", "")
+    last = store.last_runs(user).get(sid) or {}
+    if not key or not last.get("ended") or last.get("error"):
+        return False
+    s = store.session(sid, user) or {}
+    found = {e.get("finding_id") for e in store.events(sid) if e.get("type") == "finding.added" and e.get("counts", True)}
+    body = {"user": user, "id": sid, "title": s.get("title") or "", "findings": len(found - {None})}
+    req = urllib.request.Request(f"{ENGINE}/api/research-ready", data=json.dumps(body).encode(), method="POST",
+                                 headers={"content-type": "application/json", "authorization": f"Bearer {key}"})  # fmt: skip
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return bool(json.loads(r.read() or b"{}").get("sent"))
+    except (OSError, ValueError) as e:
+        print(f"research: ready message for {sid} not sent: {type(e).__name__}", flush=True)
+        return False
 
 
 def start_run(sid: str, user: str, text: str, *, context: dict[str, Any] | None = None,
@@ -235,6 +265,8 @@ def start_run(sid: str, user: str, text: str, *, context: dict[str, Any] | None 
                 _running.pop(sid, None)
             with _changed:
                 _changed.notify_all()
+        if (context or {}).get("action") == "approve":
+            tell_ready(sid, user)
 
     threading.Thread(target=go, name=f"research-{sid}", daemon=True).start()
     return _private({"started": True, "after": after}, 202)

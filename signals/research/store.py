@@ -103,6 +103,13 @@ class Store:
         return [dict(r) for r in self._q(
             "SELECT id, created, title FROM sessions WHERE user = ? ORDER BY created DESC LIMIT ?", (user, limit))]  # fmt: skip
 
+    def last_runs(self, user: str) -> dict[str, dict[str, Any]]:
+        """Each of ``user``'s sessions' latest run: when it ended (None: still going, or the process died in it) and
+        how it stopped (``error``: None when it ran to its end), for the list's Ready and Stopped."""
+        rows = self._q("SELECT session, ended, error FROM runs WHERE id IN "
+                       "(SELECT MAX(id) FROM runs WHERE user = ? GROUP BY session)", (user,))  # fmt: skip
+        return {r["session"]: {"ended": r["ended"], "error": r["error"]} for r in rows}
+
     def set_container(self, sid: str, container: str | None) -> None:
         """The session's code container, and when it was first given (None: none, a new one next time)."""
         self._q("UPDATE sessions SET container = ?, container_at = ? WHERE id = ?",

@@ -190,6 +190,15 @@ export function rowProgress(p, now = Date.now() / 1000) {
   return ['Running', step, c && c.left].filter(Boolean).join(' · ');
 }
 
+// A breakdown that isn't running, in the list: "ready" when its latest run ended cleanly after you last opened it (and
+// after `since`, the first visit with this code, within a day), "stopped" when it ended on an error, else "saved".
+// `opened` {id: seconds} is what you opened (signals.breakdowns.opened, shared with the main page's pill).
+export function rowState(r, opened, since, now = Date.now() / 1000) {
+  if (r.running) return 'running';
+  if (r.stopped) return 'stopped';
+  return r.ended && r.ended > since && r.ended > (opened[r.id] || 0) && now - r.ended < 86400 ? 'ready' : 'saved';
+}
+
 // Every number in a text, split around the ones the check flagged ({value_text, start, end}): so a card can strike
 // exactly the flagged number where it stands.
 export function splitFlagged(text, flagged) {
