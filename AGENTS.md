@@ -184,7 +184,7 @@ behind Vercel (see README, "Hosting").
   /rules lists everyone you follow, a line and a button each. Alerts sent before 10 Nov keep "Stop alerts" (`unf:`)
   and "Fewer alerts" (`few:`, `am:`), which still work. The suggested amount and pace come from `_measure_pace`, kept
   in alerts.db `pace`. At most 200 alerts per person per UTC day (a safety limit), then
-  one message that says when alerts resume (00:00 UTC, and how long until then) and nothing until the next day. When 2+ traders you follow buy the same outcome, each within 6 hours of the one before (1 hour in
+  one message that says how long until alerts resume ("Alerts resume in 5 h 12 min": no clock time; the day ends 00:00 UTC) and nothing until the next day. When 2+ traders you follow buy the same outcome, each within 6 hours of the one before (1 hour in
   Sports and Esports), the second buy sends one grouped alert (each one's price and how long ago they bought, the
   price now) and later buys edit it in place; it counts once. Every alert has
   "Useful / Not useful" (one vote per alert and account, changeable). Big trades ($10,000 or more) in your chosen
