@@ -309,3 +309,61 @@ def test_the_column_puts_the_answer_first_and_offers_one_next_step() -> None:
     js = (STATIC / "js" / "agent.js").read_text()
     assert "Next, I'd look at" not in js and "Numbers checked" not in js and "f.finding_id}</span>" not in js
     assert "x.type !== 'proposal'" in js and "lastP.state === 'open'" in js
+
+
+def test_an_accepted_next_step_shows_at_once_and_starts_a_new_run() -> None:
+    """Owner, 11 Nov: after Start on the agent's next step the column showed old messages and nothing else for up to
+    a minute, the old findings stayed mixed in, and the workspace kept the last run's view. Now the click shows at
+    once ("Starting…"), the server's ask replaces the page's echo, the column reads "Drafting a plan…" until the
+    plan comes, the accepted step starts run 2 (run 1 folds), a small question stays in run 2, and the plan the
+    workspace shows is the current run's."""
+    ev = [
+        {"type": "investigation.created", "title": "How does 0xb945 make money?", "question": "How does it make money?"},
+        {"type": "ask.started", "ask_id": 1, "text": "How does it make money?", "context": None},
+        {"type": "plan.proposed", "plan_id": "plan-1", "title": "One window", "steps": [{"id": 1, "title": "Read"}]},
+        {"type": "done"},
+        {"type": "ask.started", "ask_id": 2, "text": "Start", "context": {"plan_id": "plan-1", "action": "approve"}},
+        {"type": "plan.answered", "plan_id": "plan-1", "action": "approve"},
+        {"type": "finding.added", "finding_id": "F1", "title": "It buys both sides", "kind": "pattern"},
+        {"type": "answer.card", "ask_id": 2, "text": "It pairs Up and Down under $1."},
+        {"type": "proposal", "proposal_id": "p1", "text": "Next, I'd look at the whole of 10 Nov across every BTC 15-minute window."},
+        {"type": "done"},
+    ]
+    later = [
+        {"type": "proposal.answered", "proposal_id": "p1", "action": "accept"},
+        {"type": "ask.started", "ask_id": 3, "started_at": 1794400000,
+         "text": "Yes, go ahead: Next, I'd look at the whole of 10 Nov across every BTC 15-minute window.",
+         "context": {"proposal_id": "p1"}},
+    ]
+    planned = [{"type": "plan.proposed", "plan_id": "plan-2", "title": "All of 10 Nov", "steps": [{"id": 1, "title": "Read"}]}]
+    small = [{"type": "done"}, {"type": "ask.started", "ask_id": 4, "text": "Why did it lose at 14:15?", "context": None}]
+
+    def seq(xs: list[dict[str, Any]], o: int) -> list[dict[str, Any]]:
+        return [{**e, "seq": o + i, "v": 2} for i, e in enumerate(xs)]
+
+    a, b, c, d = seq(ev, 0), seq(later, 100), seq(planned, 200), seq(small, 300)
+    got = _page_store(
+        "const inv = S.emptyInv('x'), out = {}; const ap = xs => xs.forEach(e => S.apply(inv, e, null));\n"
+        "const runs = () => S.runs(S.groups(inv.feed));\n"
+        "const lastG = () => { const r = runs(); const g = r[r.length - 1].groups; return g[g.length - 1]; };\n"
+        f"ap({json.dumps(a)}); out.before = runs().length;\n"
+        # the click, as the page does it (app.js `sending`): its echo and Starting… before the server answers
+        "inv.feed.push({ type: 'ask', text: S.yesText(\"Next, I'd look at the whole of 10 Nov\"), pending: true, proposal: true });"
+        " inv.starting = true; inv.runPlan = null;\n"
+        "out.click = [runs().length, S.thinking(inv, lastG()).text, S.currentPlan(inv)];\n"
+        f"ap({json.dumps(b)});\n"
+        "out.started = [runs().length, inv.feed.filter(x => x.pending).length, lastG().ask.text, lastG().ask.proposal,"
+        " S.thinking(inv, lastG()).text, S.currentPlan(inv), S.runCards(inv, runs()[0]), S.runCards(inv, runs()[1])];\n"
+        f"ap({json.dumps(c)}); out.planned = [runs().length, S.currentPlan(inv).plan_id, S.thinking(inv, lastG()).text];\n"
+        f"ap({json.dumps(d)}); out.small = [runs().length, S.runTitle(inv, runs()[1], 1)];\n"
+        "process.stdout.write(JSON.stringify(out));"
+    )
+    assert got["before"] == 1
+    assert got["click"] == [2, "Starting…", None]  # shows at once, run 2 already, no stale plan
+    n, pending, text, prop, think, plan, cards1, cards2 = got["started"]
+    assert (n, pending, prop, plan) == (2, 0, True, None)
+    assert text == "I'd look at the whole of 10 Nov across every BTC 15-minute window."  # not "Yes: Yes, go ahead: Next…"
+    assert think == "Drafting a plan…"
+    assert (cards1, cards2) == (2, 0)  # Findings counts the current run only
+    assert got["planned"] == [2, "plan-2", "Working…"]
+    assert got["small"] == [2, "All of 10 Nov"]  # a question about the same scope stays in run 2

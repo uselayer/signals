@@ -5,7 +5,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser } from './api.js';
 import { fixtureApi } from './fixtures.js';
-import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState } from './store.js';
+import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
@@ -224,20 +224,30 @@ function Investigation({ api, id }) {
     return () => clearInterval(t);
   }, [mayQueue, id]);
 
-  const runCall = async p => { try { await p; startFollow(); } catch (e) { inv.feed.push({ type: 'error', text: e.message }); redraw(); } };
+  const runCall = async p => { try { const r = await p; if (r && r.started === false) { inv.starting = false; redraw(); } startFollow(); } catch (e) { inv.starting = false; inv.feed = inv.feed.filter(x => !x.pending); inv.feed.push({ type: 'error', text: e.message }); redraw(); } };
+  // The click shows at once (owner, 11 Nov: after Start the column sat still for up to a minute): what was sent goes
+  // in the column, the agent shows as starting, and the server's own ask.started replaces both.
+  const sending = (text, extra) => { if (text != null) inv.feed.push({ type: 'ask', text, pending: true, ...extra }); inv.starting = true; ui.tab = 'findings'; };
+  // A new run (an accepted next step, a plan's Start): the workspace moves to its plan, not the last run's chart.
+  const toPlan = () => { ui.stage = 'plan'; ui.followAgent = true; ui.hl = null; };
   const act = {
     scopeOpts: st.current.scope,
     other: st.current.other || null,
     toggleScope: (oid, on) => { on ? st.current.scope.add(oid) : st.current.scope.delete(oid); redraw(); },
-    approve: pid => runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])),
+    approve: pid => { sending(null); toPlan(); redraw(); runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])); },
     editPlan: pid => { ui.composeFocus = true; ui.composeText = 'Change the plan: '; ui.editing = pid; redraw(); },
     composed: () => { ui.composeFocus = false; ui.composeText = null; },
-    proposal: (it, yes) => { it.state = yes ? 'accepted' : 'declined'; redraw(); runCall(api.proposal(id, it.proposal_id, yes ? 'accept' : 'decline')); },
+    proposal: (it, yes) => {
+      it.state = yes ? 'accepted' : 'declined';
+      if (yes) { sending(yesText(it.text), { proposal: true }); inv.runPlan = null; toPlan(); }
+      redraw(); runCall(api.proposal(id, it.proposal_id, yes ? 'accept' : 'decline'));
+    },
     ask: q => {
-      if (ui.editing && /^Change the plan:/.test(q)) { const pid = ui.editing; ui.editing = null; return runCall(api.plan(id, pid, 'edit', q.replace(/^Change the plan:\s*/, ''))); }
+      if (ui.editing && /^Change the plan:/.test(q)) { const pid = ui.editing; ui.editing = null; sending(null); redraw(); return runCall(api.plan(id, pid, 'edit', q.replace(/^Change the plan:\s*/, ''))); }
       const c = ui.ctx; ui.ctx = null; ui.pin = null;
       let context = null;
       if (c) context = api.fixtures ? { ...c.context, answer: localAnswer(c, q) } : c.context;
+      sending(q, { ctx: c ? c.label : null });
       redraw(); runCall(api.ask(id, q, context));
     },
     askBurst: (w, b) => { ui.pop = null; ui.ctx = { kind: 'burst', label: `${shares(b.shares)} ${b.side} at ${mmss(b.t0)}, ${clock(w.start).slice(0, 5)} window`, w, b, context: { trade_ids: b.fills.slice(0, 50).map(x => x.trade_id) } };
@@ -274,6 +284,8 @@ function Investigation({ api, id }) {
       <div class="plan"><div style="display:flex;gap:12px"><span class="dot live"></span><div><h3>Loading its plan, windows and findings</h3><p class="muted small">Nothing is re-run: this is the saved breakdown.</p></div></div></div>
     </section></div>`;
   const totalProfit = inv.summaries.reduce((s, x) => s + (x.profit || 0), 0);
+  const rs = runs(groups(inv.feed)); // more than one: the header says which run the workspace is on
+  const cp = currentPlan(inv), runWaits = cp && (cp.status === 'proposed' || cp.status === 'queued') ? cp.status : null;
   const tabs = [['plan', 'Plan and data'], ['windows', `Windows${inv.summaries.length ? ' · ' + inv.summaries.length : ''}`]];
   if (cur && cur.id) tabs.push(['window', `Window: ${windowLabel(cur.start, cur.start + cur.end).replace(' UTC', '')}`], ['trades', `Fills · ${cur.trades.length}`]);
   return html`<div class="inv">
@@ -281,6 +293,8 @@ function Investigation({ api, id }) {
       <div class="head">
         <div class="muted small"><a href="#/">Breakdowns</a> /</div>
         <h1>${shortWallets(inv.title) || 'Breakdown'}</h1>
+        ${rs.length > 1 && html`<p class="nowrun"><span class=${'dot ' + (inv.running || inv.starting ? 'live' : runWaits ? '' : 'ok')}></span><span><b>Run ${rs.length}:</b> ${shortWallets(runTitle(inv, rs[rs.length - 1], rs.length - 1))}</span>
+          <span class="muted small">${inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for you to press Start' : 'done'} · earlier runs are folded in the agent's column</span></p>`}
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}<span>BTC Up or Down 15m</span>
           ${inv.summaries.length > 0 && html`<span>· ${plural(inv.summaries.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
