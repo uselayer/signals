@@ -3,8 +3,8 @@ import { html, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact
 import { Chart, Spark } from './chart.js';
 import { money, signedMoney, cents, shares, btc, signedBtc, mmss, clock, windowLabel, hm, day, plural } from './format.js';
 import { posText, fmtWhen } from './windowdata.js';
-import { splitFlagged, flagsFor } from './store.js';
-import { RunClock } from './clock.js';
+import { splitFlagged, flagsFor, rowProgress } from './store.js';
+import { RunProgress } from './clock.js';
 import { FILTERS, filterTiles, tally, buyPoints, pct, leanLine } from './allwindows.js';
 
 const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -16,12 +16,15 @@ const planMinutes = p => Math.max(1, Math.round((p.estimate_s ?? p.steps.reduce(
 const MARK = { queued: '', running: '…', done: '✓', warning: '!', failed: '×' };
 export function PlanStage({ inv, act }) {
   const p = inv.plans[inv.planOrder[0]];
+  const working = inv.running && p && p.status === 'approved', queued = p && p.status === 'queued';
+  // another breakdown of yours working (act.other, a row from the list): Start queues this one behind it
+  const other = p && p.status === 'proposed' ? act.other : null;
   if (!p) return html`<div class="plan"><div style="display:flex;gap:12px"><span class=${'dot ' + (inv.running ? 'live' : '')}></span><div><h3>${inv.running ? 'Working out a plan' : 'No plan yet'}</h3><p class="muted small">${inv.running ? 'The agent shows its plan here before it reads anything.' : 'Ask a question to start.'}</p></div></div></div>`;
   return html`<div class="plan">
     <div style="display:flex;gap:12px;align-items:flex-start"><span class=${'dot ' + (p.status === 'approved' && inv.running ? 'live' : p.status === 'done' ? 'ok' : '')} style="margin-top:6px"></span>
-      <div><h3>${p.status === 'proposed' ? 'Here is my plan' : p.status === 'done' || inv.done ? 'What I did' : 'Working on it'}</h3>
-      <p class="muted small">${p.title}${p.estimate_usd != null && p.status === 'proposed' ? ` · about ${money(p.estimate_usd)} of model time` : ''}${p.status === 'proposed' ? `, about ${planMinutes(p)} min. Nothing runs until you press Start.` : '. If you leave, the results stay here.'}</p>
-      ${inv.running && p.status !== 'proposed' && html`<p class="muted small"><${RunClock} inv=${inv} bar=${false} /></p>`}</div></div>
+      <div style="flex:1;min-width:0"><h3>${p.status === 'proposed' ? 'Here is my plan' : queued ? 'Queued' : p.status === 'done' || inv.done ? 'What I did' : 'Working on it'}</h3>
+      <p class="muted small">${p.title}${p.estimate_usd != null && p.status === 'proposed' ? ` · about ${money(p.estimate_usd)} of model time` : ''}${p.status === 'proposed' ? `, about ${planMinutes(p)} min. Nothing runs until you press Start.` : queued ? '. It starts by itself when your other breakdown finishes.' : working ? '' : '. Saved in your breakdowns.'}</p>
+      ${working && html`<p class="small runline"><${RunProgress} inv=${inv} /></p>`}</div></div>
     <ol>${p.steps.map((s, i) => html`<li class=${'ps ' + s.status}><span class="mk">${MARK[s.status] || i + 1}</span><div>
       <div class="ti">${s.title}</div>${s.source && html`<div class="src">${s.source}</div>`}
       ${s.summary && s.status !== 'queued' && html`<div class="sum">${s.summary}</div>`}
@@ -29,7 +32,10 @@ export function PlanStage({ inv, act }) {
       ${(s.warnings || []).map(w => html`<div class="warn">${w.text}</div>`)}</div></li>`)}</ol>
     ${p.scope && html`<div class="scope"><div><b>Scope:</b> ${p.scope.from ? `${p.scope.from} to ${p.scope.to}` : 'as asked'}.</div>
       ${(p.scope_options || []).map(o => html`<label><input type="checkbox" id=${'so-' + o.id} disabled=${p.status !== 'proposed'} checked=${act.scopeOpts.has(o.id)} onChange=${e => act.toggleScope(o.id, e.target.checked)} /> ${o.text}</label>`)}</div>`}
-    ${p.status === 'proposed' && html`<div style="display:flex;gap:8px"><button class="btn primary" onClick=${() => act.approve(p.plan_id)}>Start</button><button class="btn ghost" onClick=${() => act.editPlan(p.plan_id)}>Change the plan</button></div>`}
+    ${other && html`<div class="waitnote"><span class="dot live"></span><p>Your other breakdown is still running (${rowProgress(other.progress).replace(/^Running( · )?/, '') || 'working'}). This one starts as soon as it finishes.</p></div>`}
+    ${p.status === 'proposed' && html`<div style="display:flex;gap:8px"><button class="btn primary" onClick=${() => act.approve(p.plan_id)}>${other ? 'Queue it' : 'Start'}</button><button class="btn ghost" onClick=${() => act.editPlan(p.plan_id)}>Change the plan</button></div>`}
+    ${(working || queued) && html`<div class="leave"><p><b>You can leave this page.</b> ${queued ? "It starts by itself, and we'll tell you when it's ready." : "It keeps running, and we'll tell you when it's ready."}</p>
+      <div class="row"><a class="btn sm" href="#/">Start another breakdown</a><a class="btn sm" href="/#/">Go to Feed</a></div></div>`}
   </div>`;
 }
 

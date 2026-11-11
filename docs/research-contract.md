@@ -14,9 +14,9 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 |---|---|
 | `GET /api/research/config` | `{clerk_key, event_version}` |
 | `POST /api/research/sessions` `{title?}` | a new investigation → `{id}` |
-| `GET /api/research/sessions` | yours → `{sessions: [{id, created, title}]}` |
+| `GET /api/research/sessions` | yours → `{sessions: [{id, created, title, running?, progress?}]}`; a running one has `running: true` and `progress {started_at, typical_s, limit_s, steps?, done?, step?}` (steps only for a Started plan, counted from `step.status`); one that isn't has its latest run's `ended` and, when that run stopped on an error, `stopped` (its kind). The pages call an `ended` after you last opened it Ready. A Start waiting its turn has `queued: true` |
 | `GET /api/research/sessions/{id}` | `{id, title, created, running, events}` (every event so far) |
-| `POST /api/research/sessions/{id}/ask` `{question}` | starts a run → 202 `{started, after}`; 409 one of yours is running; 429 busy |
+| `POST /api/research/sessions/{id}/ask` `{question}` | starts a run → 202 `{started, after}`; 409 one of yours is running (except a new breakdown's first question, which only drafts its plan and may run beside it); 429 busy |
 | `GET /api/research/sessions/{id}/events?after=N` | server-sent events after `seq` N, then live until `done` |
 | `GET /api/research/sessions/{id}/windows` | `{windows: [window.summary], coverage: per_source}` |
 | `GET /api/research/sessions/{id}/windows/{window_id}` | `window.ready` (kept, else built now) |
@@ -166,6 +166,10 @@ dates, wallet addresses and slugs aren't checked.
 - **Plan** `POST /api/research/sessions/{id}/plan` `{plan_id, action: approve|edit, text?, scope_option_ids?}` →
   202 and a run ("Start", or "change the plan: …", which re-plans). 404 unknown plan, 409 already answered, 400 an
   edit with no text. Emits `plan.answered` `{plan_id, action, scope_option_ids, text}`.
+  An approve while another breakdown of yours is working queues instead: 202 `{started: false, queued: true, after}`,
+  `plan.queued` `{plan_id, scope_option_ids}` now, and `plan.answered` (approve) when it starts by itself as that one
+  ends (oldest first, 3 queued at most per person: 429 past that). The events stream stays open while it waits. A
+  restart drops the queue: each one waiting gets `plan.unqueued` `{plan_id, text}` and its plan waits for Start again.
 - **Proposal** `POST /api/research/sessions/{id}/proposals/{proposal_id}` `{action: accept|decline}`: accept → 202
   and a run; decline → 200 `{started: false}`, no run. 409 when already answered. Emits `proposal.answered`
   `{proposal_id, action}`.

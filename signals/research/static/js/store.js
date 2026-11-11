@@ -80,6 +80,10 @@ export function apply(s, e, ui) {
       break;
     }
     case 'plan.answered': { const p = s.plans[e.plan_id]; if (p) p.status = e.action === 'approve' ? 'approved' : 'edited'; break; }
+    // Start pressed while another breakdown of yours works: it waits, then starts by itself (plan.answered then);
+    // unqueued: it never started (a restart), so the plan waits for Start again
+    case 'plan.queued': { const p = s.plans[e.plan_id]; if (p) p.status = 'queued'; break; }
+    case 'plan.unqueued': { const p = s.plans[e.plan_id]; if (p) p.status = 'proposed'; if (e.text) feedPush(s, { type: 'note', text: e.text }); break; }
     case 'proposal.answered': { const it = s.feed.find(x => x.type === 'proposal' && x.proposal_id === e.proposal_id); if (it) it.state = e.action === 'accept' ? 'accepted' : 'declined'; break; }
     case 'step.status': {
       for (const p of Object.values(s.plans)) { const st = p.steps.find(x => x.id === e.step_id); if (st) Object.assign(st, { status: e.status, progress: e.progress, summary: e.summary ?? st.summary, warnings: e.warnings ?? st.warnings }); }
@@ -159,6 +163,45 @@ export function runClock(s, now = Date.now() / 1000) {
   else if (typical) { left = `taking longer than usual${cap ? `, ${cap}` : ''}`; frac = 0.8 + (limit > typical ? 0.15 * (e - typical) / (limit - typical) : 0.15); }
   else { left = cap ? `${cap} at the latest` : ''; frac = limit ? e / limit : 0; }
   return { elapsed, left, frac: limit || typical ? Math.min(0.95, Math.max(0.02, frac)) : null }; // no bar with nothing to measure against
+}
+
+// Where a Started plan has got to (Drew, 10 Nov: "how far along is it?"): "Step 2 of 4" and one bar segment per
+// step, from the steps' statuses (step.status), so the bar only moves when the agent finishes a step. Only while a
+// run works on an approved plan; a question's run has no steps, and the page shows its clock alone.
+export function planProgress(s) {
+  if (!s.running) return null;
+  const p = [...s.planOrder].reverse().map(id => s.plans[id]).find(x => x && x.status === 'approved');
+  return p && p.steps.length ? stepProgress(p.steps) : null;
+}
+const FINISHED = new Set(['done', 'warning', 'failed']);
+// The step being worked on is the one running, else the first not finished; with all finished it's writing up.
+// frac: how far the running step is, only when the agent counted it (step.status progress {done, total}).
+export function stepProgress(steps) {
+  const total = steps.length, done = steps.filter(x => FINISHED.has(x.status)).length;
+  let i = steps.findIndex(x => x.status === 'running');
+  if (i < 0) i = steps.findIndex(x => !FINISHED.has(x.status));
+  const cur = i < 0 ? null : steps[i];
+  const frac = cur && cur.status === 'running' && cur.progress && cur.progress.total > 0 ? Math.min(1, Math.max(0, cur.progress.done / cur.progress.total)) : null;
+  return { total, done, step: i < 0 ? total : i + 1, finishing: i < 0, label: i < 0 ? 'Finishing up' : `Step ${i + 1} of ${total}`,
+           segs: steps.map((x, k) => (FINISHED.has(x.status) ? 'done' : k === i ? 'run' : '')), frac };
+}
+
+// A running breakdown's row in the list, from the server's run_progress: "Running · step 2 of 4 · about 3 min left".
+export function rowProgress(p, now = Date.now() / 1000) {
+  p = p || {};
+  const c = p.started_at ? runClock({ running: true, clock: { start: p.started_at, limit: p.limit_s ?? null, typical: p.typical_s ?? null } }, now) : null;
+  const step = p.steps ? (p.done >= p.steps ? 'finishing up' : `step ${p.step} of ${p.steps}`) : null;
+  return ['Running', step, c && c.left].filter(Boolean).join(' · ');
+}
+
+// A breakdown that isn't running, in the list: "ready" when its latest run ended cleanly after you last opened it (and
+// after `since`, the first visit with this code, within a day), "stopped" when it ended on an error, else "saved".
+// `opened` {id: seconds} is what you opened (signals.breakdowns.opened, shared with the main page's pill).
+export function rowState(r, opened, since, now = Date.now() / 1000) {
+  if (r.running) return 'running';
+  if (r.queued) return 'queued';
+  if (r.stopped) return 'stopped';
+  return r.ended && r.ended > since && r.ended > (opened[r.id] || 0) && now - r.ended < 86400 ? 'ready' : 'saved';
 }
 
 // Every number in a text, split around the ones the check flagged ({value_text, start, end}): so a card can strike

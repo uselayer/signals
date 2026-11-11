@@ -4194,6 +4194,52 @@ def _say(chat: str, text: str, **kw: Any) -> Any:
     return tg("sendMessage", chat_id=chat, text=text, parse_mode="HTML", disable_web_page_preview=True, **kw)
 
 
+# ---- "Your breakdown is ready" (the research service asks; README "Research agent") ----
+# Drew, 10 Nov: you can leave a running breakdown, so something has to tell you it's done. When a Started plan runs to
+# its end, the research service posts here (it has no bot and no chats; the engine owns both). One message to the
+# account's connected chat, with a button that opens the breakdown; nothing for an account without Telegram. Off
+# (404) without RESEARCH_NOTIFY_KEY, the same key set on both services by the owner.
+RESEARCH_NOTIFY_KEY = os.environ.get("RESEARCH_NOTIFY_KEY", "")
+_BREAKDOWN_ID = re.compile(r"[A-Za-z0-9_-]{6,64}")
+
+
+class ResearchReady(BaseModel):
+    user: str
+    id: str
+    title: str = ""
+    findings: int = 0
+
+
+def ready_text(title: str, findings: int) -> str:
+    """The message: what's ready, its title, how many findings. No clock time (alerts' rule, owner 10 Nov)."""
+    lines = ["<b>Your breakdown is ready ✓</b>"]
+    if title.strip():
+        lines.append(html.escape(title.strip()[:160]))
+    if findings > 0:
+        lines.append(f"{findings} finding{'' if findings == 1 else 's'}")
+    return "\n".join(lines)
+
+
+@app.post("/api/research-ready")
+def research_ready(body: ResearchReady, request: Request) -> dict[str, Any]:
+    auth = request.headers.get("authorization", "")
+    key = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+    if not (RESEARCH_NOTIFY_KEY and key and secrets.compare_digest(key.encode(), RESEARCH_NOTIFY_KEY.encode())):
+        raise HTTPException(404)
+    if not _BREAKDOWN_ID.fullmatch(body.id):
+        raise HTTPException(400, detail="Not a breakdown id.")
+    chat = (_load_follows()["users"].get(body.user) or {}).get("chat")
+    if not (TG_TOKEN and chat):
+        return {"sent": False}
+    button = {"inline_keyboard": [[{"text": "Open breakdown", "url": f"{SITE}/breakdowns/#/i/{body.id}"}]]}
+    try:
+        _say(str(chat), ready_text(body.title, body.findings), reply_markup=button)
+    except TelegramError as e:
+        print(f"research ready: not sent: {e}", flush=True)
+        return {"sent": False}
+    return {"sent": True}
+
+
 def _who(wallet: str) -> str:
     """A trader's name as the page shows it: their name, or "Trader 0x91…76", never a whole address."""
     for s in (_worth_load() or {}).get("scores", []):
