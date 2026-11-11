@@ -367,3 +367,8 @@ def test_an_accepted_next_step_shows_at_once_and_starts_a_new_run() -> None:
     assert (cards1, cards2) == (2, 0)  # Findings counts the current run only
     assert got["planned"] == [2, "plan-2", "Working…"]
     assert got["small"] == [2, "All of 10 Nov"]  # a question about the same scope stays in run 2
+    # owner, 11 Nov: the page never says "Run 1 / Run 2" (how it's built); each is named by what it covers, and the
+    # earlier ones are "Earlier question"
+    page = (STATIC / "js" / "agent.js").read_text() + (STATIC / "js" / "app.js").read_text()
+    assert "Earlier question" in page and "New question" in page and "<b>Now:</b>" in page
+    assert not re.search(r"Run \$\{|<b>Run |`Run ", page)

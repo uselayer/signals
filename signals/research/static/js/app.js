@@ -293,8 +293,8 @@ function Investigation({ api, id }) {
       <div class="head">
         <div class="muted small"><a href="#/">Breakdowns</a> /</div>
         <h1>${shortWallets(inv.title) || 'Breakdown'}</h1>
-        ${rs.length > 1 && html`<p class="nowrun"><span class=${'dot ' + (inv.running || inv.starting ? 'live' : runWaits ? '' : 'ok')}></span><span><b>Run ${rs.length}:</b> ${shortWallets(runTitle(inv, rs[rs.length - 1], rs.length - 1))}</span>
-          <span class="muted small">${inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for you to press Start' : 'done'} · earlier runs are folded in the agent's column</span></p>`}
+        ${rs.length > 1 && html`<p class="nowrun"><span class=${'dot ' + (inv.running || inv.starting ? 'live' : runWaits ? '' : 'ok')}></span><span><b>Now:</b> ${shortWallets(runTitle(inv, rs[rs.length - 1], rs.length - 1))}</span>
+          <span class="muted small">${inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for you to press Start' : 'done'} · earlier questions are folded in the agent's column</span></p>`}
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}<span>BTC Up or Down 15m</span>
           ${inv.summaries.length > 0 && html`<span>· ${plural(inv.summaries.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
