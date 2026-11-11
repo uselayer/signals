@@ -22,7 +22,7 @@ from signals import app as engine
 FAPI = "clerk.signals.test"
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 SAM, ANN, BOB, WHALE = ("0x" + c * 40 for c in "abcd")
-CAP = "You've reached today's limit of 200 alerts. Alerts resume at 00:00 UTC, in "
+CAP = "You've reached today's limit of 200 alerts. Alerts resume in "
 
 
 def auth(sub: str = "user_1") -> dict[str, str]:

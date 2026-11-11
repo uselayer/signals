@@ -3522,12 +3522,12 @@ DAILY_CAP = 200
 
 
 def cap_text(now: float | None = None) -> str:
-    """The message at DAILY_CAP: the limit, and when alerts resume (the next 00:00 UTC, and how long until then)."""
+    """The message at DAILY_CAP: the limit, and how long until alerts resume (the next 00:00 UTC; no clock time, owner 11-10)."""
     now = time.time() if now is None else now
     left = 86400 - now % 86400
     h, m = int(left // 3600), int(left % 3600 // 60)
     wait = f"{h} h {m} min" if h else f"{m} min"
-    return (f"You've reached today's limit of {DAILY_CAP} alerts. Alerts resume at 00:00 UTC, in {wait}. Every trade by"
+    return (f"You've reached today's limit of {DAILY_CAP} alerts. Alerts resume in {wait}. Every trade by"
             f" traders you follow is still in your Feed: {SITE}/#/")  # fmt: skip
 
 
