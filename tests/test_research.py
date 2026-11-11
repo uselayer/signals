@@ -380,6 +380,7 @@ def test_before_chainlink_recording_and_without_a_book() -> None:
     assert r["up"] == [] and r["minute_fallback"]["up"] == [{"t": 1794285000, "p": 0.5}]
     assert r["binance"] == [{"t": 1794285000, "p": 74827.09}] and not r["coverage"]["book"]
     assert WS.summary(r)["profit"] == 0 and WS.totals([r["coverage"]])["chainlink"] == {"complete": 0, "total": 1}
+    assert WS.summary(r)["chainlink_spark"] is None  # the all-windows chart falls back to Binance's move, labelled
 
 
 class FakeCaseReads:
@@ -522,6 +523,34 @@ def test_window_routes(monkeypatch: pytest.MonkeyPatch) -> None:
         assert r["window_id"] == LATE_SLUG and r["position"][0]["up"] == 10
         tiles = c.get(f"/api/research/sessions/{sid}/windows").json()
         assert tiles["windows"][0]["window_id"] == LATE_SLUG and tiles["coverage"]["book"] == {"complete": 1, "total": 1}
+    finally:
+        server.app.dependency_overrides.clear()
+
+
+def test_tiles_carry_chainlink_even_when_kept_before_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The all-windows chart measures each buy against the price to beat with Chainlink from the tile. A tile kept
+    before tiles carried it gets it from its kept replay when the page loads: no read."""
+    from fastapi.testclient import TestClient
+
+    from signals.research import server
+    from signals.research import workspace as WS
+
+    monkeypatch.setattr(server, "store", Store(os.path.join(tempfile.mkdtemp(), "s.db")))
+    reads = FakeCaseReads()
+    monkeypatch.setattr(server, "_reads", reads)
+    server.app.dependency_overrides[server.auth.user_of] = lambda: "alice"
+    try:
+        c = TestClient(server.app)
+        sid = c.post("/api/research/sessions", json={}).json()["id"]
+        server.store.set_wallet(sid, W)
+        r = WS.build(server.store, reads, sid, LATE_SLUG)
+        line = [{"t": LATE, "p": 74719.5}, {"t": LATE + 1, "p": 74720.0}]
+        assert WS.summary(r)["chainlink_spark"] == line
+        old = {k: v for k, v in WS.summary(r).items() if k != "chainlink_spark"}
+        server.store.put_window(sid, LATE_SLUG, summary=old)
+        calls = list(reads.calls)
+        tile = c.get(f"/api/research/sessions/{sid}/windows").json()["windows"][0]
+        assert tile["chainlink_spark"] == line and tile["price_to_beat"] == r["price_to_beat"] and reads.calls == calls
     finally:
         server.app.dependency_overrides.clear()
 

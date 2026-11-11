@@ -62,8 +62,9 @@ export function WindowsStage({ inv, ui, act }) {
 }
 
 // ---------- every window on one chart
-// Each buy: when in its window (x) and how far Binance BTCUSDT had moved since the window opened, toward the side it
-// bought (y). Coloured by one of two different questions: did the window make money, or did the side bought win.
+// Each buy: when in its window (x) and how far BTC was from the price to beat, toward the side it bought (y): Chainlink
+// BTC/USD where it was recorded, else Binance BTCUSDT's move since the open, drawn hollow (buyPoints). Coloured by one
+// of two different questions: did the window make money, or did the side bought win.
 const COLOUR_BY = [['money', 'Did the window make money?'], ['side', 'Did the side it bought win?']];
 function AllWindowsChart({ tiles, ui, act }) {
   const [box, width] = useWidth();
@@ -81,25 +82,26 @@ function AllWindowsChart({ tiles, ui, act }) {
   const [a, b] = [share(good), share(bad)];
   const names = by === 'money' ? ['of buys in windows that made money', 'in windows that lost money'] : ['of buys of the side that won', 'of buys of the side that lost'];
   const yTicks = [-m, -m / 2, 0, m / 2, m].map(v => Math.round(v));
-  const nWin = new Set(pts.map(p => p.window_id)).size;
+  const nWin = new Set(pts.map(p => p.window_id)).size, nOpen = pts.filter(p => p.basis === 'open').length;
   return html`<figure class="allwin">
     <div class="allwin-head"><b>Every buy, across ${plural(nWin, 'window')}</b>
       <div class="wfilter small" role="group" aria-label="Colour the buys by">${COLOUR_BY.map(([k, label]) => html`<button class=${by === k ? 'on' : ''} onClick=${() => act.colourBy(k)}>${label}</button>`)}</div></div>
-    <div ref=${box}><svg viewBox=${`0 0 ${width} ${H}`} width=${width} height=${H} role="img" aria-label=${`Every buy: minutes into its window against how far Binance BTCUSDT had moved toward the side it bought`}>
+    <div ref=${box}><svg viewBox=${`0 0 ${width} ${H}`} width=${width} height=${H} role="img" aria-label=${`Every buy: minutes into its window against how far BTC was from the price to beat, toward the side it bought`}>
       ${yTicks.map(v => html`<g><line x1=${L} x2=${width - R} y1=${Y(v)} y2=${Y(v)} stroke="var(--line)" stroke-dasharray=${v === 0 ? '3 3' : ''} stroke-width=${v === 0 ? 1.2 : 1} />
         <text class="axs" x=${L - 6} y=${Y(v) + 4} text-anchor="end">${v === 0 ? '$0' : signedBtc(v).replace('.00', '')}</text></g>`)}
       ${lo < 0 && html`<rect x=${X(lo)} y=${T} width=${X(0) - X(lo)} height=${H - T - B} fill="var(--soft)" />`}
       ${[0, 300, 600, 900].map(t => html`<text class="axs" x=${X(t)} y=${H - 10} text-anchor=${t === hi ? 'end' : 'middle'}>${t / 60} min</text>`)}
-      <text class="axs" x=${L + 6} y=${T + 12}>BTC moved toward the side it bought ↑</text>
-      <text class="axs" x=${L + 6} y=${H - B - 6}>BTC moved against it ↓</text>
-      ${pts.map(p => html`<circle cx=${X(p.t)} cy=${Y(p.toward)} r="2.6" fill=${fill(p)} fill-opacity=".55" onClick=${() => act.openWin(p.window_id)}>
-        <title>${`${day(p.start)} ${hm(p.start)} window: bought ${p.side} at ${mmss(p.t)}, Binance BTCUSDT ${signedBtc(p.toward)} toward ${p.side} since the open. ${p.sideWon ? `${p.side} won` : `${p.side} lost`}; the window ${p.profit == null ? 'has no result yet' : `${signedMoney(p.profit)} from its fills`}. Click to open it.`}</title></circle>`)}
+      <text class="axs" x=${L + 6} y=${T + 12}>BTC on the side it bought ↑</text>
+      <text class="axs" x=${L + 6} y=${H - B - 6}>BTC on the other side of the price to beat ↓</text>
+      ${pts.map(p => html`<circle cx=${X(p.t)} cy=${Y(p.toward)} r="2.6" fill=${p.basis === 'open' ? 'none' : fill(p)} fill-opacity=".55"
+        stroke=${p.basis === 'open' ? fill(p) : 'none'} stroke-width="1" onClick=${() => act.openWin(p.window_id)}>
+        <title>${`${day(p.start)} ${hm(p.start)} window: bought ${p.side} at ${mmss(p.t)}, ${p.basis === 'ptb' ? `Chainlink BTC/USD ${signedBtc(p.toward)} from the price to beat, toward ${p.side}` : `Binance BTCUSDT ${signedBtc(p.toward)} toward ${p.side} since the open (no Chainlink recorded)`}. ${p.sideWon ? `${p.side} won` : `${p.side} lost`}; the window ${p.profit == null ? 'has no result yet' : `${signedMoney(p.profit)} from its fills`}. Click to open it.`}</title></circle>`)}
     </svg></div>
     <figcaption class="muted small">
       <span class="keys"><span class="key"><i style="background:var(--gain)"></i>${by === 'money' ? 'window made money' : 'the side it bought won'}</span>
         <span class="key"><i style="background:var(--loss)"></i>${by === 'money' ? 'window lost money' : 'the side it bought lost'}</span></span>
-      ${a != null && b != null && html`<span>Bought with BTC already moved toward that side: ${a}% ${names[0]}, ${b}% ${names[1]}.</span>`}
-      <span>Each dot is one buy (${plural(pts.length, 'buy')}): minutes into its window, and how far Binance BTCUSDT had moved since the window opened, toward the side it bought. This is Binance's move, not the gap to the price to beat (that's Chainlink BTC/USD). Click a dot to open its window.${noLine ? ` ${plural(noLine, 'window')} without a Binance line ${noLine === 1 ? 'isn\'t' : 'aren\'t'} drawn.` : ''}</span></figcaption>
+      ${a != null && b != null && html`<span>Bought the side BTC was already on: ${a}% ${names[0]}, ${b}% ${names[1]}.</span>`}
+      <span>Each dot is one buy (${plural(pts.length, 'buy')}): minutes into its window, and how far Chainlink BTC/USD was from the price to beat, toward the side it bought (above it for Up, below it for Down).${nOpen ? ` Hollow dots (${plural(nOpen, 'buy')}) are from before Chainlink was recorded: Binance BTCUSDT's move since the window opened instead, close but not the same.` : ''} Click a dot to open its window.${noLine ? ` ${plural(noLine, 'window')} without a price line ${noLine === 1 ? 'isn\'t' : 'aren\'t'} drawn.` : ''}</span></figcaption>
   </figure>`;
 }
 

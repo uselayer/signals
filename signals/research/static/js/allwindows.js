@@ -44,19 +44,25 @@ export function sparkAt(pts, t) {
   return b.t === a.t ? b.p : a.p + (b.p - a.p) * (t - a.t) / (b.t - a.t);
 }
 
-// One point per buy: when in the window (seconds from its start) and how far Binance BTCUSDT had moved since the
-// window opened, toward the side it bought ($, positive = BTC was on that side). The open is the tile's own dashed
-// line (its first point at or after the start). Windows with no Binance line are counted, not drawn.
+// One point per buy: when in the window (seconds from its start) and how far BTC was from the price to beat, toward
+// the side it bought ($, positive = BTC was on that side: above the line for Up, below it for Down). Where Chainlink
+// BTC/USD was recorded (the feed the price to beat is averaged from), that's Chainlink against the price to beat
+// (`basis: 'ptb'`). Before that, Binance BTCUSDT's move since the window opened (`basis: 'open'`, the tile's dashed
+// line): Binance is BTC in Tether, about 0.1% above Chainlink, so it's never measured against the price to beat
+// itself. Windows with neither line are counted, not drawn.
 export function buyPoints(tiles) {
   const pts = []; let noLine = 0;
   for (const s of tiles) {
-    const sp = s.spark || [], open = (sp.find(p => p.t >= s.start) || {}).p, facts = windowFacts(s);
-    if (open == null) { noLine += 1; continue; }
+    const cl = s.chainlink_spark, sp = s.spark || [], facts = windowFacts(s);
+    const ptb = cl && cl.length && s.price_to_beat != null;
+    const line = ptb ? cl : sp, ref = ptb ? s.price_to_beat : (sp.find(p => p.t >= s.start) || {}).p;
+    if (ref == null) { noLine += 1; continue; }
     for (const e of s.entries || []) {
       if (e.action !== 'buy' || (e.side !== 'Up' && e.side !== 'Down')) continue;
-      const p = sparkAt(sp, e.t);
+      const p = sparkAt(line, e.t);
       if (p == null) continue;
-      pts.push({ window_id: s.window_id, start: s.start, t: e.t - s.start, side: e.side, toward: (p - open) * (e.side === 'Up' ? 1 : -1),
+      pts.push({ window_id: s.window_id, start: s.start, t: e.t - s.start, side: e.side, toward: (p - ref) * (e.side === 'Up' ? 1 : -1),
+        basis: ptb ? 'ptb' : 'open',
         sideWon: s.result === e.side, sideLost: (s.result === 'Up' || s.result === 'Down') && s.result !== e.side, made: facts.made, lostMoney: facts.lostMoney, profit: s.profit });
     }
   }

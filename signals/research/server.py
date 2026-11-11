@@ -300,7 +300,11 @@ def windows(sid: str, user: str = Depends(auth.user_of)) -> JSONResponse:
 
     _own(sid, user)
     tiles = store.summaries(sid)
-    covs = [c for c in (store.window(sid, t["window_id"])["ready"] or {} for t in tiles) if c]
+    readies = [store.window(sid, t["window_id"])["ready"] or {} for t in tiles]
+    for t, r in zip(tiles, readies, strict=True):  # tiles kept before they carried Chainlink: from the kept replay
+        if "chainlink_spark" not in t and r:
+            t["chainlink_spark"] = workspace.chainlink_spark(r)
+    covs = [r for r in readies if r]
     return _private({"windows": tiles, "coverage": workspace.totals([r["coverage"] for r in covs])})
 
 

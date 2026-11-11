@@ -53,6 +53,18 @@ def _points(rows: list[list[float]] | None) -> list[dict[str, float]]:
     return [{"t": int(t), "p": float(p)} for t, p in rows or []]
 
 
+def _spark(pts: list[dict[str, float]]) -> list[dict[str, float]]:
+    """A tile's line: about one point every 15 s of the window, from a ``ready`` price series."""
+    step = max(1, len(pts) // SPARK_POINTS)
+    return [p for i, p in enumerate(pts) if i % step == 0][:SPARK_POINTS + 1]
+
+
+def chainlink_spark(r: dict[str, Any]) -> list[dict[str, float]] | None:
+    """Chainlink BTC/USD as a tile's line (the feed the price to beat is averaged from), None where it wasn't
+    recorded. From the ``ready`` alone: no read."""
+    return _spark(r["chainlink"]) if r.get("chainlink") else None
+
+
 def _per_second(best: list[dict[str, Any]], side: str, start: int, end: int) -> list[dict[str, Any]]:
     """One side's best bid and ask at every second from ``start`` to ``end``, carried forward from each change
     (the recording keeps a row per change). Seconds before the first change are left out."""
@@ -204,8 +216,6 @@ def summary(r: dict[str, Any]) -> dict[str, Any]:
     payout = None
     if r.get("result") in ("Up", "Down"):
         payout = max(0.0, held["up" if r["result"] == "Up" else "down"])
-    pts = r["binance"]
-    step = max(1, len(pts) // SPARK_POINTS)
     return {
         "window_id": r["window_id"], "start": r["start"], "end": r["end"], "result": r.get("result"),
         "price_to_beat": r.get("price_to_beat"),
@@ -216,7 +226,9 @@ def summary(r: dict[str, Any]) -> dict[str, Any]:
         "cost": round(cost, 2), "sold_for": round(back, 2), "payout": None if payout is None else round(payout, 2),
         "profit": None if payout is None else round(payout + back - cost, 2),
         "profit_note": "From fills and the payout of shares held at the end; merges and redemptions aren't counted.",
-        "spark": [p for i, p in enumerate(pts) if i % step == 0][:SPARK_POINTS + 1],
+        "spark": _spark(r["binance"]),
+        # Chainlink BTC/USD, the feed the price to beat is averaged from: how far BTC was from it at each buy.
+        "chainlink_spark": chainlink_spark(r),
         "coverage": {k: r["coverage"][k] for k in ("chainlink", "book", "outage")},
     }  # fmt: skip
 
