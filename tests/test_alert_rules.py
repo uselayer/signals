@@ -528,3 +528,68 @@ def test_the_bots_words_never_mention_copying_or_fewer_alerts() -> None:
                       engine._skip_text(SAM, "s"), engine._edit_text(SAM, r), engine.TYPE_ASK, engine.TYPE_AGAIN,
                       json.dumps([engine._setup_markup(SAM), engine._skip_markup(SAM, r, "s"), engine._edit_markup(SAM, r)])])  # fmt: skip
     assert "copy" not in words.lower() and "Fewer alerts" not in words and " bet" not in words.lower()
+
+
+# ---- follow-ups (owner, 11 Nov): the name once after a follow; no clock times in summaries ----
+
+
+@pytest.fixture
+def pace_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Following measures pace and asks for a rule right away, on this thread (no Polymarket: _busy stands in)."""
+    monkeypatch.setattr(engine, "_pace_later", lambda uid, trader, wait_s=None: engine._pace_after_follow(uid, trader, wait_s))
+
+
+def _start_link(api: TestClient, monkeypatch: pytest.MonkeyPatch, wallet: str, chat: int) -> None:
+    monkeypatch.setattr(engine, "_tg", {"bot": "SignalsAlertsBot", "offset": 0, "error": None, "login_refused": None})
+    code = api.post("/api/follow/telegram", json={"wallet": wallet}).json()["code"]
+    say(f"/start {code}", chat=chat)
+
+
+def test_a_follow_from_the_bot_names_the_trader_once(api: TestClient, monkeypatch: pytest.MonkeyPatch, pace_now: None) -> None:
+    _busy(monkeypatch, 30, time.time())
+    _start_link(api, monkeypatch, SAM, 900)  # a new chat: the help (no names), then the rule setup
+    texts = [m["text"] for m in engine.tg.sent]
+    assert len(texts) == 2 and texts[0].startswith("Connected.") and "/rules: your alert rules" in texts[0]
+    assert texts[1] == "You're following <b>Sam</b>. They made about 30 trades a day last week.\n\nChoose which ones reach you?"
+    assert sum(t.count("Sam") for t in texts) == 1
+    assert buttons(engine.tg.sent[1]["reply_markup"]) == [[("Set my rule", f"rs:{SAM}"), ("Every trade", f"ra:{SAM}")]]
+    engine.tg.sent.clear()
+    _start_link(api, monkeypatch, ANN, 900)  # the same chat follows another: only the setup
+    assert [m["text"] for m in engine.tg.sent] == [
+        "You're following <b>Ann</b>. They made about 30 trades a day last week.\n\nChoose which ones reach you?"]
+    engine.tg.sent.clear()
+    _start_link(api, monkeypatch, ANN, 900)  # already following: said once, no setup again
+    assert [m["text"] for m in engine.tg.sent] == ["You already follow <b>Ann</b>. Change their alerts with /rules."]
+
+
+def test_a_follow_from_the_site_names_the_trader_once(api: TestClient, monkeypatch: pytest.MonkeyPatch, pace_now: None) -> None:
+    user(follows=())
+    _busy(monkeypatch, 30, time.time())
+    api.post("/api/me/follows", json={"wallet": SAM}, headers=auth())
+    assert [m["text"].count("Sam") for m in engine.tg.sent] == [1]
+
+
+def test_a_follow_from_the_bot_asks_without_the_pace_when_measuring_is_slow(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch, pace_now: None
+) -> None:
+    measured = []
+
+    def slow(trader: str, now: float | None = None) -> dict[str, Any]:
+        time.sleep(0.3)
+        measured.append(trader)
+        return {"per_day": 40.0, "usd": None, "days": 7.0, "at": time.time()}
+
+    monkeypatch.setattr(engine, "_measure_pace", slow)
+    monkeypatch.setattr(engine, "FOLLOW_PACE_WAIT_S", 0.02)
+    _start_link(api, monkeypatch, SAM, 900)
+    assert engine.tg.sent[-1]["text"] == "You're following <b>Sam</b>.\n\nChoose which ones reach you?"  # no made-up pace
+    time.sleep(0.5)
+    assert measured == [SAM]  # it carried on, for the next step's suggestion
+
+
+def test_a_summary_says_how_long_it_covers_never_a_clock_time() -> None:
+    now = time.time()
+    rows = [(SAM, "buy", 700.0, now - 6 * 3600 - 120), (SAM, "sell", 300.0, now - 600)]
+    text = engine._summary_text(rows, None, now)
+    assert text.splitlines()[0] == "From traders you follow, over the last 6 h:" and "UTC" not in text
+    assert engine._summary_text(rows[1:], None, now).splitlines()[0] == "From traders you follow, over the last 10 min:"

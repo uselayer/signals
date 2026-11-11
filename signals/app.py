@@ -3554,6 +3554,7 @@ BUSY_PER_DAY = 20
 SUGGEST_PER_DAY = 3
 PACE_S = 7 * 86400
 PACE_KEEP_S = 86400  # a trader's pace is measured again when it's older than this
+FOLLOW_PACE_WAIT_S = 8.0  # a follow from the bot asks for a rule this soon at most, pace measured or not
 PACE_PAGES = 200  # /activity reads at most for one measure (500 trades each): the busiest traders get fewer days
 UNIT_ADD_S = 60  # a pace "bet": their fills of one outcome within this long of the first (what one alert's dollars sum)
 TOLD_S = 30 * 86400  # a sale counts as one they alerted you about when that alert was this recent
@@ -4124,7 +4125,7 @@ def _who(wallet: str) -> str:
     return f"Trader {wallet[:4]}…{wallet[-2:]}"
 
 
-CONNECTED = (
+CONNECTED_HELP = (
     "Connected. You'll get a message here a few minutes after a trader you follow buys or sells, of any size: what "
     "they traded, at what price, the price now and when they traded. Polymarket's public data runs a few minutes "
     "behind, so alerts are never instant.\n\n"
@@ -4138,8 +4139,9 @@ CONNECTED = (
     f"only in the markets you pick, skipping some, or one summary every {SUMMARY_S // 3600} hours. Set it with /rules "
     "or Edit rule under any alert, where you can also pause a trader for 24 hours. A sale of something they alerted you "
     f"about still comes right away. At most {DAILY_CAP} alerts a day, as a safety limit."
-    "\n\nFollowing: {names}\n/list: who you follow · /rules: your alert rules · /stop: turn alerts off"
 )
+COMMANDS = "/list: who you follow · /rules: your alert rules · /stop: turn alerts off"
+CONNECTED = CONNECTED_HELP + "\n\nFollowing: {names}\n" + COMMANDS  # Connect Telegram's Start: every name once
 
 
 def _vote(chat: str, data: str) -> str | None:
@@ -4341,9 +4343,15 @@ def _follow_from_chat(chat: str, code: str, w: str) -> None:
         count("follow", uid=uid, trader=w)
         ph("trader followed", uid, {"via": "telegram", "from": "bot", "wallet": w})
         _directory_note_later([Seen(w, "follow")])  # the wallet only: who follows them stays in follows.json
-        _pace_later(uid, w)  # how busy they are, then the alert rule setup (_setup_text)
-    names = ", ".join(_who(x) for x in mine["follows"])
-    _say(chat, f"You're following {html.escape(_who(w))}.\n\n" + CONNECTED.format(names=html.escape(names)))
+    # The trader's name once (owner, 11 Nov): a new chat gets the help with no names in it, then the rule setup
+    # ("You're following X. …", _pace_after_follow) is the one message that names them. It waits at most
+    # FOLLOW_PACE_WAIT_S for how busy they are, so Start isn't met with silence (the pace sentence is left out then).
+    if joined:
+        _say(chat, f"{CONNECTED_HELP}\n\n{COMMANDS}")
+    if new:
+        _pace_later(uid, w, wait_s=FOLLOW_PACE_WAIT_S)
+    else:
+        _say(chat, f"You already follow <b>{html.escape(_who(w))}</b>. Change their alerts with /rules.")
 
 
 def _bot_loop() -> None:
@@ -5126,15 +5134,30 @@ def _choices_markup(trader: str, p: dict[str, Any] | None, chosen: tuple[str, fl
     return {"inline_keyboard": [row, [button("s", f"A summary every {SUMMARY_S // 3600} hours")]]}
 
 
-def _pace_after_follow(uid: str, trader: str) -> None:
+def _pace_after_follow(uid: str, trader: str, wait_s: float | None = None) -> None:
     """After someone follows ``trader``: how busy they are (measured again when over PACE_KEEP_S old), then, when
     that person has Telegram connected, the alert rule setup (_setup_text; owner, 10 Nov: it replaces the busy-trader
-    warning, for every trader). Never in the way of the follow: a failed read only leaves the pace out."""
+    warning, for every trader). Never in the way of the follow: a failed read only leaves the pace out. ``wait_s``:
+    wait at most this long for a new measure (it carries on and is kept for later), then ask without the pace."""
     p: dict[str, Any] | None
     try:
         p = _pace(trader)
         if p is None or time.time() - p["at"] > PACE_KEEP_S:
-            p = _measure_pace(trader)
+            if wait_s is None:
+                p = _measure_pace(trader)
+            else:
+                got: dict[str, Any] = {}
+
+                def measure() -> None:
+                    try:
+                        got["pace"] = _measure_pace(trader)
+                    except (VenueError, RuntimeError, OSError, ValueError, KeyError):
+                        pass
+
+                t = threading.Thread(target=measure, daemon=True, name="pace")
+                t.start()
+                t.join(wait_s)
+                p = got.get("pace")
     except (VenueError, RuntimeError, OSError, ValueError, KeyError):
         p = None
     u = _load_follows()["users"].get(uid) or {}
@@ -5143,9 +5166,9 @@ def _pace_after_follow(uid: str, trader: str) -> None:
     _tell(u["chat"], _setup_text(trader, p), _setup_markup(trader))
 
 
-def _pace_later(uid: str, trader: str) -> None:
+def _pace_later(uid: str, trader: str, wait_s: float | None = None) -> None:
     """_pace_after_follow on its own thread, so following answers at once (the busiest traders take up to a minute)."""
-    threading.Thread(target=_pace_after_follow, args=(uid, trader), daemon=True, name="pace").start()
+    threading.Thread(target=_pace_after_follow, args=(uid, trader, wait_s), daemon=True, name="pace").start()
 
 
 # ---- alert rules in Telegram (owner, 10 Nov; README "Alerts on Telegram") ----
@@ -5765,14 +5788,16 @@ def alert_pass(now: float | None = None) -> int:
 # ---- summaries: the trades of traders you chose a summary for ----
 
 
-def _summary_text(rows: list[tuple[str, str, float | None, float]], aid: str | None = None) -> str:
+def _summary_text(rows: list[tuple[str, str, float | None, float]], aid: str | None = None, now: float | None = None) -> str:
     """One message for everything held for a person: per trader, how many more trades (buys and sells, with their
-    dollars), since the first was held, and a link to the Feed, where every trade is."""
+    dollars), over how long since the first was held (relative, as alerts say it: no clock time and no time zone,
+    owner, 11 Nov), and a link to the Feed, where every trade is."""
     e = html.escape
     per: dict[str, dict[str, list[float]]] = {}
     for trader, side, usd, _ in rows:
         per.setdefault(trader, {"buy": [], "sell": []})[side].append(usd or 0.0)
-    lines = [f"From traders you follow, since {datetime.fromtimestamp(min(r[3] for r in rows), UTC):%H:%M} UTC:"]
+    span = _ago(min(r[3] for r in rows), time.time() if now is None else now).removesuffix(" ago")
+    lines = [f"From traders you follow, over the last {span}:"]
     for trader, sides in sorted(per.items(), key=lambda kv: -sum(map(len, kv[1].values()))):
         parts = [f"{len(v)} {side}{'s' if len(v) != 1 else ''} (${sum(v):,.0f})" for side, v in sides.items() if v]
         n = sum(map(len, sides.values()))
@@ -5805,7 +5830,7 @@ def _summaries(users: dict[str, dict[str, Any]], now: float) -> int:
                 clear(con)
             continue
         summed = [r[1:] for r in rows]
-        if _send(uid, chat, "summary", lambda aid, x=summed: _summary_text(x, aid), on_queue=clear):
+        if _send(uid, chat, "summary", lambda aid, x=summed: _summary_text(x, aid, now), on_queue=clear):
             sent += 1
         with _db() as con:  # kept (and cleared with it) or past the cap: either way, nothing is held for it now
             clear(con)

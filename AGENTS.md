@@ -154,7 +154,8 @@ behind Vercel (see README, "Hosting").
   (owner, 10 Nov: 4,140 alerts in 30 days, 0.2% tapped; one follower at the 200 cap every day). The rule is
   `alert_for[wallet]` in follows.json (`_rule` reads it, `_change_rule` writes it, `_wants` applies it): `mode` and
   `usd` as before (every trade, only trades of `usd` or more, or a summary every 6 hours, which then sums up only what
-  passes the rule), plus `cats` (markets, the same INTEREST_CHOICES as big-trade interests; [] or none = all; a market
+  passes the rule and says the time it covers as alerts do, "over the last 6 h", never a clock time or time zone:
+  owner, 11 Nov), plus `cats` (markets, the same INTEREST_CHOICES as big-trade interests; [] or none = all; a market
   whose category couldn't be read doesn't match, as for big trades), `first_only`, `px` ([lo, hi] cents, ends
   included, on the trade's average price) and `paused_until` (unix time). A field that's missing is its default, so
   an older follows.json reads as it did, and the page's choice (`PUT …/alerts`, mode and amount only) keeps the
@@ -168,7 +169,9 @@ behind Vercel (see README, "Hosting").
   grouped alert. Big-trade alerts have no rules. In Telegram (`_on_rule`, buttons `r…:<wallet>`): right after a follow
   with Telegram connected (from the site or the bot's Follow link), "You're following X. They made about N trades a
   day last week. Choose which ones reach you?" (the pace sentence only when `_measure_pace` measured it; it replaced the
-  busy-trader warning) with Set my rule / Every trade; Set my rule is three steps (the smallest buy: $100, $500,
+  busy-trader warning) with Set my rule / Every trade. It is the one message that names the trader (owner, 11 Nov:
+  the name once): a follow from the bot's link sends no "You're following X" of its own (a new chat gets the help
+  with no names in it first), and waits at most 8 s for the pace (`FOLLOW_PACE_WAIT_S`), then asks without it. Set my rule is three steps (the smallest buy: $100, $500,
   $1,000, the amount about 3 of their buys a day reached last week worded as an estimate, never a promise, or Type my
   own; which markets; what to skip: "Adds to a position they already hold", "Prices above 90¢ or below 10¢"), each
   saved at once, then "Saved: X" with the rule and, only when the pace measure already read it (the whole week, under a

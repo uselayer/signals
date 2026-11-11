@@ -1349,7 +1349,8 @@ def test_summary_only_holds_their_trades_for_one_summary_every_six_hours(
     assert engine._summaries(users, held_at + engine.SUMMARY_S + 1) == 1
     now = held_at
     lines = engine.tg.sent[-1]["text"].splitlines()
-    assert lines[0].startswith("From traders you follow, since ") and lines[1] == "• <b>Sam</b>: 2 trades, 2 buys ($1,000)"
+    assert lines[0] == "From traders you follow, over the last 6 h:" and lines[1] == "• <b>Sam</b>: 2 trades, 2 buys ($1,000)"
+    assert "UTC" not in engine.tg.sent[-1]["text"]  # no clock time, no time zone (owner, 11 Nov)
     assert lines[2] == "You chose a summary every 6 hours for these traders. Every trade is in your Feed."
     assert ">Open your Feed</a>" in lines[3] and engine._sent_today("user_1") == 1 and _held() == []  # counts once
     assert engine._summaries(users, now + 2 * engine.SUMMARY_S) == 0

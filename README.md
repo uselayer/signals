@@ -113,7 +113,9 @@ alerts on. Connecting the same chat to an account later keeps those follows.
   to skip (a buy that adds to a position they already hold; prices above 90¢ or below 10¢), and every trade or one
   summary every 6 hours. A buy that passed your rule says so first ("Matches your rule · $500+ in Politics").
 - Right after you follow someone (with Telegram connected) the bot asks: **Set my rule** (three taps, or type your
-  own amount) or **Every trade**. It says how many trades a day they made last week when that's been measured.
+  own amount) or **Every trade**, in one message that names the trader once. It says how many trades a day they made
+  last week when that's been measured.
+- A summary every 6 hours says how long it covers ("over the last 6 h"), never a clock time.
 - Under each alert: **Edit rule** (where "Stop alerts from …" now is) and **Pause 24 h**, then Useful / Not useful.
   `/rules` lists everyone you follow with their rule.
 - A sale of something an alert told you about always comes, whatever the rule (not while that trader is paused).
