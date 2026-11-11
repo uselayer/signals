@@ -92,13 +92,12 @@ def test_a_buy_outside_the_range_says_the_price_already_moved_even_for_a_copyabl
     t = trade(SAM, datetime.now(UTC))
     at = datetime(2026, 10, 13, 14, 2, tzinfo=UTC).timestamp()
     lines = engine._alert_text(SAM, t, 0.49, 0.60, 980, at, at + 7 * 60).splitlines()
-    assert lines[:4] == ["<b>Sam</b> bought <b>Yes</b> at 49¢ ($980)", "Will it &lt;rain&gt;?", "Now 60¢, price already moved.",
-                         "Traded 14:02 UTC, 7 min before this alert."]  # fmt: skip
+    assert lines[:2] == ["<b>Sam</b> bought <b>Yes</b> · Will it &lt;rain&gt;?", "$980 at 49¢ · 7 min ago. Now 60¢, price already moved."]
     assert "get in" not in "\n".join(lines) and "Buying after" not in "\n".join(lines)  # no copy cue, ever
-    assert lines[4] == engine.TRADED_INTL  # where they traded; no US claim while Layer's matches aren't read
-    assert "Check current price" in lines[5] and "Buy on Polymarket International" in lines[5] and lines[6] == engine.FOLLOW_DELAY
+    assert lines[2] == engine.TRADED_INTL  # where they traded; no US claim while Layer's matches aren't read
+    assert "Check current price" in lines[3] and "Buy on Polymarket International" in lines[3] and len(lines) == 4
     below = engine._alert_text(SAM, t, 0.49, 0.30, 980, at, at)  # the market turned against them: moved too
-    assert "Now 30¢, price already moved." in below and "Traded 14:02 UTC, under a minute before this alert." in below
+    assert "$980 at 49¢ · 1 min ago. Now 30¢, price already moved." in below  # never "just now"
 
 
 def test_every_buy_by_a_followed_trader_alerts_whatever_the_amount(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -113,7 +112,7 @@ def test_every_buy_by_a_followed_trader_alerts_whatever_the_amount(api: TestClie
     trades[:0] = [trade(SAM, fresh, 0.40, 5, "0xcid:0"), trade(SAM, fresh, 0.40, 150, "0xcid:1")]
     engine._cache.clear()
     assert engine.alert_pass() == 2
-    assert sorted("($5)" in m["text"] for m in engine.tg.sent) == [False, True]  # a $5 buy is news too
+    assert sorted("\n$5 at 40¢" in m["text"] for m in engine.tg.sent) == [False, True]  # a $5 buy is news too
 
 
 def test_a_followed_trader_nobody_recommends_or_has_checked_alerts_too(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,7 +127,8 @@ def test_a_followed_trader_nobody_recommends_or_has_checked_alerts_too(api: Test
     assert engine.alert_pass() == 0  # first round: noted only
     trades[:0] = [trade(quiet, datetime.now(UTC), 0.40, 2500, "0xcid:0")]
     engine._cache.clear()
-    assert engine.alert_pass() == 1 and "bought <b>Yes</b> at 40¢ ($2,500)" in engine.tg.sent[0]["text"]
+    assert engine.alert_pass() == 1 and "bought <b>Yes</b> · Will it" in engine.tg.sent[0]["text"]
+    assert "\n$2,500 at 40¢ · " in engine.tg.sent[0]["text"]
 
 
 # ---- the daily cap ----
@@ -166,21 +166,22 @@ def test_a_second_trader_buying_the_same_outcome_sends_one_grouped_alert_and_lat
     assert engine._deliver("user_1", "555", new_buy(ANN, t0 + timedelta(minutes=18), 0.51, 0.53), "Politics") == 1
     group = engine.tg.sent[-1]
     lines = group["text"].splitlines()
-    assert lines[0] == "<b>2 traders you follow bought Yes</b> on Will it &lt;rain&gt;?"
-    assert lines[1:3] == ["· Sam paid 49¢ at 14:02 UTC", "· Ann paid 51¢ at 14:20 UTC"]  # who went first, first
-    assert lines[3:5] == ["Now 53¢.", "Latest buy 5 min before this alert."]
+    assert lines[0] == "<b>2 traders you follow bought Yes</b> · Will it &lt;rain&gt;?"
+    assert lines[1:3] == ["· Sam paid 49¢ · 23 min ago", "· Ann paid 51¢ · 5 min ago"]  # who went first, first
+    assert lines[3] == "Now 53¢."  # no UTC time, no delay sentence (owner, 10 Nov)
     check = urllib.parse.quote(f"{engine.SITE}/#/check/{ANN}/0xcid:0", safe="")  # the latest buyer's trade
-    assert lines[5] == engine.TRADED_INTL
-    assert f"/check?to={check}" in lines[6] and ">Check current price</a>" in lines[6] and "Buy on Polymarket International" in lines[6]
-    assert lines[7] == engine.FOLLOW_DELAY
-    assert [b["text"] for b in group["reply_markup"]["inline_keyboard"][0]] == ["Useful", "Not useful"]
+    assert lines[4] == engine.TRADED_INTL
+    assert f"/check?to={check}" in lines[5] and ">Check current price</a>" in lines[5] and "Buy on Polymarket International" in lines[5]
+    assert len(lines) == 6 and "UTC" not in group["text"]
+    assert [[b["text"] for b in row] for row in group["reply_markup"]["inline_keyboard"]] == [["Useful", "Not useful"]]
     # A third trader, over 6 hours after the first but within 6 of the latest (the window slides): no new ping, the
     # grouped message is edited in place
     assert engine._deliver("user_1", "555", new_buy(BOB, t0 + timedelta(hours=6, minutes=10), 0.52, 0.62), "Politics") == 0
     assert len(engine.tg.sent) == 2
     edit = engine.tg.edits[-1]
     assert (edit["chat_id"], edit["message_id"]) == ("555", 2)
-    assert edit["text"].startswith("<b>3 traders you follow bought Yes</b>") and "· Bob paid 52¢ at 20:12 UTC" in edit["text"]
+    assert edit["text"].startswith("<b>3 traders you follow bought Yes</b>") and "· Bob paid 52¢ · 5 min ago" in edit["text"]
+    assert "· Sam paid 49¢ · 6 h ago" in edit["text"]  # relative times per trader: minutes, then hours
     assert "Now 62¢, price already moved." in edit["text"]
     assert engine._sent_today("user_1") == 2  # Sam's alert and the group, counted once
 
@@ -213,8 +214,8 @@ def test_useful_votes_are_one_per_alert_and_account_and_can_change(api: TestClie
     user("user_2", chat="777")
     aid = engine._send("user_1", "555", "buy", lambda a: "alert", stop=SAM)
     keys = engine.tg.sent[-1]["reply_markup"]["inline_keyboard"]
-    assert [(b["text"], b["callback_data"]) for b in keys[0]] == [("Useful", f"v:{aid}:1"), ("Not useful", f"v:{aid}:0")]
-    assert keys[1][0]["text"] == "Stop alerts from Sam"  # beside the existing button
+    assert [(b["text"], b["callback_data"]) for b in keys[1]] == [("Useful", f"v:{aid}:1"), ("Not useful", f"v:{aid}:0")]
+    assert [(b["text"], b["callback_data"]) for b in keys[0]] == [("Edit rule", f"re:{SAM}"), ("Pause 24 h", f"rp:{SAM}")]
     tap = lambda chat, data: engine._on_update({"callback_query": {"id": "q", "data": data, "message": {"chat": {"id": chat}}}})  # noqa: E731
     tap(555, f"v:{aid}:1")
     assert engine.tg.answers[-1] == {"callback_query_id": "q", "text": "Noted: useful."}  # quietly: no chat message
@@ -274,15 +275,14 @@ def test_big_trades_alert_people_who_saved_markets_there_whoever_the_trader(
     assert [m["chat_id"] for m in engine.tg.sent] == ["1"]
     text = engine.tg.sent[-1]["text"]
     lines = text.splitlines()
-    assert lines[0] == "<b>Big trade in Politics:</b> Trader 0xdd…dd bought <b>Yes</b> at 49¢ ($12,400)"
-    assert lines[1:3] == ["Will it &lt;rain&gt;?", "Now 51¢."]  # neutral: no "get in" for a trader copying isn't offered for
-    assert lines[3].startswith("Traded ") and lines[3].endswith(" UTC, under a minute before this alert.")
+    assert lines[0] == "<b>Big trade in Politics:</b> Trader 0xdd…dd bought <b>Yes</b> · Will it &lt;rain&gt;?"
+    assert lines[1] == "$12,400 at 49¢ · 1 min ago. Now 51¢."  # neutral: no "get in"; no UTC time, no delay sentence
     # each link goes through /go (counted), on to Check current price and the market; no record for an unscored trader
     check = urllib.parse.quote(f"{engine.SITE}/#/check/{WHALE}/0xw:0", safe="")
-    assert lines[4] == engine.TRADED_INTL
-    assert f"/check?to={check}" in lines[5] and ">Check current price</a>" in lines[5] and "Buy on Polymarket International" in lines[5]
-    assert "Their record" not in lines[5] and lines[6] == engine.BIG_DELAY
-    assert "Stop alerts" not in str(engine.tg.sent[-1]["reply_markup"])  # they don't follow them
+    assert lines[2] == engine.TRADED_INTL
+    assert f"/check?to={check}" in lines[3] and ">Check current price</a>" in lines[3] and "Buy on Polymarket International" in lines[3]
+    assert "Their record" not in lines[3] and len(lines) == 4 and "Matches your rule" not in text  # no rule for big trades
+    assert "Edit rule" not in str(engine.tg.sent[-1]["reply_markup"])  # they don't follow them
 
 
 def test_a_big_trade_by_a_scored_trader_links_to_their_signals_page(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -325,10 +325,12 @@ def test_connecting_describes_the_alert_rules(api: TestClient, monkeypatch: pyte
                   "Not every trade gets its own message", "buys of one outcome within 30 minutes come as one",
                   "more buys of that outcome (or more sells of it) are left out for 6 hours", "two or more traders you follow buy the same thing",
                   "all but decided (2¢ or less, 98¢ or more)", "trades of $10,000 or more", "At most 200 alerts a day",
-                  "unless you choose fewer for them", "only trades over an amount you pick", "one summary every 6 hours",
-                  "Fewer alerts under any alert", "A sale of something they alerted you about still comes right away",
-                  "Following: Sam"):  # fmt: skip
+                  "unless you set a rule for them", "only trades over an amount you pick", "only in the markets you pick",
+                  "one summary every 6 hours", "Set it with /rules or Edit rule under any alert", "pause a trader for 24 hours",
+                  "A sale of something they alerted you about still comes right away",
+                  "Following: Sam", "/rules: your alert rules"):  # fmt: skip
         assert words in text, words
+    assert "Fewer alerts" not in text
     assert "$100" not in text and "whatever the amount" not in text and "every trade" not in text.replace("Not every trade", "")
     assert engine.ALERT_AGAIN_S == 6 * 3600 and engine.ALERT_MAX_AGE_S == 30 * 60  # what it says is what alert_pass does
     assert "something you can still get into" not in text
@@ -402,8 +404,7 @@ def test_a_late_buy_with_an_earlier_time_joins_its_group(api: TestClient) -> Non
     engine._deliver("user_1", "555", new_buy(ANN, t0 + timedelta(minutes=30)), "Politics")  # the group
     assert engine._deliver("user_1", "555", new_buy(BOB, t0 - timedelta(minutes=10), 0.45), "Politics") == 0  # seen late
     lines = engine.tg.edits[-1]["text"].splitlines()
-    assert lines[0].startswith("<b>3 traders you follow") and lines[1] == "· Bob paid 45¢ at 13:50 UTC"  # first, first
-
+    assert lines[0].startswith("<b>3 traders you follow") and lines[1] == "· Bob paid 45¢ · 5 min ago"  # first, first
 
 def test_groups_use_six_hours_when_the_category_isnt_known(api: TestClient) -> None:
     user()
@@ -569,7 +570,7 @@ def test_one_60_dollar_buy_alerts_and_a_second_soon_after_doesnt_alert_again(
     api: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sent, texts = _split(monkeypatch, [0, 0.5, 31])
-    assert sent == 1 and "bought <b>Yes</b> at 48¢ ($60)" in texts[-1]  # one alert per trader and market in ALERT_AGAIN_S
+    assert sent == 1 and "\n$60 at 48¢ · " in texts[-1]  # one alert per trader and market in ALERT_AGAIN_S
 
 
 def test_fills_seen_before_there_was_a_price_add_into_the_next_alert_across_a_restart(
@@ -590,7 +591,7 @@ def test_fills_seen_before_there_was_a_price_add_into_the_next_alert_across_a_re
     prices["0xcid:0"] = 0.50
     trades.append(trade(SAM, t0 + timedelta(minutes=1), 0.50, 60, "0xcid:0", "b"))
     engine._cache.clear()
-    assert engine.alert_pass(now=t0.timestamp() + 90) == 1 and "($120)" in engine.tg.sent[-1]["text"]
+    assert engine.alert_pass(now=t0.timestamp() + 90) == 1 and "\n$120 at " in engine.tg.sent[-1]["text"]
 
 
 def test_fills_from_one_transaction_all_add_into_the_alert(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -606,7 +607,7 @@ def test_fills_from_one_transaction_all_add_into_the_alert(api: TestClient, monk
     trades += [one, two]
     engine._cache.clear()
     assert engine.alert_pass(now=t0.timestamp() + 60) == 1
-    assert "bought <b>Yes</b> at 49¢ ($160)" in engine.tg.sent[-1]["text"]  # both fills, at their average price
+    assert "\n$160 at 49¢ · " in engine.tg.sent[-1]["text"]  # both fills, at their average price
     again = [trade(ANN, t0, 0.48, 60, "0xcid:1", "tx"), trade(ANN, t0, 0.50, 100, "0xcid:1", "tx")]
     engine._add_up(ANN, again, t0.timestamp() + 90)
     assert engine._add_up(ANN, again, t0.timestamp() + 95)["0xcid:1"][1] == 160  # read twice, kept once
@@ -634,12 +635,11 @@ def test_a_sell_alerts_with_the_price_now_while_they_still_hold_some_and_only_on
     assert engine.alert_pass(now=t0.timestamp() + 6 * 60) == 1
     m = engine.tg.sent[-1]
     lines = m["text"].splitlines()
-    assert lines[:4] == ["<b>Sam</b> sold <b>Yes</b> at 62¢ ($800)", "Will it &lt;rain&gt;?", "Now 61¢. They still hold some.",
-                         f"Traded {t0:%H:%M} UTC, 6 min before this alert."]  # fmt: skip
-    assert lines[4] == engine.TRADED_INTL
-    assert ">Check current price</a>" in lines[5] and ">Their record</a>" in lines[5] and ">Open on Polymarket International</a>" in lines[5]
-    assert lines[6] == engine.FOLLOW_DELAY and "Buying after" not in m["text"] and "get in" not in m["text"]
-    assert m["reply_markup"]["inline_keyboard"][1][0]["callback_data"] == f"unf:{SAM}"  # Stop alerts from Sam
+    assert lines[:2] == ["<b>Sam</b> sold <b>Yes</b> · Will it &lt;rain&gt;?", "$800 at 62¢ · 6 min ago. Now 61¢. They still hold some."]
+    assert lines[2] == engine.TRADED_INTL
+    assert ">Check current price</a>" in lines[3] and ">Their record</a>" in lines[3] and ">Open on Polymarket International</a>" in lines[3]
+    assert len(lines) == 4 and "UTC" not in m["text"] and "Buying after" not in m["text"] and "get in" not in m["text"]
+    assert m["reply_markup"]["inline_keyboard"][0][0]["callback_data"] == f"re:{SAM}"  # Edit rule (Stop is in it)
     assert engine._sent_today("user_1") == 1  # counts towards the daily cap
     trades.append(sold(SAM, t0 + timedelta(minutes=1), i="c"))  # sold more soon after: no second alert
     engine._cache.clear()
@@ -671,7 +671,7 @@ def test_selling_the_rest_soon_after_a_partial_sell_still_alerts_once(api: TestC
     engine._cache.clear()
     assert engine.alert_pass(now=t0.timestamp() + 8 * 60) == 1
     lines = engine.tg.sent[-1]["text"].splitlines()
-    assert lines[:3] == ["<b>Sam</b> sold <b>Yes</b> at 60¢ ($300)", "Will it &lt;rain&gt;?", engine.EXITED]
+    assert lines[:2] == ["<b>Sam</b> sold <b>Yes</b> · Will it &lt;rain&gt;?", f"$300 at 60¢ · 6 min ago. {engine.EXITED}"]
     trades.append(sold(SAM, t0 + timedelta(minutes=3), 0.60, 100, i="c"))  # bought back and sold again: left out
     engine._cache.clear()
     assert engine.alert_pass(now=t0.timestamp() + 9 * 60) == 0
@@ -690,11 +690,14 @@ def test_a_sell_of_everything_says_so_and_never_makes_up_a_price(api: TestClient
     at = t.at.timestamp()
     text = engine._sell_text(SAM, t, 0.62, 800, False, None, at, at + 30)
     lines = text.splitlines()
-    assert lines[2:4] == ["They no longer hold it.", "Traded 14:02 UTC, under a minute before this alert."]
-    assert lines[4] == engine.TRADED_INTL and "Now" not in text and "Check current price" not in text
-    assert "Open on Polymarket International" in lines[5]
+    assert lines[1] == "$800 at 62¢ · 1 min ago. They no longer hold it."
+    assert lines[2] == engine.TRADED_INTL and "Now" not in text and "Check current price" not in text
+    assert "Open on Polymarket International" in lines[3]
     held = engine._sell_text(SAM, t, 0.62, 800, True, None, at, at + 30)  # still hold some, but no price to show
-    assert "They still hold some." in held.splitlines() and "Now" not in held and "Check current price" in held
+    assert "$800 at 62¢ · 1 min ago. They still hold some." in held.splitlines() and "Now" not in held
+    assert "Check current price" in held
+    later = engine._sell_text(SAM, t, 0.62, 800, True, 0.6, at, at + 3 * 3600 + 50)
+    assert "$800 at 62¢ · 3 h ago. Now 60¢. They still hold some." in later
 
 
 @pytest.mark.parametrize(("paid", "now"), [(0.99, 0.99), (0.50, 0.01), (0.01, None)])
@@ -842,7 +845,7 @@ def test_a_trader_with_more_open_positions_than_one_read_holds_still_gets_every_
     assert asked == [(50, None), (500, "0xsmall,0xsold,0xbig2")]
     assert engine.alert_pass() == 4
     text = "\n".join(m["text"] for m in engine.tg.sent)
-    assert "($1)" in text and "Now 40¢" in text  # the $1 buy, with its price now
+    assert "\n$1 at 40¢ · " in text and "Now 40¢" in text  # the $1 buy, with its price now
     assert "They still hold some." in text and "no longer hold" not in text
     trades.insert(0, trade(SAM, datetime.now(UTC), 0.40, 70, "0xbig7:0", "b7"))
     asked.clear()
@@ -1318,11 +1321,13 @@ def test_only_bets_over_an_amount_and_a_sale_you_were_told_about_still_comes(
     trades += [trade(SAM, t0, usd=1000, market="0xa:0", i="a"), trade(SAM, t0, usd=2000, market="0xb:0", i="b")]
     engine._cache.clear()
     assert engine.alert_pass(now=t0.timestamp() + 60) == 1  # the $2,000 buy; the $1,000 one is only in the Feed
-    assert "($2,000)" in engine.tg.sent[-1]["text"] and _held() == []
+    assert "\n$2,000 at " in engine.tg.sent[-1]["text"] and _held() == []
+    assert engine.tg.sent[-1]["text"].startswith("<i>Matches your rule · $1,500+</i>\n")
     trades += [sold(SAM, t0 + timedelta(minutes=2), usd=300, market="0xb:0"), sold(SAM, t0 + timedelta(minutes=2), usd=300, market="0xa:0")]
     engine._cache.clear()
     assert engine.alert_pass(now=t0.timestamp() + 3 * 60) == 1  # the sale of 0xb, which their alert told you about
-    assert "<b>Sam</b> sold" in engine.tg.sent[-1]["text"] and "($300)" in engine.tg.sent[-1]["text"]
+    assert "<b>Sam</b> sold" in engine.tg.sent[-1]["text"] and "\n$300 at " in engine.tg.sent[-1]["text"]
+    assert "Matches your rule" not in engine.tg.sent[-1]["text"]  # it came because their alert told you, not the rule
 
 
 def test_summary_only_holds_their_trades_for_one_summary_every_six_hours(
@@ -1472,37 +1477,47 @@ def test_how_busy_a_trader_is_and_the_amount_suggested(api: TestClient, monkeypa
     assert engine._about(1679) == "$1,700" and engine._about(404) == "$400" and engine._about(37) == "$37"
 
 
-def test_following_a_busy_trader_says_so_with_an_estimate_not_a_promise(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_following_asks_for_a_rule_with_last_weeks_pace(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     user(follows=(SAM,))
     _busy(monkeypatch, 100, time.time(), big=3)
     engine._pace_after_follow("user_1", SAM)
     m = engine.tg.sent[-1]
-    assert m["text"].startswith("<b>Sam</b> is a busy trader: about 103 alerts a day over the past week.")
-    assert "Based on their past week, trades of about $2,000 or more came roughly 3 times a day." in m["text"]
-    assert "That's an estimate from last week, not a promise of how many alerts you'll get." in m["text"]
-    assert "At most 200 alerts a day in all." in m["text"]
+    assert m["text"] == "You're following <b>Sam</b>. They made about 103 trades a day last week.\n\nChoose which ones reach you?"
     keys = [[(b["text"], b["callback_data"]) for b in row] for row in m["reply_markup"]["inline_keyboard"]]
-    assert keys == [[("✓ Every trade", f"am:{SAM}:a"), ("Only trades over $2,000", f"am:{SAM}:o")],
-                    [("A summary every 6 hours", f"am:{SAM}:s")]]  # fmt: skip
+    assert keys == [[("Set my rule", f"rs:{SAM}"), ("Every trade", f"ra:{SAM}")]]
 
 
-def test_a_quiet_trader_or_no_telegram_gets_no_warning(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    user(follows=(SAM,))
+def test_every_follow_with_telegram_asks_for_a_rule_busy_or_quiet_and_without_a_pace(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user(follows=(SAM, BOB))
     _busy(monkeypatch, 10, time.time())
-    engine._pace_after_follow("user_1", SAM)  # 10 a day: not busy
+    engine._pace_after_follow("user_1", SAM)  # 10 a day: asked all the same (the busy-trader warning is gone)
+    assert engine.tg.sent[-1]["text"].startswith("You're following <b>Sam</b>. They made about 10 trades a day last week.")
+
+    class Down:
+        def activity(self, *a: Any, **k: Any) -> Any:
+            raise OSError("down")
+
+    monkeypatch.setattr(engine, "background", lambda: type("W", (), {"_poly": Down()})())
+    engine._pace_after_follow("user_1", BOB)  # couldn't measure: no made-up pace, the question all the same
+    assert engine.tg.sent[-1]["text"] == "You're following <b>Bob</b>.\n\nChoose which ones reach you?"
     user("user_2", chat=None, follows=(ANN,))  # type: ignore[arg-type]
     _busy(monkeypatch, 100, time.time())
-    engine._pace_after_follow("user_2", ANN)  # busy, but no Telegram to tell
-    assert engine.tg.sent == [] and engine._pace(ANN)["per_day"] == pytest.approx(100)
+    n = len(engine.tg.sent)
+    engine._pace_after_follow("user_2", ANN)  # busy, but no Telegram to ask
+    assert len(engine.tg.sent) == n and engine._pace(ANN)["per_day"] == pytest.approx(100)
     r = api.get("/api/me", headers=auth("user_2")).json()
     assert r["pace"] == {ANN: {"per_day": 100.0, "usd": 50.0, "busy": True}}  # the page shows it instead
 
 
 def test_a_trader_busy_enough_to_reach_the_limit_says_so(api: TestClient) -> None:
     p = {"per_day": 506.0, "usd": 2100.0, "days": 7.0, "at": time.time()}
-    text = engine._busy_text(SAM, p)
-    assert "about 506 alerts a day" in text and "At their pace, every trade would reach your limit of 200 alerts a day." in text
-    assert "At most 200 alerts a day in all." in engine._busy_text(SAM, p | {"per_day": 103.0})
+    text = engine._setup_text(SAM, p)
+    assert "about 506 trades a day" in text and "At their pace, every trade would reach your limit of 200 alerts a day." in text
+    assert "limit" not in engine._setup_text(SAM, p | {"per_day": 103.0})
+    assert "They made no trades last week." in engine._setup_text(SAM, p | {"per_day": 0})
+    assert "They made fewer than one trade a day last week." in engine._setup_text(SAM, p | {"per_day": 0.4})
 
 
 def _tap(data: str, chat: int = 555) -> None:
@@ -1510,9 +1525,9 @@ def _tap(data: str, chat: int = 555) -> None:
 
 
 def test_fewer_alerts_under_an_alert_offers_the_choices_and_a_tap_saves_one(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # New alerts no longer carry "Fewer alerts" (Edit rule replaces it), but those already in chats still work.
     user(follows=(SAM,))
-    assert engine._keyboard("abc", SAM)["inline_keyboard"][1] == [
-        {"text": "Stop alerts from Sam", "callback_data": f"unf:{SAM}"}, {"text": "Fewer alerts", "callback_data": f"few:{SAM}"}]
+    assert "few:" not in str(engine._keyboard("abc", SAM)) and "unf:" not in str(engine._keyboard("abc", SAM))
     _busy(monkeypatch, 100, time.time(), big=3)
     engine._measure_pace(SAM)
     _tap(f"few:{SAM}")

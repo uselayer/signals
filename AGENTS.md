@@ -73,7 +73,8 @@ behind Vercel (see README, "Hosting").
   `/lyr` (`web/vercel.json`). A signed-in person is identified by their Clerk user id only: never send PostHog a
   name, email, Telegram account or anything from `/api/me`, and keep fields and Clerk's menus masked in replays.
   It's for seeing how the page is used, and (since 10 Nov, through `ph` in the engine) what people do in Telegram:
-  connected, alerts sent/failed/tapped, "Fewer alerts", stops, votes; the account id only (Clerk id or a Telegram-only
+  connected, alerts sent/failed/tapped, "Fewer alerts", alert rules (setup started, saved with which parts, edited,
+  paused, a typed amount that wasn't one: never what was typed), stops, votes; the account id only (Clerk id or a Telegram-only
   follower's random `tg_` id), never a chat id. Counting (above) stays the record of alerts and follows. Named events go
   through `track` (README lists them) and say where on the page (`from`) and, since 7 Nov (the owner: a trader's
   page link carried the wallet anyway), which trader: `traderFacts` (wallet, the name Signals shows, main category,
@@ -128,15 +129,18 @@ behind Vercel (see README, "Hosting").
   to Telegram (`alert_pass` in `app.py`). Signals is trader discovery and trading intelligence first, copying
   second: following is research, so every buy by a trader you follow alerts you, whatever the amount and whoever
   the trader (their buys of one outcome within 30 minutes add up, across rounds and restarts, shown as the total
-  at the average price). Every alert gives the same facts for every trader (`_trade_text`): who bought which
-  outcome at what price and for how much, the market, the price now, and when they traded with how long before
-  the alert that was, measured ("Traded 14:02 UTC, 6 min before this alert."), never "just now" or "live".
+  at the average price), unless you set a rule for them (below). Every alert gives the same facts for every trader
+  (`_trade_text`), short (owner, 10 Nov: "too much words"; people think in their own time zone, not UTC): "**Sam**
+  bought **Yes** · Market", then "$1,240 at 41¢ · 6 min ago. Now 42¢.", where it traded, and the links. How long ago
+  is measured from the trade's Polymarket timestamp (`_ago`: minutes, at least "1 min ago", then "2 h ago"), never
+  "just now", "live" or a UTC time. A buy sent because it passed a rule starts with the rule it matched (`_rule_tag`:
+  "Matches your rule · $500+ in Politics", from the parts that are set).
   Outside the "can still get in" range it says "Now 60¢, price already moved.", whoever the trader. Nothing about
   copying (no copy line: the copy estimate isn't shown anywhere) and never a cost in the alert: costs, the fill, liquidity and risks are the
   trade page's. Every alert links "Check current price" (`#/check/<wallet>/<market>`, the trade's own page,
   neutral for every trader), and "Buy on Polymarket", which only opens the market. Sells by a trader you follow
-  alert too, whatever the amount (`_sell_text`): who sold which outcome at what price and for how much, the market
-  and when, measured; while they still hold some, the price now and "Check current price"; once they hold none,
+  alert too, whatever the amount (`_sell_text`, as short): who sold which outcome and the market, then how much at
+  what price and how long ago; while they still hold some, the price now and "Check current price"; once they hold none,
   "They no longer hold it." and no price (never a made-up one). A sell is information only: never "sell too",
   never a copy line, never grouped, "Open on Polymarket" for the market. No alert at all when the price
   now is settled (2¢ or less, 98¢ or more), or a sell's price is. A restart (a deploy) neither skips nor repeats one:
@@ -146,26 +150,53 @@ behind Vercel (see README, "Hosting").
   wait or 30 s, 1, 2, 4 min, for up to 30 minutes, after a restart too) only when Telegram surely didn't take it:
   it was never reached, or it said 429. When it may have (a 5xx, no answer once the request went out, the engine
   stopping mid-request) it's recorded as unknown, with why, never asked again. A refusal fails it, and a chat that
-  blocked the bot is disconnected. Every trade of a trader you follow alerts unless you chose fewer for them
-  (`alert_for` in follows.json: only trades over an amount, or a summary every 6 hours; `_wants`), and a sale of
-  something their alert told you about always comes. Following a busy trader (over 20 alerts a day over the past
-  week: `_measure_pace`, kept in alerts.db `pace`) says so with an amount about 3 of their trades a day reached, worded
-  as an estimate from last week, never a promise. At most 200 alerts per person per UTC day (a safety limit), then
+  blocked the bot is disconnected. Every trade of a trader you follow alerts unless you set a rule for them
+  (owner, 10 Nov: 4,140 alerts in 30 days, 0.2% tapped; one follower at the 200 cap every day). The rule is
+  `alert_for[wallet]` in follows.json (`_rule` reads it, `_change_rule` writes it, `_wants` applies it): `mode` and
+  `usd` as before (every trade, only trades of `usd` or more, or a summary every 6 hours, which then sums up only what
+  passes the rule), plus `cats` (markets, the same INTEREST_CHOICES as big-trade interests; [] or none = all; a market
+  whose category couldn't be read doesn't match, as for big trades), `first_only`, `px` ([lo, hi] cents, ends
+  included, on the trade's average price) and `paused_until` (unix time). A field that's missing is its default, so
+  an older follows.json reads as it did, and the page's choice (`PUT …/alerts`, mode and amount only) keeps the
+  other fields. **first_only** skips a buy that adds to an outcome they already held: from the same reads the alert
+  already makes (no new read), the open position the poller read with the buy (Polymarket's positions, which give
+  the price now) less the contracts this alert's buys add up to, plus any of it they sold since the first of those
+  buys, is worth $1 or more at what they paid and over 1% of the position (`_held_before`). When Polymarket's
+  positions haven't caught up with the buy, that can only call an add a first buy (an alert too many), never skip a
+  first buy. While `paused_until` is ahead, nothing from that trader comes, buys or sells; otherwise a sale of
+  something their alert told you about always comes, whatever the rule (`_told`). A buy the rule skips never joins a
+  grouped alert. Big-trade alerts have no rules. In Telegram (`_on_rule`, buttons `r…:<wallet>`): right after a follow
+  with Telegram connected (from the site or the bot's Follow link), "You're following X. They made about N trades a
+  day last week. Choose which ones reach you?" (the pace sentence only when `_measure_pace` measured it; it replaced the
+  busy-trader warning) with Set my rule / Every trade; Set my rule is three steps (the smallest buy: $100, $500,
+  $1,000, the amount about 3 of their buys a day reached last week worded as an estimate, never a promise, or Type my
+  own; which markets; what to skip: "Adds to a position they already hold", "Prices above 90¢ or below 10¢"), each
+  saved at once, then "Saved: X" with the rule and, only when the pace measure already read it (the whole week, under a
+  day old, a rule of amount and prices only), "About N buy alerts last week instead of M." "Markets with little
+  trading" is left out: the engine has no fresh volume for a market without a new read. Type my own: the chat's next
+  plain message is the amount ("750", "$750", "1,000"), else "That's not an amount. Send a number, like 750." and it
+  keeps waiting; the wait is per chat in alerts.db (`typing`, so a deploy doesn't lose it), ends after 10 minutes, and
+  any /command cancels it. Under an alert about one trader: Edit rule (the rule; Minimum size, Markets, Skip,
+  Delivery, and "Stop alerts from X") and Pause 24 h ("X paused for 24 hours." with Undo), then Useful / Not useful.
+  /rules lists everyone you follow, a line and a button each. Alerts sent before 10 Nov keep "Stop alerts" (`unf:`)
+  and "Fewer alerts" (`few:`, `am:`), which still work. The suggested amount and pace come from `_measure_pace`, kept
+  in alerts.db `pace`. At most 200 alerts per person per UTC day (a safety limit), then
   one message that says when alerts resume (00:00 UTC, and how long until then) and nothing until the next day. When 2+ traders you follow buy the same outcome, each within 6 hours of the one before (1 hour in
-  Sports and Esports), the second buy sends one grouped alert (each one's price and buy time, the price now, how
-  long before the alert the latest buy was) and later buys edit it in place; it counts once. Every alert has
+  Sports and Esports), the second buy sends one grouped alert (each one's price and how long ago they bought, the
+  price now) and later buys edit it in place; it counts once. Every alert has
   "Useful / Not useful" (one vote per alert and account, changeable). Big trades ($10,000 or more) in your chosen
   markets alert you whoever the trader, with the same facts, at most 5
   a day within the daily cap. Only a choice made where the page asks (onboarding, or the Feed's "Your markets · Change")
   is kept on the account (per account like follows); Traders' chips only filter the view, and nothing saved or []
   (Skip, all markets) means no big-trade alerts. An alert is never "you can still get in" and never green.
-  Every alert and trade card keeps the link to the market, whoever the trader. Every alert, and the Feed, says
+  Every alert and trade card keeps the link to the market, whoever the trader. The Feed says
   how late it can be for where its trades come from, never a blanket figure and never "instant": a trader you
-  follow is read on their own about every 30 seconds (Polymarket returns their trades there within seconds), so
-  their alerts say "Signals typically reads followed traders' trades every 30 seconds" (`FOLLOW_DELAY`); big trades
-  come from Polymarket's feed of every trade, which typically runs 3–5 minutes behind (`BIG_DELAY`, and the Feed's Big
-  trades). A trade's time is its Polymarket timestamp (its transaction's block time), and every alert measures
-  from it ("Traded 14:02 UTC, 6 min before this alert."). The engine checks Clerk's session token itself (public keys,
+  follow is read on their own about every 30 seconds (Polymarket returns their trades there within seconds); big trades
+  come from Polymarket's feed of every trade, which typically runs 3–5 minutes behind (the Feed's Big trades).
+  Telegram alerts no longer carry the "Traded 14:02 UTC, 6 min before this alert." line or the delay sentences
+  ("Signals typically reads…", "Big trades come from…"): the owner's decision, 10 Nov ("too much words"; people think
+  in PST/EST, not UTC). A trade's time is its Polymarket timestamp (its transaction's block time), and every alert
+  measures from it ("6 min ago"). The website's delay notes stay. The engine checks Clerk's session token itself (public keys,
   no Clerk secret). Never let one account see or change another's follows, and never let an answer about a
   signed-in person be cached.
 - The owner's alerts (`signals/owner_alerts.py`, README "When something breaks"): a Telegram message to the owner

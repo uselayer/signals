@@ -102,17 +102,25 @@ minutes behind. A trade's time is when it was made on Polymarket.
 
 ### Alerts on Telegram
 
-"Connect Telegram" on a trader's page links your chat to the bot. You then get a message after a trader you follow
-buys or sells: who, what, at what price, the price now, and how long before the alert they traded.
+"Connect Telegram" on a trader's page links your chat to the bot. You then get a short message after a trader you
+follow buys or sells: who, what and the market; how much at what price, how long ago they traded ("6 min ago"), and
+the price now. No UTC times.
 
 Signed out, Follow needs no account: it opens the bot, and Start there follows that trader from your chat with
 alerts on. Connecting the same chat to an account later keeps those follows.
 
-- Every trade by default. Per trader you can choose only trades over an amount, or one summary every 6 hours.
+- Every trade by default. Each trader you follow can have an **alert rule**: the smallest buy, which markets, what
+  to skip (a buy that adds to a position they already hold; prices above 90¢ or below 10¢), and every trade or one
+  summary every 6 hours. A buy that passed your rule says so first ("Matches your rule · $500+ in Politics").
+- Right after you follow someone (with Telegram connected) the bot asks: **Set my rule** (three taps, or type your
+  own amount) or **Every trade**. It says how many trades a day they made last week when that's been measured.
+- Under each alert: **Edit rule** (where "Stop alerts from …" now is) and **Pause 24 h**, then Useful / Not useful.
+  `/rules` lists everyone you follow with their rule.
+- A sale of something an alert told you about always comes, whatever the rule (not while that trader is paused).
 - Two or more followed traders buying the same outcome make one message, updated as more buy.
 - Trades of $10,000 or more in the markets you picked alert you too, at most 5 a day.
-- Following a very busy trader (over 20 alerts a day last week) says so first.
-- At most 200 alerts a day. In the chat, `/list` shows who you follow and `/stop` turns alerts off.
+- At most 200 alerts a day. In the chat, `/list` shows who you follow, `/rules` your rules, and `/stop` turns alerts
+  off.
 
 ### What buying now costs
 
@@ -209,7 +217,9 @@ curl -X POST -H "Authorization: Bearer $SIGNALS_METRICS_KEY" https://usesignals.
 ### Counting
 
 What was sent, how it was delivered, taps on alert links, votes, follows and unfollows, "Fewer alerts" opened and
-the choice made (the summary's `fewer`), and `/stop` in the chat (`alerts_turned_off_with_stop`) are counted in `alerts.db`,
+the choice made (the summary's `fewer`), alert rules (the summary's `rules`: setups started and saved, with which parts
+set; edits by part; pauses; typed amounts that weren't one; and how many follows have a rule now), and `/stop` in the
+chat (`alerts_turned_off_with_stop`) are counted in `alerts.db`,
 with nothing personal beyond the signed-in account (no IPs). Price checks are counted with no id at all. To read the
 summary:
 
@@ -256,8 +266,12 @@ whale, cap) and `wallet`.
 - `telegram alert sent` (`tries`, `minutes_late`) and `telegram alert failed` (`why`, Telegram's words): each alert's
   delivery, once it's settled.
 - `telegram alert tapped`: one of its links (`target`: market, market_us, market_kalshi, record, check, feed).
-- `telegram fewer alerts opened` (`mode_before`, `busy`) and `alert choice saved` (`mode`: all, over, summary; `usd`;
-  `via`: telegram or page).
+- `telegram fewer alerts opened` (`mode_before`, `busy`; only from alerts sent before 10 Nov) and `alert choice saved`
+  (`mode`: all, over, summary; `usd`; `via`: telegram or page; Every trade in the rule setup is `all`).
+- Alert rules, each with the trader, `fields` (which parts are set: usd, cats, first_only, px) and `summary`:
+  `telegram rule setup started` (Set my rule), `telegram rule saved` (the setup's last Done; `usd`, `markets`),
+  `telegram rule edited` (`field`: usd, cats, skip, delivery), `telegram trader paused` (`hours`) and `telegram trader
+  unpaused`, `telegram typed amount invalid` (never what was typed), `telegram rules opened` (`/rules`, `follows`).
 - `telegram stop tapped` ("Stop alerts from …", with the trader), `telegram alerts stopped` (`/stop`, with `follows`),
   `telegram list opened` (`/list`), `telegram alert voted` (`useful`), `telegram chat lost` (blocked or deleted).
 
