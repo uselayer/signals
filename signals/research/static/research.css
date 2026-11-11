@@ -291,7 +291,22 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .runpast { display: flex; flex-direction: column; gap: 10px; padding-left: 10px; border-left: 2px solid var(--line); }
 .rundiv { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
 .rundiv::before, .rundiv::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.nowrun { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 14px; }
+/* the question switcher: one chip per question, the workspace shows the one picked (owner, 11 Nov) */
+.qruns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.qruns .lbl { font-size: 12px; color: var(--muted); }
+.qrun { display: inline-flex; align-items: center; gap: 8px; max-width: min(100%, 360px); border: 1px solid var(--line); background: var(--card); color: var(--muted);
+  border-radius: 9px; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+.qrun[aria-pressed="true"] { border-color: color-mix(in srgb, var(--fg) 55%, var(--line)); color: var(--fg); background: var(--soft); }
+.qrun .qt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qrun .st { flex: none; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--soft); color: var(--muted); border: 1px solid var(--line); }
+.qrun .st.live { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+/* the day: one bar per 15-minute window of the question's range, filling in as windows are read */
+.daystrip { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.daystrip .tally .muted { display: inline; font-size: 13px; }
+.dsbox { border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--card); overflow-x: auto; }
+.dsbox svg { display: block; width: 100%; min-width: 520px; height: auto; }
+.dsbar { cursor: pointer; } .dsbar:hover { opacity: .75; }
+.daystrip .pending { animation: breathe 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .dots i { animation: none; opacity: .8; } }
 .card.answer { gap: 10px; padding: 14px; border-color: color-mix(in srgb, var(--fg) 14%, var(--line)); }
 .card.answer .k { margin-left: 0; font-weight: 600; }

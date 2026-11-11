@@ -29,13 +29,12 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
   // earlier runs fold to one line each; the Findings count is the current run's
   const rs = runs(groups(inv.feed)), cur = rs[rs.length - 1], many = rs.length > 1;
   const nCards = cur ? runCards(inv, cur) : 0;
-  const runLabel = many ? `Run ${rs.length} · ` : '';
   const flip = i => setOpenRuns(s => { const t = new Set(s); if (t.has(i)) t.delete(i); else t.add(i); return t; });
   const lastG = cur && cur.groups[cur.groups.length - 1];
   const showGroups = (gs, think) => gs.map((g, i) => html`<${Group} key=${i} g=${g} inv=${inv} act=${act} open=${open} toggle=${toggle} think=${think && g === lastG ? thinking(inv, g) : null} />`);
   return html`<aside class="agent" aria-label="The research agent">
     <div class="agent-head"><span class=${'dot ' + (working || inv.starting ? 'live' : inv.done && !waiting ? 'ok' : '')}></span>
-      <div><div class="t">Signals agent</div><div class="s">${working ? html`${runLabel}Working · <${RunProgress} inv=${inv} />` : inv.starting ? `${runLabel}Starting…` : inv.error ? 'Stopped on an error' : queued ? 'Queued · starts when your other breakdown finishes' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
+      <div><div class="t">Signals agent</div><div class="s">${working ? html`Working · <${RunProgress} inv=${inv} />` : inv.starting ? 'Starting…' : inv.error ? 'Stopped on an error' : queued ? 'Queued · starts when your other breakdown finishes' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
     <div class="atabs" role="tablist"><button role="tab" class=${ui.tab === 'findings' ? 'on' : ''} onClick=${() => act.tab('findings')}>Findings${nCards ? ` · ${nCards}` : ''}</button>
       <button role="tab" class=${ui.tab === 'activity' ? 'on' : ''} onClick=${() => act.tab('activity')}>Activity and data</button></div>
     <div class="feed" ref=${feedRef}>${ui.tab === 'activity' ? html`<${Activity} inv=${inv} />` : html`
@@ -43,10 +42,10 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
       ${inv.feed.length === 0 && html`<div class="note"><span class="dot"></span><p class="muted">The plan appears in the workspace first. Nothing runs until you press Start.</p></div>`}
       ${many && rs.slice(0, -1).map((r, i) => html`<div class="runfold-wrap" key=${'r' + i}>
         <button class="runfold" aria-expanded=${openRuns.has(i) ? 'true' : 'false'} onClick=${() => flip(i)}>
-          <span><b>Run ${i + 1}</b> · ${shortWallets(runTitle(inv, r, i))}${runCards(inv, r) ? ` · ${runCards(inv, r)} finding${runCards(inv, r) === 1 ? '' : 's'}` : ''}</span>
+          <span><b>Earlier question</b> · ${shortWallets(runTitle(inv, r, i))}${runCards(inv, r) ? ` · ${runCards(inv, r)} finding${runCards(inv, r) === 1 ? '' : 's'}` : ''}</span>
           <span class="muted">${openRuns.has(i) ? 'Hide' : 'Open'}</span></button>
         ${openRuns.has(i) && html`<div class="runpast">${showGroups(r.groups, false)}</div>`}</div>`)}
-      ${many && html`<div class="rundiv">Run ${rs.length}${cur.groups[0].ask && cur.groups[0].ask.at ? ` · started ${new Date(cur.groups[0].ask.at * 1000).toISOString().slice(11, 16)} UTC` : ''}</div>`}
+      ${many && html`<div class="rundiv">New question${cur.groups[0].ask && cur.groups[0].ask.at ? ` · started ${new Date(cur.groups[0].ask.at * 1000).toISOString().slice(11, 16)} UTC` : ''}</div>`}
       ${cur && showGroups(cur.groups, true)}`}</div>
     <${Composer} inv=${inv} ui=${ui} act=${act} fixtures=${fixtures} />
   </aside>`;

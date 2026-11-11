@@ -3,7 +3,7 @@ import { html, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact
 import { Chart, Spark } from './chart.js';
 import { money, signedMoney, cents, shares, btc, signedBtc, mmss, clock, windowLabel, hm, day, plural } from './format.js';
 import { posText, fmtWhen } from './windowdata.js';
-import { splitFlagged, flagsFor, rowProgress, currentPlan } from './store.js';
+import { splitFlagged, flagsFor, rowProgress, currentPlan, scopeSlots } from './store.js';
 import { RunProgress } from './clock.js';
 import { FILTERS, filterTiles, tally, buyPoints, pct, leanLine } from './allwindows.js';
 
@@ -14,9 +14,11 @@ const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduce
 // the plan's own step guesses.
 const planMinutes = p => Math.max(1, Math.round((p.estimate_s ?? p.steps.reduce((s, x) => s + (x.est || 0), 0)) / 60));
 const MARK = { queued: '', running: '…', done: '✓', warning: '!', failed: '×' };
-export function PlanStage({ inv, act }) {
-  // the current run's plan (owner, 11 Nov: after Start on a next step the workspace still showed the last run's)
-  const p = currentPlan(inv), busy = inv.running || inv.starting, next = inv.planOrder.length > 0;
+export function PlanStage({ inv, act, plan, past }) {
+  // the current run's plan (owner, 11 Nov: after Start on a next step the workspace still showed the last run's), or
+  // the earlier question's picked in the switcher
+  const p = plan !== undefined ? plan : currentPlan(inv), busy = !past && (inv.running || inv.starting), next = inv.planOrder.length > 0;
+  if (!p && past) return html`<div class="plan"><div style="display:flex;gap:12px"><span class="dot ok"></span><div><h3>No plan for this question</h3><p class="muted small">The agent answered it from what the breakdown had already read. Its answer is in the agent's column.</p></div></div></div>`;
   const working = inv.running && p && p.status === 'approved', queued = p && p.status === 'queued';
   // another breakdown of yours working (act.other, a row from the list): Start queues this one behind it
   const other = p && p.status === 'proposed' ? act.other : null;
@@ -31,6 +33,7 @@ export function PlanStage({ inv, act }) {
       ${s.summary && s.status !== 'queued' && html`<div class="sum">${s.summary}</div>`}
       ${s.progress && s.status === 'running' && html`<div class="bar"><i style=${`width:${Math.round(100 * s.progress.done / Math.max(1, s.progress.total))}%`}></i></div>`}
       ${(s.warnings || []).map(w => html`<div class="warn">${w.text}</div>`)}</div></li>`)}</ol>
+    ${p.status !== 'proposed' && !queued && html`<${DayStrip} sums=${inv.summaries} plan=${p} live=${!!working} act=${act} />`}
     ${p.scope && html`<div class="scope"><div><b>Scope:</b> ${p.scope.from ? `${p.scope.from} to ${p.scope.to}` : 'as asked'}.</div>
       ${(p.scope_options || []).map(o => html`<label><input type="checkbox" id=${'so-' + o.id} disabled=${p.status !== 'proposed'} checked=${act.scopeOpts.has(o.id)} onChange=${e => act.toggleScope(o.id, e.target.checked)} /> ${o.text}</label>`)}</div>`}
     ${other && html`<div class="waitnote"><span class="dot live"></span><p>Your other breakdown is still running (${rowProgress(other.progress).replace(/^Running( · )?/, '') || 'working'}). This one starts as soon as it finishes.</p></div>`}
@@ -40,13 +43,50 @@ export function PlanStage({ inv, act }) {
   </div>`;
 }
 
+// ---------- the day: one bar per window of the question's range
+// Its profit per 15-minute window across the plan's scope (owner, 11 Nov mock-up): bars fill in as the agent draws each
+// window; while it works, grey = not read yet (after its latest tile); a flat line = no trades there. A bar opens its
+// window. Not drawn when the scope can't be read as a range (scopeSlots).
+export function DayStrip({ sums, plan, live, act }) {
+  const slots = scopeSlots(plan && plan.scope);
+  if (!slots) return null;
+  const by = new Map(sums.map(s => [Math.floor(s.start / 900) * 900, s]));
+  const latest = sums.reduce((m, s) => Math.max(m, s.start), -Infinity);
+  const W = 760, H = 168, L = 58, T = 12, PW = W - L - 10, PH = 128, bw = PW / slots.length, mid = T + PH * 0.6;
+  const up = Math.max(10, ...sums.map(s => s.profit || 0)), dn = Math.max(10, ...sums.map(s => -(s.profit || 0)));
+  const sc = Math.min((PH * 0.6 * 0.95) / up, (PH * 0.4 * 0.95) / dn);
+  const multiDay = slots[slots.length - 1] - slots[0] >= 86400 || day(slots[0]) !== day(slots[slots.length - 1]);
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => Math.min(slots.length - 1, Math.round(f * (slots.length - 1))));
+  const withTrades = sums.filter(s => by.get(Math.floor(s.start / 900) * 900) === s).length;
+  const read = live ? slots.filter(t => t <= latest).length : slots.length;
+  return html`<div class="daystrip">
+    <p class="tally"><b>Profit on each 15-minute window</b> <span class="muted">${live ? `${read} of ${slots.length} windows read · ${plural(withTrades, 'window')} with trades so far` : `${slots.length} windows · ${withTrades} with trades`}</span></p>
+    <div class="dsbox"><svg viewBox=${`0 0 ${W} ${H}`} role="img" aria-label="Profit on each 15-minute window">
+      <line x1=${L} x2=${L + PW} y1=${mid} y2=${mid} stroke="var(--line)" />
+      <text x=${L - 8} y=${T + 10} fill="var(--muted)" font-size="11" text-anchor="end">${signedMoney(up)}</text>
+      <text x=${L - 8} y=${mid + dn * sc} fill="var(--muted)" font-size="11" text-anchor="end">${signedMoney(-dn)}</text>
+      ${slots.map((t, i) => {
+        const x = L + i * bw + Math.min(1, bw * 0.15), w = Math.max(1, bw - 2 * Math.min(1, bw * 0.15)), s = by.get(t);
+        if (s && s.profit) { const h = Math.max(2, Math.abs(s.profit) * sc);
+          return html`<rect class="dsbar" x=${x} y=${s.profit > 0 ? mid - h : mid} width=${w} height=${h} rx="1.5" fill=${s.profit > 0 ? 'var(--gain)' : 'var(--loss)'} onClick=${() => act.openWin(s.window_id)}><title>${day(t)} ${hm(t)} · ${signedMoney(s.profit)}</title></rect>`; }
+        if (!s && live && t > latest) return html`<rect class=${reduced ? '' : 'pending'} x=${x} y=${mid - 10} width=${w} height="10" rx="1.5" fill="var(--line)"><title>${hm(t)} · not read yet</title></rect>`;
+        return html`<rect x=${x} y=${mid - 1} width=${w} height="2" fill=${s ? 'var(--muted)' : 'var(--line)'} style=${s ? 'cursor:pointer' : ''} onClick=${s ? () => act.openWin(s.window_id) : null}><title>${day(t)} ${hm(t)} · ${s ? 'broke even' : 'no trades'}</title></rect>`;
+      })}
+      ${ticks.map((k, j) => html`<text x=${L + (k + 0.5) * bw} y=${H - 4} fill="var(--muted)" font-size="11" text-anchor=${j === 0 ? 'start' : j === 4 ? 'end' : 'middle'}>${multiDay ? `${day(slots[k])} ${hm(slots[k])}` : hm(slots[k])}</text>`)}
+    </svg></div>
+    <p class="muted small">${live ? 'Bars fill in as the agent reads each window. Grey: not read yet. ' : ''}Green: profit. Red: loss. Flat: no trades. Click a bar to replay that window.</p>
+  </div>`;
+}
+
 // ---------- tiles
-export function WindowsStage({ inv, ui, act }) {
+export function WindowsStage({ inv, ui, act, plan, live }) {
   const all = inv.summaries;
-  if (!all.length) return html`<div class="ghostbox">${inv.winsLoading ? 'Loading its windows…' : 'Windows appear here as the agent draws them.'}</div>`;
+  const strip = plan && plan.status !== 'proposed' && plan.status !== 'queued' ? html`<${DayStrip} sums=${all} plan=${plan} live=${!!live} act=${act} />` : null;
+  if (!all.length) return html`<div class="ov">${live && strip}<div class="ghostbox">${inv.winsLoading ? 'Loading its windows…' : 'Windows appear here as the agent draws them.'}</div></div>`;
   const hl = ui.hl, n = tally(all), tiles = filterTiles(all, ui.wf), lean = leanLine(buyPoints(all).pts);
   const fl = FILTERS.find(f => f[0] === ui.wf);
   return html`<div class="ov">
+    ${strip}
     ${n.decided > 0 && html`<p class="tally">${lean && html`<b>${lean}</b> `}Made money in <b>${n.made} of ${plural(n.decided, 'window')}</b> (<span class="gain">${signedMoney(n.profitMade)}</span>) and lost money in <b>${n.lostMoney}</b> (<span class="loss">${signedMoney(n.profitLost)}</span>). Bought more of the side that won in ${n.favWon} of ${n.decided}.</p>`}
     <div class="wfilter" role="group" aria-label="Show windows">
       <button class=${!ui.wf ? 'on' : ''} onClick=${() => act.filter(null)}>All · ${all.length}</button>

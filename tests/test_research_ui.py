@@ -367,3 +367,48 @@ def test_an_accepted_next_step_shows_at_once_and_starts_a_new_run() -> None:
     assert (cards1, cards2) == (2, 0)  # Findings counts the current run only
     assert got["planned"] == [2, "plan-2", "Working…"]
     assert got["small"] == [2, "All of 10 Nov"]  # a question about the same scope stays in run 2
+    # owner, 11 Nov: the page never says "Run 1 / Run 2" (how it's built); each is named by what it covers, and the
+    # earlier ones are "Earlier question"
+    page = (STATIC / "js" / "agent.js").read_text() + (STATIC / "js" / "app.js").read_text()
+    assert "Earlier question" in page and "New question" in page and "Your questions" in page
+    assert not re.search(r"Run \$\{|<b>Run |`Run ", page)
+
+
+def test_each_question_shows_only_its_own_windows_and_its_day() -> None:
+    """Owner, 11 Nov (mock-up): with two questions the Windows tab mixed both and added their totals. Each tile keeps
+    the runs that drew it (the server's `run` on window.summary; a Start's run answers its question), the switcher
+    shows one question's tiles, a tile both drew is in both, a reload from /windows (no seq) keeps the tags, and the
+    day strip has one slot per 15-minute window of the plan's scope."""
+    t0 = 1794222000  # 9 Nov 2026 11:00 UTC
+    scope1 = {"from": "9 Nov 2026 11:00 UTC", "to": "9 Nov 2026 12:00 UTC"}
+    scope2 = {"from": "9 Nov 2026 00:00 UTC", "to": "10 Nov 2026 00:00 UTC"}
+    ws = lambda i, run, p: {"type": "window.summary", "window_id": f"w{i}", "start": t0 + 900 * i, "end": t0 + 900 * (i + 1), "profit": p, "run": run}  # noqa: E731
+    ev = [
+        {"type": "ask.started", "ask_id": 1, "text": "How does it trade?", "context": None},
+        {"type": "plan.proposed", "plan_id": "plan-1", "title": "11:00 to 12:00", "scope": scope1, "steps": []},
+        {"type": "done"},
+        {"type": "ask.started", "ask_id": 2, "text": "Start", "context": {"plan_id": "plan-1", "action": "approve"}},
+        ws(0, 2, 10.0), ws(1, 2, -5.0),
+        {"type": "proposal", "proposal_id": "p1", "text": "All of 9 Nov"},
+        {"type": "done"},
+        {"type": "ask.started", "ask_id": 3, "text": "Yes, go ahead: All of 9 Nov", "context": {"proposal_id": "p1"}},
+        {"type": "plan.proposed", "plan_id": "plan-2", "title": "All of 9 Nov", "scope": scope2, "steps": []},
+        {"type": "done"},
+        {"type": "ask.started", "ask_id": 4, "text": "Start", "context": {"plan_id": "plan-2", "action": "approve"}},
+        ws(0, 4, 10.0), ws(3, 4, 7.0),
+        {"type": "done"},
+    ]
+    seq = [{**e, "seq": i, "v": 2} for i, e in enumerate(ev)]
+    reload = [{k: v for k, v in ws(i, None, p).items() if k != "run"} for i, p in ((0, 10.0), (1, -5.0), (3, 7.0))]
+    got = _page_store(
+        f"const inv = S.emptyInv('x'); for (const e of {json.dumps(seq)}) S.apply(inv, e, null);\n"
+        f"for (const x of {json.dumps(reload)}) S.apply(inv, x, null);\n"  # the page's /windows reload: no seq
+        "const rs = S.runs(S.groups(inv.feed)), ids = r => S.runSummaries(inv, r).map(x => x.window_id);\n"
+        "process.stdout.write(JSON.stringify({n: rs.length, asks: rs.map(r => r.askIds), q1: ids(rs[0]), q2: ids(rs[1]),"
+        " plans: rs.map((r, i) => (S.planOfRun(inv, r, i) || {}).plan_id), slots1: S.scopeSlots(inv.plans['plan-1'].scope),"
+        " slots2: S.scopeSlots(inv.plans['plan-2'].scope).length, bad: S.scopeSlots({from: 'soon', to: 'later'})}));"
+    )
+    assert got["n"] == 2 and got["asks"] == [[1, 2], [3, 4]]
+    assert got["q1"] == ["w0", "w1"] and got["q2"] == ["w0", "w3"]  # w0 drawn by both questions
+    assert got["plans"] == ["plan-1", "plan-2"]
+    assert got["slots1"] == [t0, t0 + 900, t0 + 1800, t0 + 2700] and got["slots2"] == 96 and got["bad"] is None
