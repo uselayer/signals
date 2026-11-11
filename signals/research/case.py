@@ -141,8 +141,9 @@ CASE_TOOLS: list[dict[str, Any]] = [
             "Answers the user's question as a card: label (a few words), observed: [lines with the data's "
             "numbers], inferred: [your readings, each saying what would confirm it], annotations: [{window_id, kind: "
             "point|span|region, t0, t1, panel: btc|prices|position, label}] to draw on the replay, focus: {stage, "
-            "window_id, step_index, label} to move the workspace, finding_ids it rests on or changed. Call it once "
-            "at the end of every answer, then end your turn."
+            "window_id, step_index, label} to move the workspace, finding_ids it rests on or changed. The card sits "
+            "on top of the findings, so keep it to two or three plain sentences in all; the detail lives in the "
+            "findings. Call it once at the end of every answer, then end your turn."
         ),
         "input_schema": {
             "type": "object",
