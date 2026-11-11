@@ -1,7 +1,7 @@
 // The /copy page: set up one-tap copy (signals/copying.py). Only accounts in the owner's flag get past the first
 // check (/api/me/copy is 404 for everyone else). Steps, each signed by the follower in their own Privy wallet:
 // 1. Polymarket's geoblock, from this browser: where Polymarket doesn't allow new trades, it stops here.
-// 2. Privy sign-in (email or Google): makes the follower's wallet, whose key never leaves Privy.
+// 2. Privy sign-in (email): makes the follower's wallet, whose key never leaves Privy.
 // 3. Their Polymarket Deposit Wallet (deployed for them, gas paid by Signals' builder key).
 // 4. Trading approvals, then their approval of the Signals trading key (a session key: trades only, can't withdraw).
 // Then: where to send funds (Polymarket's bridge) and the balance.
@@ -152,7 +152,7 @@ function Boot() {
     <PrivyProvider
       appId={state.privy_app_id}
       config={{
-        loginMethods: ["email", "google"],
+        loginMethods: ["email"],
         embeddedWallets: { ethereum: { createOnLogin: "users-without-wallets" } },
         defaultChain: polygon,
         supportedChains: [polygon],
