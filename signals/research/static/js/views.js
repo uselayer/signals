@@ -31,7 +31,7 @@ export function PlanStage({ inv, act }) {
     ${p.scope && html`<div class="scope"><div><b>Scope:</b> ${p.scope.from ? `${p.scope.from} to ${p.scope.to}` : 'as asked'}.</div>
       ${(p.scope_options || []).map(o => html`<label><input type="checkbox" id=${'so-' + o.id} disabled=${p.status !== 'proposed'} checked=${act.scopeOpts.has(o.id)} onChange=${e => act.toggleScope(o.id, e.target.checked)} /> ${o.text}</label>`)}</div>`}
     ${p.status === 'proposed' && html`<div style="display:flex;gap:8px"><button class="btn primary" onClick=${() => act.approve(p.plan_id)}>Start</button><button class="btn ghost" onClick=${() => act.editPlan(p.plan_id)}>Change the plan</button></div>`}
-    ${working && html`<div class="leave"><p><b>You can leave this page.</b> It keeps running and is saved in your breakdowns.</p>
+    ${working && html`<div class="leave"><p><b>You can leave this page.</b> It keeps running, and we'll tell you when it's ready.</p>
       <div class="row"><a class="btn sm" href="#/">Your breakdowns</a><a class="btn sm" href="/#/">Go to Feed</a></div></div>`}
   </div>`;
 }

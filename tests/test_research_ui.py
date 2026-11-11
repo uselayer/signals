@@ -253,3 +253,21 @@ def test_a_started_plan_shows_its_step_and_a_running_row_says_so() -> None:
     assert (r["label"], r["step"], r["total"], r["done"], r["segs"], r["frac"]) == ("Step 2 of 3", 2, 3, 1, ["done", "run", ""], 0.25)
     assert got["finishing"]["label"] == "Finishing up" and got["finishing"]["segs"] == ["done", "done", "done"]
     assert got["rows"] == ["Running · step 2 of 3 · about 3 min left", "Running · it stops by 10 min at the latest", "Running"]
+
+
+def test_a_finished_breakdown_is_ready_until_you_open_it() -> None:
+    """A row that isn't running: Ready when its latest run ended cleanly after you last opened it (and after `since`,
+    within a day), Stopped when it ended on an error, else Saved."""
+    now, since = 1794300000, 1794200000
+    rows = [
+        {"id": "a", "running": True},
+        {"id": "b", "ended": now - 60},  # never opened
+        {"id": "c", "ended": now - 60},  # opened after it ended
+        {"id": "d", "ended": now - 60, "stopped": "over_budget"},
+        {"id": "e", "ended": since - 10},  # ended before this code's first visit
+        {"id": "f", "ended": now - 90000},  # over a day ago
+        {"id": "g"},  # never ran
+    ]
+    got = _page_store(f"const opened = {{c: {now - 30}}};\n"
+                      f"process.stdout.write(JSON.stringify({json.dumps(rows)}.map(r => S.rowState(r, opened, {since}, {now}))));")
+    assert got == ["running", "ready", "saved", "stopped", "saved", "saved", "saved"]

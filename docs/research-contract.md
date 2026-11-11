@@ -14,7 +14,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 |---|---|
 | `GET /api/research/config` | `{clerk_key, event_version}` |
 | `POST /api/research/sessions` `{title?}` | a new investigation → `{id}` |
-| `GET /api/research/sessions` | yours → `{sessions: [{id, created, title, running?, progress?}]}`; a running one has `running: true` and `progress {started_at, typical_s, limit_s, steps?, done?, step?}` (steps only for a Started plan, counted from `step.status`) |
+| `GET /api/research/sessions` | yours → `{sessions: [{id, created, title, running?, progress?}]}`; a running one has `running: true` and `progress {started_at, typical_s, limit_s, steps?, done?, step?}` (steps only for a Started plan, counted from `step.status`); one that isn't has its latest run's `ended` and, when that run stopped on an error, `stopped` (its kind). The pages call an `ended` after you last opened it Ready |
 | `GET /api/research/sessions/{id}` | `{id, title, created, running, events}` (every event so far) |
 | `POST /api/research/sessions/{id}/ask` `{question}` | starts a run → 202 `{started, after}`; 409 one of yours is running; 429 busy |
 | `GET /api/research/sessions/{id}/events?after=N` | server-sent events after `seq` N, then live until `done` |

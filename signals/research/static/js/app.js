@@ -5,7 +5,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser } from './api.js';
 import { fixtureApi } from './fixtures.js';
-import { emptyInv, emptyUi, apply, planProgress, rowProgress } from './store.js';
+import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
@@ -78,6 +78,29 @@ function Teaser() {
   </main>`;
 }
 
+// What you opened and when (the main page's pill reads it too: same origin), and since when "ready" counts.
+const OPENED = 'signals.breakdowns.opened', SINCE = 'signals.breakdowns.since';
+const readLs = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const writeLs = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+function since() {
+  let s = readLs(SINCE, null);
+  if (typeof s !== 'number') { s = Date.now() / 1000; writeLs(SINCE, s); }
+  return s;
+}
+since();
+// You've seen breakdown `id` now: its Ready ends, here and on the main page. The 50 latest are kept.
+function markOpened(id) {
+  const o = readLs(OPENED, {});
+  o[id] = Date.now() / 1000;
+  writeLs(OPENED, Object.fromEntries(Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 50)));
+}
+function rowLabel(s) {
+  const st = rowState(s, readLs(OPENED, {}), since());
+  if (st === 'running') return html`<span class="r run"><span class="dot live"></span>${rowProgress(s.progress)}</span>`;
+  if (st === 'ready') return html`<span class="r ready">✓ Ready</span>`;
+  return html`<span class="r">${st === 'stopped' ? 'Stopped' : 'Saved'}</span>`;
+}
+
 function Home({ api }) {
   const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
@@ -120,7 +143,7 @@ function Home({ api }) {
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
-        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled breakdown'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div>${s.running ? html`<span class="r run"><span class="dot live"></span>${rowProgress(s.progress)}</span>` : html`<span class="r">Saved</span>`}</a>`)}</div>`}</div>`}
+        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled breakdown'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div>${rowLabel(s)}</a>`)}</div>`}</div>`}
     <p class="muted small">Later: re-running a breakdown when the wallet trades again, with Telegram alerts, comes after the first version.</p>
   </main>`;
 }
@@ -142,6 +165,7 @@ function Investigation({ api, id }) {
     tt.wasRunning = inv.running;
     const pp = planProgress(inv);
     document.title = inv.running ? `(${pp ? `${pp.step}/${pp.total}` : '…'}) ${name}` : tt.unseen ? `(✓) ${name}` : name;
+    if (!document.hidden && !inv.running && !api.fixtures) markOpened(id); // you're looking at it finished: not "ready" any more
   };
   useEffect(() => {
     const onVis = () => { if (!document.hidden) titled.current.unseen = false; setTitle(); };

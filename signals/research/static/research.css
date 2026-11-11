@@ -311,3 +311,4 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .leave .row { display: flex; flex-wrap: wrap; gap: 8px; }
 /* the list: a running breakdown's row */
 .list .r.run { color: var(--fg); display: inline-flex; align-items: center; gap: 7px; }
+.list .r.ready { color: var(--accent); font-weight: 600; }
