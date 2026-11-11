@@ -5,7 +5,7 @@ import { money, signedMoney, cents, shares, btc, signedBtc, mmss, clock, windowL
 import { posText, fmtWhen } from './windowdata.js';
 import { splitFlagged, flagsFor } from './store.js';
 import { RunClock } from './clock.js';
-import { FILTERS, filterTiles, tally, buyPoints } from './allwindows.js';
+import { FILTERS, filterTiles, tally, buyPoints, pct, leanLine } from './allwindows.js';
 
 const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -37,16 +37,15 @@ export function PlanStage({ inv, act }) {
 export function WindowsStage({ inv, ui, act }) {
   const all = inv.summaries;
   if (!all.length) return html`<div class="ghostbox">Windows appear here as the agent draws them.</div>`;
-  const hl = ui.hl, n = tally(all), tiles = filterTiles(all, ui.wf);
+  const hl = ui.hl, n = tally(all), tiles = filterTiles(all, ui.wf), lean = leanLine(buyPoints(all).pts);
   const fl = FILTERS.find(f => f[0] === ui.wf);
   return html`<div class="ov">
-    ${n.decided > 0 && html`<p class="tally">Made money in <b>${n.made} of ${plural(n.decided, 'window')}</b> (<span class="gain">${signedMoney(n.profitMade)}</span>) and lost money in <b>${n.lostMoney}</b> (<span class="loss">${signedMoney(n.profitLost)}</span>), from its fills. It bought more of the side that won in <b>${n.favWon} of ${n.decided}</b>.
-      <span class="muted">Not the same thing: buying both Up and Down, it can back the winner and still lose money.</span></p>`}
+    ${n.decided > 0 && html`<p class="tally">${lean && html`<b>${lean}</b> `}Made money in <b>${n.made} of ${plural(n.decided, 'window')}</b> (<span class="gain">${signedMoney(n.profitMade)}</span>) and lost money in <b>${n.lostMoney}</b> (<span class="loss">${signedMoney(n.profitLost)}</span>). Bought more of the side that won in ${n.favWon} of ${n.decided}.</p>`}
     <div class="wfilter" role="group" aria-label="Show windows">
       <button class=${!ui.wf ? 'on' : ''} onClick=${() => act.filter(null)}>All · ${all.length}</button>
       ${FILTERS.map(([k, label]) => html`<button class=${ui.wf === k ? 'on' : ''} disabled=${!n[k]} onClick=${() => act.filter(k)}>${label} · ${n[k]}</button>`)}</div>
-    <${AllWindowsChart} tiles=${tiles} ui=${ui} act=${act} />
-    <p class="muted small">Each tile is one window: Binance BTCUSDT from its price at the start (the dashed line), with this wallet's fills along the bottom (Up above, Down below) and the time before the open shaded. Click one to step through it.${fl ? ` Showing only: ${fl[1].toLowerCase()}.` : ''}</p>
+    <${AllWindowsChart} tiles=${tiles} act=${act} />
+    <p class="muted small">Each tile is one window: BTC from its price at the start (dashed line), its fills along the bottom. Click one to replay it.${fl ? ` Showing only: ${fl[1].toLowerCase()}.` : ''}</p>
     ${hl && html`<div class="hl"><span>Showing <b>${hl.label}</b>: matching windows outlined.</span><button class="link" onClick=${() => act.clearHl()}>Show all</button></div>`}
     <div class="tiles">${tiles.map(s => {
       const cls = hl ? (hl.match.has(s.window_id) ? 'match' : (hl.base && hl.base.has(s.window_id) ? '' : 'dim')) : '';
@@ -63,45 +62,42 @@ export function WindowsStage({ inv, ui, act }) {
 
 // ---------- every window on one chart
 // Each buy: when in its window (x) and how far BTC was from the price to beat, toward the side it bought (y): Chainlink
-// BTC/USD where it was recorded, else Binance BTCUSDT's move since the open, drawn hollow (buyPoints). Coloured by one
-// of two different questions: did the window make money, or did the side bought win.
-const COLOUR_BY = [['money', 'Did the window make money?'], ['side', 'Did the side it bought win?']];
-function AllWindowsChart({ tiles, ui, act }) {
+// BTC/USD where it was recorded, else Binance BTCUSDT's move since the open, drawn hollow (buyPoints). Coloured by
+// whether the window made money, the one question a trader asks of it (owner, 11 Nov: the second colouring, "did the
+// side it bought win", is gone).
+function AllWindowsChart({ tiles, act }) {
   const [box, width] = useWidth();
   const { pts, noLine } = useMemo(() => buyPoints(tiles), [tiles]);
   if (!pts.length) return null;
-  const by = ui.colourBy || 'money', H = 260, L = 54, R = 10, T = 14, B = 30;
+  const H = 260, L = 54, R = 10, T = 14, B = 30;
   const lo = Math.max(-300, Math.min(0, ...pts.map(p => p.t))), hi = 900;
   const sorted = pts.map(p => Math.abs(p.toward)).sort((a, b) => a - b);
   const m = Math.max(20, sorted[Math.floor(0.99 * (sorted.length - 1))]); // the top 1% clipped to the edge, not lost
   const X = t => L + (Math.max(lo, Math.min(hi, t)) - lo) / (hi - lo) * (width - L - R);
   const Y = v => T + (1 - (Math.max(-m, Math.min(m, v)) + m) / (2 * m)) * (H - T - B);
-  const good = p => (by === 'money' ? p.made : p.sideWon), bad = p => (by === 'money' ? p.lostMoney : p.sideLost);
-  const fill = p => (good(p) ? 'var(--gain)' : bad(p) ? 'var(--loss)' : 'var(--faint)');
-  const share = sel => { const g = pts.filter(sel); return g.length ? Math.round(100 * g.filter(p => p.toward > 0).length / g.length) : null; };
-  const [a, b] = [share(good), share(bad)];
-  const names = by === 'money' ? ['of buys in windows that made money', 'in windows that lost money'] : ['of buys of the side that won', 'of buys of the side that lost'];
+  const fill = p => (p.made ? 'var(--gain)' : p.lostMoney ? 'var(--loss)' : 'var(--faint)');
+  const ahead = sel => { const g = pts.filter(sel); return g.length ? pct(g.filter(p => p.toward > 0).length, g.length) : null; };
+  const [a, b] = [ahead(p => p.made), ahead(p => p.lostMoney)];
   const yTicks = [-m, -m / 2, 0, m / 2, m].map(v => Math.round(v));
   const nWin = new Set(pts.map(p => p.window_id)).size, nOpen = pts.filter(p => p.basis === 'open').length;
   return html`<figure class="allwin">
-    <div class="allwin-head"><b>Every buy, across ${plural(nWin, 'window')}</b>
-      <div class="wfilter small" role="group" aria-label="Colour the buys by">${COLOUR_BY.map(([k, label]) => html`<button class=${by === k ? 'on' : ''} onClick=${() => act.colourBy(k)}>${label}</button>`)}</div></div>
+    <div class="allwin-head"><b>Every buy, across ${plural(nWin, 'window')}</b></div>
     <div ref=${box}><svg viewBox=${`0 0 ${width} ${H}`} width=${width} height=${H} role="img" aria-label=${`Every buy: minutes into its window against how far BTC was from the price to beat, toward the side it bought`}>
       ${yTicks.map(v => html`<g><line x1=${L} x2=${width - R} y1=${Y(v)} y2=${Y(v)} stroke="var(--line)" stroke-dasharray=${v === 0 ? '3 3' : ''} stroke-width=${v === 0 ? 1.2 : 1} />
         <text class="axs" x=${L - 6} y=${Y(v) + 4} text-anchor="end">${v === 0 ? '$0' : signedBtc(v).replace('.00', '')}</text></g>`)}
       ${lo < 0 && html`<rect x=${X(lo)} y=${T} width=${X(0) - X(lo)} height=${H - T - B} fill="var(--soft)" />`}
       ${[0, 300, 600, 900].map(t => html`<text class="axs" x=${X(t)} y=${H - 10} text-anchor=${t === hi ? 'end' : 'middle'}>${t / 60} min</text>`)}
-      <text class="axs" x=${L + 6} y=${T + 12}>BTC on the side it bought ↑</text>
-      <text class="axs" x=${L + 6} y=${H - B - 6}>BTC on the other side of the price to beat ↓</text>
+      <text class="axs" x=${L + 6} y=${T + 12}>Bought the side that was ahead ↑</text>
+      <text class="axs" x=${L + 6} y=${H - B - 6}>Bought the side that was behind ↓</text>
       ${pts.map(p => html`<circle cx=${X(p.t)} cy=${Y(p.toward)} r="2.6" fill=${p.basis === 'open' ? 'none' : fill(p)} fill-opacity=".55"
         stroke=${p.basis === 'open' ? fill(p) : 'none'} stroke-width="1" onClick=${() => act.openWin(p.window_id)}>
         <title>${`${day(p.start)} ${hm(p.start)} window: bought ${p.side} at ${mmss(p.t)}, ${p.basis === 'ptb' ? `Chainlink BTC/USD ${signedBtc(p.toward)} from the price to beat, toward ${p.side}` : `Binance BTCUSDT ${signedBtc(p.toward)} toward ${p.side} since the open (no Chainlink recorded)`}. ${p.sideWon ? `${p.side} won` : `${p.side} lost`}; the window ${p.profit == null ? 'has no result yet' : `${signedMoney(p.profit)} from its fills`}. Click to open it.`}</title></circle>`)}
     </svg></div>
     <figcaption class="muted small">
-      <span class="keys"><span class="key"><i style="background:var(--gain)"></i>${by === 'money' ? 'window made money' : 'the side it bought won'}</span>
-        <span class="key"><i style="background:var(--loss)"></i>${by === 'money' ? 'window lost money' : 'the side it bought lost'}</span></span>
-      ${a != null && b != null && html`<span>Bought the side BTC was already on: ${a}% ${names[0]}, ${b}% ${names[1]}.</span>`}
-      <span>Each dot is one buy (${plural(pts.length, 'buy')}): minutes into its window, and how far Chainlink BTC/USD was from the price to beat, toward the side it bought (above it for Up, below it for Down).${nOpen ? ` Hollow dots (${plural(nOpen, 'buy')}) are from before Chainlink was recorded: Binance BTCUSDT's move since the window opened instead, close but not the same.` : ''} Click a dot to open its window.${noLine ? ` ${plural(noLine, 'window')} without a price line ${noLine === 1 ? 'isn\'t' : 'aren\'t'} drawn.` : ''}</span></figcaption>
+      <span class="keys"><span class="key"><i style="background:var(--gain)"></i>window made money</span>
+        <span class="key"><i style="background:var(--loss)"></i>window lost money</span></span>
+      ${a != null && b != null && html`<span>Bought the side that was ahead: ${a} of buys in windows that made money, ${b} in windows that lost money.</span>`}
+      <span>Each dot is one buy: minutes into its window, and how far BTC was from the price to beat, for or against the side it bought.${nOpen ? ' Hollow dots: Binance, before Chainlink was recorded.' : ''} Click a dot to open its window.${noLine ? ` ${plural(noLine, 'window')} without a price line ${noLine === 1 ? 'isn\'t' : 'aren\'t'} drawn.` : ''}</span></figcaption>
   </figure>`;
 }
 
