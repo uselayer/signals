@@ -273,6 +273,7 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 /* answer first, proof on demand: per question, its answer on top, each finding one line that opens to its proof */
 .group { display: flex; flex-direction: column; gap: 10px; }
 .asked { font-size: 13px; align-self: flex-end; max-width: 90%; background: var(--soft); border: 1px solid var(--line); border-radius: 12px 12px 3px 12px; padding: 7px 11px; }
+.asked .clamp + .clamp { margin-top: 4px; } /* the plan it started, under the question */
 .asked .clamp { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; } /* clamp inside the padding: no half line */
 /* the agent busy under the latest question, from the click until its own progress lines (owner, 11 Nov) */
 .typing { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; padding: 2px 4px; }

@@ -53,15 +53,22 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
 
 const waitingFor = inv => { const p = inv.plans[inv.planOrder[inv.planOrder.length - 1]]; return p && p.status === 'proposed' ? 'Waiting for you to start the plan' : 'Ready'; };
 
+const startedPlan = p => !!p && p.status !== 'proposed' && p.status !== 'signin';
+
 // One question: its answer first, then each finding on one line, then what's still running. A proposal isn't
 // here: it's the one next step, above the ask box.
 function Group({ g, inv, act, open, toggle, think }) {
   const answers = g.items.filter(x => x.type === 'answer');
   const fs = g.items.filter(x => x.type === 'finding').map(x => inv.findings[x.id]).filter(Boolean);
   const rows = [...fs.filter(f => f.kind !== 'data'), ...fs.filter(f => f.kind === 'data')]; // what's missing last
-  const rest = g.items.filter(x => x.type !== 'answer' && x.type !== 'finding' && x.type !== 'proposal');
+  // A started plan is what this question set going, so it sits with the question on top (owner, 11 Nov: under the
+  // findings, "● Plan started" read as the status while the header said "Done · saved").
+  const started = g.items.filter(x => x.type === 'plan' && startedPlan(inv.plans[x.plan_id])).map(x => inv.plans[x.plan_id]);
+  const rest = g.items.filter(x => x.type !== 'answer' && x.type !== 'finding' && x.type !== 'proposal' && !(x.type === 'plan' && startedPlan(inv.plans[x.plan_id])));
   return html`<section class="group">
-    ${g.ask && html`<p class="asked" title=${g.ask.text}><span class="clamp"><span class="muted">${g.ask.proposal ? 'You said yes to' : html`You asked${g.ask.ctx ? html` about <span class="ctx">${g.ask.ctx}</span>` : ''}`}:</span> ${g.ask.text}</span></p>`}
+    ${(g.ask || started.length > 0) && html`<p class="asked" title=${[g.ask && g.ask.text, ...started.map(p => p.title)].filter(Boolean).join('\n')}>
+      ${g.ask && html`<span class="clamp"><span class="muted">${g.ask.proposal ? 'You said yes to' : html`You asked${g.ask.ctx ? html` about <span class="ctx">${g.ask.ctx}</span>` : ''}`}:</span> ${g.ask.text}</span>`}
+      ${started.map(p => html`<span class="clamp" key=${p.plan_id}><span class="muted">${g.ask ? 'Plan' : 'You started'}:</span> ${p.title}</span>`)}</p>`}
     ${answers.map((a, i) => html`<${Answer} key=${i} a=${a} inv=${inv} act=${act} />`)}
     ${rows.length > 0 && html`<div class="frows">${answers.length > 0 && html`<h5>What it found</h5>`}
       ${rows.map(f => html`<${Finding} key=${f.finding_id} f=${f} inv=${inv} act=${act} open=${open === f.finding_id} toggle=${() => toggle(f)} />`)}</div>`}
@@ -76,7 +83,7 @@ function Item({ it, inv, act }) {
   if (it.type === 'working') return html`<div class="working"><span class="dot live"></span><div>${it.lines.map(l => html`<p class=${l.done ? 'done' : ''}>${l.done ? '✓ ' : ''}${l.text}</p>`)}</div></div>`;
   if (it.type === 'plan') { const p = inv.plans[it.plan_id]; if (!p) return null;
     if (p.status === 'signin') return html`<${SigninCard} p=${p} />`; // the sample's end: run it on your own
-    if (p.status !== 'proposed') return html`<div class="note"><span class="dot ok"></span><p class="muted">Plan started: ${p.title}</p></div>`;
+    if (p.status !== 'proposed') return null; // started: shown with its question, at the top of the group
     // its steps are in the workspace (the Plan tab shows the current run's plan): here, what it is and Start
     return html`<div class="proposal"><div class="k">This widens the breakdown, so here's the plan first</div><p><b>${p.title}</b></p>
       <p class="muted small">${p.steps.length} step${p.steps.length === 1 ? '' : 's'}${p.estimate_usd != null ? `, about ${money(p.estimate_usd)} of model time` : ''}. <button class="link" onClick=${() => act.stage('plan')}>See the steps</button></p>

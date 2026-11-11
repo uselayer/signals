@@ -426,3 +426,14 @@ def test_each_question_shows_only_its_own_windows_and_its_day() -> None:
     assert got["q1"] == ["w0", "w1"] and got["q2"] == ["w0", "w3"]  # w0 drawn by both questions
     assert got["plans"] == ["plan-1", "plan-2"]
     assert got["slots1"] == [t0, t0 + 900, t0 + 1800, t0 + 2700] and got["slots2"] == 96 and got["bad"] is None
+
+
+def test_a_started_plan_sits_with_its_question_not_under_the_findings() -> None:
+    """Owner, 11 Nov (screenshot): the header said "Done · saved" while the last line of the column, under eight
+    findings, read "● Plan started: …", as if the plan had only just begun. A started plan now shows inside its
+    question's bubble ("Plan: …"), above what it found; only a proposed plan (with Start) stays below."""
+    js = (STATIC / "js" / "agent.js").read_text()
+    assert "Plan started: ${" not in js
+    assert "startedPlan(" in js and "'Plan' : 'You started'" in js
+    group = js[js.index("function Group(") : js.index("function Item(")]
+    assert group.index("started.map") < group.index("answers.map") < group.index("rest.map")
