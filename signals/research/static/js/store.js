@@ -161,6 +161,35 @@ export function runClock(s, now = Date.now() / 1000) {
   return { elapsed, left, frac: limit || typical ? Math.min(0.95, Math.max(0.02, frac)) : null }; // no bar with nothing to measure against
 }
 
+// Where a Started plan has got to (Drew, 10 Nov: "how far along is it?"): "Step 2 of 4" and one bar segment per
+// step, from the steps' statuses (step.status), so the bar only moves when the agent finishes a step. Only while a
+// run works on an approved plan; a question's run has no steps, and the page shows its clock alone.
+export function planProgress(s) {
+  if (!s.running) return null;
+  const p = [...s.planOrder].reverse().map(id => s.plans[id]).find(x => x && x.status === 'approved');
+  return p && p.steps.length ? stepProgress(p.steps) : null;
+}
+const FINISHED = new Set(['done', 'warning', 'failed']);
+// The step being worked on is the one running, else the first not finished; with all finished it's writing up.
+// frac: how far the running step is, only when the agent counted it (step.status progress {done, total}).
+export function stepProgress(steps) {
+  const total = steps.length, done = steps.filter(x => FINISHED.has(x.status)).length;
+  let i = steps.findIndex(x => x.status === 'running');
+  if (i < 0) i = steps.findIndex(x => !FINISHED.has(x.status));
+  const cur = i < 0 ? null : steps[i];
+  const frac = cur && cur.status === 'running' && cur.progress && cur.progress.total > 0 ? Math.min(1, Math.max(0, cur.progress.done / cur.progress.total)) : null;
+  return { total, done, step: i < 0 ? total : i + 1, finishing: i < 0, label: i < 0 ? 'Finishing up' : `Step ${i + 1} of ${total}`,
+           segs: steps.map((x, k) => (FINISHED.has(x.status) ? 'done' : k === i ? 'run' : '')), frac };
+}
+
+// A running breakdown's row in the list, from the server's run_progress: "Running · step 2 of 4 · about 3 min left".
+export function rowProgress(p, now = Date.now() / 1000) {
+  p = p || {};
+  const c = p.started_at ? runClock({ running: true, clock: { start: p.started_at, limit: p.limit_s ?? null, typical: p.typical_s ?? null } }, now) : null;
+  const step = p.steps ? (p.done >= p.steps ? 'finishing up' : `step ${p.step} of ${p.steps}`) : null;
+  return ['Running', step, c && c.left].filter(Boolean).join(' · ');
+}
+
 // Every number in a text, split around the ones the check flagged ({value_text, start, end}): so a card can strike
 // exactly the flagged number where it stands.
 export function splitFlagged(text, flagged) {

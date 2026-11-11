@@ -1541,3 +1541,54 @@ def test_sigterm_ends_running_breakdowns_then_hands_over(monkeypatch: pytest.Mon
     assert events[kinds.index("notice")]["text"] == A.INTERRUPTED
     assert store.runs()[0]["error"] == "interrupted"
     assert A.recover(store) == 0  # already closed: nothing for the next start
+
+
+def test_the_list_says_which_breakdown_runs_and_its_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Drew, 10 Nov: after Start nothing said how far along it was, and the list called a running breakdown "Saved".
+    A running breakdown's row carries its step (the latest approved plan's, by step.status) and its clock."""
+    from signals.research.server import run_progress
+
+    steps = [{"id": "trades"}, {"id": "match"}, {"id": "compare"}, {"id": "write"}]
+    events = [
+        {"type": "plan.proposed", "plan_id": "plan-1", "steps": [{"id": "old"}]},
+        {"type": "plan.answered", "plan_id": "plan-1", "action": "edit"},
+        {"type": "plan.proposed", "plan_id": "plan-2", "steps": steps},
+        {"type": "ask.started", "started_at": 1794300000.0, "typical_s": 240, "limit_s": 600},
+        {"type": "plan.answered", "plan_id": "plan-2", "action": "approve"},
+        {"type": "step.status", "step_id": "trades", "status": "running"},
+        {"type": "step.status", "step_id": "trades", "status": "done"},
+        {"type": "step.status", "step_id": "match", "status": "warning"},
+    ]
+    assert run_progress(events) == {"started_at": 1794300000.0, "typical_s": 240, "limit_s": 600,
+                                    "steps": 4, "done": 2, "step": 3}  # fmt: skip
+    assert run_progress([*events, {"type": "step.status", "step_id": "write", "status": "running"}])["step"] == 4
+    finished = [*events, *({"type": "step.status", "step_id": s, "status": "done"} for s in ("compare", "write"))]
+    assert run_progress(finished)["step"] == 4 and run_progress(finished)["done"] == 4
+    assert "steps" not in run_progress([{"type": "ask.started", "started_at": 1.0}])  # a question: its clock only
+
+    gate = threading.Event()
+
+    class Slow:
+        def ask(self, sid: str, user: str, q: str, emit: Any, **kw: Any) -> None:
+            emit({"type": "ask.started", "started_at": 1794300000.0, "typical_s": None, "limit_s": 600})
+            gate.wait(5)
+            emit({"type": "done"})
+
+    c, server = _client(monkeypatch, Slow())
+    try:
+        quiet = c.post("/api/research/sessions", json={"title": "Saved one"}).json()["id"]
+        busy = c.post("/api/research/sessions", json={"title": "Running one"}).json()["id"]
+        assert c.post(f"/api/research/sessions/{busy}/ask", json={"question": "Go"}).status_code == 202
+        for _ in range(100):  # the run's thread writes ask.started
+            if server.store.events(busy):
+                break
+            time.sleep(0.01)
+        rows = {r["id"]: r for r in c.get("/api/research/sessions").json()["sessions"]}
+        assert rows[busy]["running"] is True and rows[busy]["progress"]["started_at"] == 1794300000.0
+        assert "running" not in rows[quiet] and "progress" not in rows[quiet]
+        gate.set()
+        _settle(server)
+        assert "running" not in {r["id"]: r for r in c.get("/api/research/sessions").json()["sessions"]}[busy]
+    finally:
+        gate.set()
+        server.app.dependency_overrides.clear()

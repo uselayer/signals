@@ -3,7 +3,7 @@
 import { html, useState, useRef, useEffect } from '../vendor/htm-preact-3.1.1.module.js';
 import { flagged } from './views.js';
 import { flagsFor } from './store.js';
-import { RunClock } from './clock.js';
+import { RunProgress } from './clock.js';
 import { money } from './format.js';
 
 
@@ -15,7 +15,7 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
   const nCards = inv.feed.filter(x => (x.type === 'finding' && (inv.findings[x.id] || {}).counts !== false) || x.type === 'answer').length;
   return html`<aside class="agent" aria-label="The research agent">
     <div class="agent-head"><span class=${'dot ' + (working ? 'live' : inv.done && !waiting ? 'ok' : '')}></span>
-      <div><div class="t">Signals agent</div><div class="s">${working ? html`Working · <${RunClock} inv=${inv} />` : inv.error ? 'Stopped on an error' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
+      <div><div class="t">Signals agent</div><div class="s">${working ? html`Working · <${RunProgress} inv=${inv} />` : inv.error ? 'Stopped on an error' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
     <div class="atabs" role="tablist"><button role="tab" class=${ui.tab === 'findings' ? 'on' : ''} onClick=${() => act.tab('findings')}>Findings${nCards ? ` · ${nCards}` : ''}</button>
       <button role="tab" class=${ui.tab === 'activity' ? 'on' : ''} onClick=${() => act.tab('activity')}>Activity and data</button></div>
     <div class="feed" ref=${feedRef}>${ui.tab === 'activity' ? html`<${Activity} inv=${inv} />` : html`

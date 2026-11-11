@@ -218,3 +218,38 @@ def test_a_reloaded_interrupted_breakdown_shows_where_it_got_to_not_working() ->
     assert inv["running"] is False and inv["done"] is True and inv["error"] is None
     assert inv["feed"] == [["ask", "Go"], ["finding", "F1"], ["answer", "Where the breakdown got to"],
                            ["note", "This breakdown was interrupted by an update. Ask again to finish it."]]
+
+
+def test_a_started_plan_shows_its_step_and_a_running_row_says_so() -> None:
+    """Drew, 10 Nov: "how far along is it?". A Started plan's progress is its steps (step.status): "Step 2 of 3" and a
+    segment per step. A question's run has none (its clock alone). A running row in the list words its step and the
+    time left."""
+    steps = [{"id": "a", "title": "Read its trades"}, {"id": "b", "title": "Match prices"}, {"id": "c", "title": "Write"}]
+    events = [
+        {"type": "plan.proposed", "plan_id": "p1", "title": "Plan", "steps": steps},
+        {"type": "ask.started", "ask_id": 2, "text": "Start the plan.", "context": {"plan_id": "p1", "action": "approve"},
+         "started_at": 1794300000, "limit_s": 600, "typical_s": 240},
+        {"type": "plan.answered", "plan_id": "p1", "action": "approve"},
+        {"type": "step.status", "step_id": "a", "status": "done"},
+        {"type": "step.status", "step_id": "b", "status": "running", "progress": {"done": 30, "total": 120}},
+    ]
+    events = [{"seq": i, "v": 2, "run": 2, **e} for i, e in enumerate(events)]
+    got = _page_store(
+        f"const inv = S.emptyInv('x'); const ev = {json.dumps(events)};\n"
+        "const q = S.emptyInv('q'); S.apply(q, {seq: 0, v: 2, type: 'ask.started', ask_id: 1, text: 'Why?', started_at: 1}, null);\n"
+        "const out = {};\n"
+        "S.apply(inv, ev[0], null); out.proposed = S.planProgress(inv);\n"
+        "for (const e of ev.slice(1)) S.apply(inv, e, null); out.running = S.planProgress(inv);\n"
+        "out.question = S.planProgress(q);\n"
+        "S.apply(inv, {seq: 10, v: 2, type: 'step.status', step_id: 'b', status: 'done'}, null);\n"
+        "S.apply(inv, {seq: 11, v: 2, type: 'step.status', step_id: 'c', status: 'done'}, null);\n"
+        "out.finishing = S.planProgress(inv);\n"
+        "S.apply(inv, {seq: 12, v: 2, type: 'done'}, null); out.done = S.planProgress(inv);\n"
+        "out.rows = [S.rowProgress({started_at: 1794300000, typical_s: 240, limit_s: 600, steps: 3, done: 1, step: 2}, 1794300060),\n"
+        "            S.rowProgress({started_at: 1794300000, limit_s: 600}, 1794300060), S.rowProgress(null)];\n"
+        "process.stdout.write(JSON.stringify(out));")
+    assert got["proposed"] is None and got["question"] is None and got["done"] is None
+    r = got["running"]
+    assert (r["label"], r["step"], r["total"], r["done"], r["segs"], r["frac"]) == ("Step 2 of 3", 2, 3, 1, ["done", "run", ""], 0.25)
+    assert got["finishing"]["label"] == "Finishing up" and got["finishing"]["segs"] == ["done", "done", "done"]
+    assert got["rows"] == ["Running · step 2 of 3 · about 3 min left", "Running · it stops by 10 min at the latest", "Running"]

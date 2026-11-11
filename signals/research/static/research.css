@@ -297,3 +297,17 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
   .feed { overflow: visible; }
   .stepbar .opts { margin-left: 0; }
 }
+
+/* a Started plan's progress: "Step 2 of 4 · 1:42 · about 3 min left" over one bar segment per step (plan and agent
+   header), and the note that the run keeps going if you leave */
+.runline { margin-top: 4px; color: var(--muted); } .runprog b { color: var(--fg); font-weight: 600; }
+.stepbar { display: flex; gap: 4px; margin-top: 8px; width: 100%; }
+.stepbar i { flex: 1; height: 5px; border-radius: 3px; background: var(--soft); position: relative; overflow: hidden; }
+.stepbar i.done { background: var(--accent); }
+.stepbar i.run::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--w, 35%); background: color-mix(in srgb, var(--accent) 55%, var(--soft)); transition: width 1s linear; }
+.stepbar i.run.pulse::after { animation: breathe 1.4s ease-in-out infinite; }
+.agent-head .stepbar { margin-top: 6px; } .agent-head .stepbar i { height: 3px; }
+.leave { border: 1px dashed color-mix(in srgb, var(--accent) 50%, var(--line)); background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; font-size: 14px; }
+.leave .row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* the list: a running breakdown's row */
+.list .r.run { color: var(--fg); display: inline-flex; align-items: center; gap: 7px; }

@@ -146,9 +146,46 @@ def new_session(body: NewSession, user: str = Depends(auth.user_of)) -> JSONResp
     return _private({"id": store.new_session(user, body.title)}, 201)
 
 
+def run_progress(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Where a running breakdown has got to, for its row in the list: its clock (the latest ``ask.started``) and, when
+    it works on a Started plan, the step it's on (the latest approved plan's steps by their ``step.status``, as the
+    page's planProgress counts them). Finished means done, warning or failed."""
+    plans: dict[str, dict[str, str]] = {}
+    approved, started = None, None
+    for e in events:
+        t = e.get("type")
+        if t == "plan.proposed":
+            plans[str(e.get("plan_id"))] = {str(s.get("id")): "queued" for s in e.get("steps") or []}
+        elif t == "plan.answered" and e.get("action") == "approve":
+            approved = str(e.get("plan_id"))
+        elif t == "step.status":
+            for steps in plans.values():
+                if str(e.get("step_id")) in steps:
+                    steps[str(e.get("step_id"))] = str(e.get("status"))
+        elif t == "ask.started":
+            started = e
+    out: dict[str, Any] = {}
+    if started:
+        out.update(started_at=started.get("started_at"), typical_s=started.get("typical_s"), limit_s=started.get("limit_s"))
+    statuses = list(plans.get(approved or "", {}).values())
+    if statuses:
+        done = sum(s in ("done", "warning", "failed") for s in statuses)
+        on = next((i for i, s in enumerate(statuses) if s == "running"), None)
+        if on is None:
+            on = next((i for i, s in enumerate(statuses) if s not in ("done", "warning", "failed")), None)
+        out.update(steps=len(statuses), done=done, step=len(statuses) if on is None else on + 1)
+    return out
+
+
 @app.get("/api/research/sessions")
 def sessions(user: str = Depends(auth.user_of)) -> JSONResponse:
-    return _private({"sessions": store.sessions(user)})
+    """Your breakdowns, newest first; one still running says so, with where it has got to (``run_progress``)."""
+    rows = store.sessions(user)
+    for r in rows:
+        if r["id"] in _running:
+            r["running"] = True
+            r["progress"] = run_progress(store.events(r["id"]))
+    return _private({"sessions": rows})
 
 
 def _own(sid: str, user: str) -> dict[str, Any]:
