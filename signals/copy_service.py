@@ -70,6 +70,12 @@ class OrderIn(BaseModel):
     max_price: float = Field(gt=0, lt=1)
 
 
+@app.get("/")
+def root() -> dict[str, bool]:
+    """Railway's health check (railway.json checks "/" for every service built from this repo): up, nothing more."""
+    return {"ok": True}
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     try:

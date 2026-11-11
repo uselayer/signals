@@ -209,6 +209,7 @@ ENGINE = {"Authorization": "Bearer t0ken"}
 
 
 def test_the_order_service_answers_only_the_engine(svc_app: TestClient) -> None:
+    assert svc_app.get("/").json() == {"ok": True}  # Railway's health check: open, says nothing
     assert svc_app.post("/keys").status_code == 401
     assert svc_app.post("/keys", headers={"Authorization": "Bearer wrong"}).status_code == 401
 
