@@ -190,7 +190,6 @@ function Investigation({ api, id }) {
     highlight: f => { const ev = f.evidence || {}, sup = ev.supporting_window_ids || ev.supporting || [], ag = ev.against_window_ids || ev.against || []; ui.hl = { label: `${f.stat ? f.stat.text : ''} · ${f.title}`, match: new Set(sup), base: new Set([...sup, ...ag]) }; ui.stage = 'windows'; redraw(); },
     clearHl: () => { ui.hl = null; redraw(); },
     filter: k => { ui.wf = k; redraw(); },
-    colourBy: k => { ui.colourBy = k; redraw(); },
   };
 
   // The wallet's Signals record (the trader page's: every Polymarket position, not just these windows), read once

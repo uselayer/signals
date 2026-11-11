@@ -13,10 +13,9 @@ export function windowFacts(s) {
   };
 }
 
-export const FILTERS = [
-  ['made', 'Made money', f => f.made], ['lostMoney', 'Lost money', f => f.lostMoney],
-  ['favWon', 'Bought more of the winning side', f => f.favWon], ['favLost', 'Bought more of the losing side', f => f.favLost],
-];
+// Made or lost money only (owner, 11 Nov: the page was a lot to take in). Which side it backed stays one sentence in
+// the tally, not a filter: for a wallet buying both Up and Down it reads as a second, confusing answer.
+export const FILTERS = [['made', 'Made money', f => f.made], ['lostMoney', 'Lost money', f => f.lostMoney]];
 
 export function filterTiles(tiles, key) {
   const f = FILTERS.find(x => x[0] === key);
@@ -67,4 +66,24 @@ export function buyPoints(tiles) {
     }
   }
   return { pts, noLine };
+}
+
+// A share as a person reads it: never "0%" or "100%" for one that isn't (11 Nov: 1 buy in a few hundred read "0%").
+export function pct(part, whole) {
+  if (!whole) return null;
+  const x = 100 * part / whole;
+  if (part > 0 && x < 1) return 'under 1%';
+  if (part < whole && x > 99) return 'over 99%';
+  return `${Math.round(x)}%`;
+}
+
+// Where BTC stood at its buys, in one sentence: on the side it bought (ahead) or the other side of the price to beat
+// (behind). The pattern behind a wallet's wins and losses, said outright instead of left for the reader to find.
+export function leanLine(pts) {
+  const n = pts.length;
+  if (!n) return null;
+  const ahead = pts.filter(p => p.toward > 0).length, behind = pts.filter(p => p.toward < 0).length;
+  if (behind >= 0.9 * n) return `It almost always bought the side that was behind: ${pct(behind, n)} of its ${n} buys were Up while BTC was under the price to beat, or Down while it was over.`;
+  if (ahead >= 0.9 * n) return `It almost always bought the side that was ahead: ${pct(ahead, n)} of its ${n} buys were Up while BTC was over the price to beat, or Down while it was under.`;
+  return `It bought the side that was ahead in ${pct(ahead, n)} of its ${n} buys, and the side that was behind in ${pct(behind, n)}.`;
 }

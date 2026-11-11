@@ -12,7 +12,7 @@ export function emptyInv(id) {
 
 export function emptyUi() {
   return { stage: 'plan', win: null, step: 0, ph: null, full: false, raw: false, hl: null, ctx: null, pin: null,
-    tab: 'findings', tradeFilter: null, pop: null, laterOpen: false, followAgent: true, wf: null, colourBy: 'money' };
+    tab: 'findings', tradeFilter: null, pop: null, laterOpen: false, followAgent: true, wf: null };
 }
 
 const feedPush = (s, item) => { s.feed.push(item); };
