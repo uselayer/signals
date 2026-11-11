@@ -291,6 +291,10 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .runpast { display: flex; flex-direction: column; gap: 10px; padding-left: 10px; border-left: 2px solid var(--line); }
 .rundiv { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
 .rundiv::before, .rundiv::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+/* the sample's end: a follow-up plan offered as the visitor's own breakdown to run */
+.signincard { display: flex; flex-direction: column; gap: 8px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); background: var(--accent-soft);
+  border-radius: 12px; padding: 12px 14px; font-size: 14px; }
+.signincard .btn { display: inline-block; }
 /* the question switcher: one chip per question, the workspace shows the one picked (owner, 11 Nov) */
 .qruns { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .qruns .lbl { font-size: 12px; color: var(--muted); }

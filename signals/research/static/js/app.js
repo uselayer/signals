@@ -234,7 +234,11 @@ function Investigation({ api, id }) {
     scopeOpts: st.current.scope,
     other: st.current.other || null,
     toggleScope: (oid, on) => { on ? st.current.scope.add(oid) : st.current.scope.delete(oid); redraw(); },
-    approve: pid => { sending(null); toPlan(); redraw(); runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])); },
+    approve: pid => {
+      // The sample's recording ends at its first plan: a follow-up's Start asks the visitor to sign in and run it
+      // (owner, 11 Nov: "There are no more recorded windows" was a dead end), nothing is played
+      if (SAMPLE && pid !== inv.planOrder[0] && inv.plans[pid]) { inv.plans[pid].status = 'signin'; toPlan(); redraw(); return; }
+      sending(null); toPlan(); redraw(); runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])); },
     editPlan: pid => { ui.composeFocus = true; ui.composeText = 'Change the plan: '; ui.editing = pid; redraw(); },
     composed: () => { ui.composeFocus = false; ui.composeText = null; },
     proposal: (it, yes) => {
@@ -310,7 +314,7 @@ function Investigation({ api, id }) {
         <h1>${shortWallets(inv.title) || 'Breakdown'}</h1>
         ${many && html`<div class="qruns" role="group" aria-label="Your questions"><span class="lbl">Your questions</span>
           ${rs.map((r, i) => { const last = i === rs.length - 1;
-            const stt = !last ? 'done' : inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for Start' : 'done';
+            const stt = !last ? 'done' : inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for Start' : cp && cp.status === 'signin' ? 'sign in to run' : 'done';
             return html`<button class="qrun" key=${i} aria-pressed=${i === idx ? 'true' : 'false'} title=${runTitle(inv, r, i)} onClick=${() => act.viewRun(i, rs.length)}>
               <span class="qt">${shortWallets(runTitle(inv, r, i))}</span><span class=${'st' + (stt === 'working' ? ' live' : '')}>${stt}</span></button>`; })}</div>`}
         ${past && html`<div class="banner"><span>You're looking at an earlier question. It's finished and won't change.</span><button class="link" onClick=${() => act.viewRun(rs.length - 1, rs.length)}>Back to the new question →</button></div>`}

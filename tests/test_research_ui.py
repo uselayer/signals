@@ -374,6 +374,20 @@ def test_an_accepted_next_step_shows_at_once_and_starts_a_new_run() -> None:
     assert not re.search(r"Run \$\{|<b>Run |`Run ", page)
 
 
+def test_the_sample_ends_on_sign_in_not_a_dead_end() -> None:
+    """Owner, 11 Nov: in the signed-out sample, Start on the follow-up's plan said "There are no more recorded windows,
+    so the sample stops here" (a dead end). The recording ends at its first plan, so a later plan's Start plays nothing
+    and offers the visitor to sign in and run it."""
+    app_js = (STATIC / "js" / "app.js").read_text()
+    approve = app_js[app_js.index("approve: pid =>") : app_js.index("editPlan:")]
+    sample_branch = approve[approve.index("if (SAMPLE") : approve.index("sending(null)")]
+    assert "pid !== inv.planOrder[0]" in sample_branch and "'signin'" in sample_branch and "return" in sample_branch
+    assert "api." not in sample_branch  # nothing is played
+    views = (STATIC / "js" / "views.js").read_text()
+    assert "Sign in to run it" in views and 'href="./?signin#/"' in views
+    assert "SigninCard" in (STATIC / "js" / "agent.js").read_text()
+
+
 def test_each_question_shows_only_its_own_windows_and_its_day() -> None:
     """Owner, 11 Nov (mock-up): with two questions the Windows tab mixed both and added their totals. Each tile keeps
     the runs that drew it (the server's `run` on window.summary; a Start's run answers its question), the switcher

@@ -1,7 +1,7 @@
 // The agent's column: what it's doing, its answers (on top), its evidence (findings, one line each, the proof one
 // tap away), and the question box with the one next step. What it finds opens the windows and fills behind them.
 import { html, useState, useRef, useEffect } from '../vendor/htm-preact-3.1.1.module.js';
-import { flagged } from './views.js';
+import { flagged, SigninCard } from './views.js';
 import { flagsFor, groups, runs, runTitle, runCards, thinking } from './store.js';
 import { RunProgress } from './clock.js';
 import { money, shortWallets } from './format.js';
@@ -75,6 +75,7 @@ function Item({ it, inv, act }) {
   if (it.type === 'error') return html`<div class="banner err">${it.text}</div>`;
   if (it.type === 'working') return html`<div class="working"><span class="dot live"></span><div>${it.lines.map(l => html`<p class=${l.done ? 'done' : ''}>${l.done ? '✓ ' : ''}${l.text}</p>`)}</div></div>`;
   if (it.type === 'plan') { const p = inv.plans[it.plan_id]; if (!p) return null;
+    if (p.status === 'signin') return html`<${SigninCard} p=${p} />`; // the sample's end: run it on your own
     if (p.status !== 'proposed') return html`<div class="note"><span class="dot ok"></span><p class="muted">Plan started: ${p.title}</p></div>`;
     // its steps are in the workspace (the Plan tab shows the current run's plan): here, what it is and Start
     return html`<div class="proposal"><div class="k">This widens the breakdown, so here's the plan first</div><p><b>${p.title}</b></p>
