@@ -25,22 +25,32 @@ export function PlanStage({ inv, act, plan, past }) {
   if (!p) return html`<div class="plan"><div style="display:flex;gap:12px">${busy ? html`<span class="dots" aria-hidden="true" style="margin-top:7px"><i></i><i></i><i></i></span>` : html`<span class="dot"></span>`}<div><h3>${busy ? (next ? 'Working out the plan for the next step' : 'Working out a plan') : 'No plan yet'}</h3><p class="muted small">${busy ? 'The agent shows its plan here before it reads anything.' : 'Ask a question to start.'}</p></div></div></div>`;
   return html`<div class="plan">
     <div style="display:flex;gap:12px;align-items:flex-start"><span class=${'dot ' + (p.status === 'approved' && inv.running ? 'live' : p.status === 'done' ? 'ok' : '')} style="margin-top:6px"></span>
-      <div style="flex:1;min-width:0"><h3>${p.status === 'proposed' ? 'Here is my plan' : queued ? 'Queued' : p.status === 'done' || inv.done ? 'What I did' : 'Working on it'}</h3>
-      <p class="muted small">${p.title}${p.estimate_usd != null && p.status === 'proposed' ? ` · about ${money(p.estimate_usd)} of model time` : ''}${p.status === 'proposed' ? `, about ${planMinutes(p)} min. Nothing runs until you press Start.` : queued ? '. It starts by itself when your other breakdown finishes.' : working ? '' : '. Saved in your breakdowns.'}</p>
+      <div style="flex:1;min-width:0"><h3>${p.status === 'proposed' || p.status === 'signin' ? 'Here is my plan' : queued ? 'Queued' : p.status === 'done' || inv.done ? 'What I did' : 'Working on it'}</h3>
+      <p class="muted small">${p.title}${p.estimate_usd != null && p.status === 'proposed' ? ` · about ${money(p.estimate_usd)} of model time` : ''}${p.status === 'proposed' ? `, about ${planMinutes(p)} min. Nothing runs until you press Start.` : queued ? '. It starts by itself when your other breakdown finishes.' : working || p.status === 'signin' ? '' : '. Saved in your breakdowns.'}</p>
       ${working && html`<p class="small runline"><${RunProgress} inv=${inv} /></p>`}</div></div>
     <ol>${p.steps.map((s, i) => html`<li class=${'ps ' + s.status}><span class="mk">${MARK[s.status] || i + 1}</span><div>
       <div class="ti">${s.title}</div>${s.source && html`<div class="src">${s.source}</div>`}
       ${s.summary && s.status !== 'queued' && html`<div class="sum">${s.summary}</div>`}
       ${s.progress && s.status === 'running' && html`<div class="bar"><i style=${`width:${Math.round(100 * s.progress.done / Math.max(1, s.progress.total))}%`}></i></div>`}
       ${(s.warnings || []).map(w => html`<div class="warn">${w.text}</div>`)}</div></li>`)}</ol>
-    ${p.status !== 'proposed' && !queued && html`<${DayStrip} sums=${inv.summaries} plan=${p} live=${!!working} act=${act} />`}
+    ${p.status !== 'proposed' && p.status !== 'signin' && !queued && html`<${DayStrip} sums=${inv.summaries} plan=${p} live=${!!working} act=${act} />`}
     ${p.scope && html`<div class="scope"><div><b>Scope:</b> ${p.scope.from ? `${p.scope.from} to ${p.scope.to}` : 'as asked'}.</div>
       ${(p.scope_options || []).map(o => html`<label><input type="checkbox" id=${'so-' + o.id} disabled=${p.status !== 'proposed'} checked=${act.scopeOpts.has(o.id)} onChange=${e => act.toggleScope(o.id, e.target.checked)} /> ${o.text}</label>`)}</div>`}
     ${other && html`<div class="waitnote"><span class="dot live"></span><p>Your other breakdown is still running (${rowProgress(other.progress).replace(/^Running( · )?/, '') || 'working'}). This one starts as soon as it finishes.</p></div>`}
+    ${p.status === 'signin' && html`<${SigninCard} p=${p} />`}
     ${p.status === 'proposed' && html`<div style="display:flex;gap:8px"><button class="btn primary" onClick=${() => act.approve(p.plan_id)}>${other ? 'Queue it' : 'Start'}</button><button class="btn ghost" onClick=${() => act.editPlan(p.plan_id)}>Change the plan</button></div>`}
     ${(working || queued) && html`<div class="leave"><p><b>You can leave this page.</b> ${queued ? "It starts by itself, and we'll tell you when it's ready." : "It keeps running, and we'll tell you when it's ready."}</p>
       <div class="row"><a class="btn sm" href="#/">Start another breakdown</a><a class="btn sm" href="/#/">Go to Feed</a></div></div>`}
   </div>`;
+}
+
+// The sample's end (status 'signin', app.js approve): a follow-up plan the recording can't play, offered as the
+// visitor's own breakdown to run (owner, 11 Nov). Only signed-out visitors watching ?sample see it.
+const lower = t => (t ? t.charAt(0).toLowerCase() + t.slice(1) : '');
+export function SigninCard({ p }) {
+  return html`<div class="signincard"><p><b>Run this on your own breakdown</b></p>
+    <p>Sign in and the agent will ${lower(p.title) || 'run this plan'}, for this wallet or any wallet you paste.</p>
+    <div><a class="btn primary" href="./?signin#/">Sign in to run it</a></div></div>`;
 }
 
 // ---------- the day: one bar per window of the question's range
