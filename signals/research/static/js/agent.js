@@ -2,18 +2,19 @@
 // tap away), and the question box with the one next step. What it finds opens the windows and fills behind them.
 import { html, useState, useRef, useEffect } from '../vendor/htm-preact-3.1.1.module.js';
 import { flagged } from './views.js';
-import { flagsFor, groups } from './store.js';
+import { flagsFor, groups, runs, runTitle, runCards, thinking } from './store.js';
 import { RunProgress } from './clock.js';
-import { money } from './format.js';
+import { money, shortWallets } from './format.js';
 
 
 export function AgentColumn({ inv, ui, act, fixtures }) {
   const feedRef = useRef(), n = inv.feed.length;
   const [open, setOpen] = useState(null); // the one finding opened to its proof
+  const [openRuns, setOpenRuns] = useState(() => new Set()); // earlier runs opened again from their folded line
   // a new item keeps the latest question in view, its answer on top (not the bottom of a long feed)
   useEffect(() => {
     const el = feedRef.current; if (!el || ui.tab !== 'findings') return;
-    const last = el.querySelector('.group:last-child');
+    const last = el.querySelector(':scope > .group:last-child'); // not one inside an earlier run opened again
     if (last) el.scrollTop += last.getBoundingClientRect().top - el.getBoundingClientRect().top - 12;
   }, [n, ui.tab]);
   const toggle = f => {
@@ -25,16 +26,28 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
   const working = inv.running;
   const last = inv.plans[inv.planOrder[inv.planOrder.length - 1]];
   const queued = !working && last && last.status === 'queued', waiting = queued || (!working && last && last.status === 'proposed');
-  const nCards = inv.feed.filter(x => (x.type === 'finding' && (inv.findings[x.id] || {}).counts !== false) || x.type === 'answer').length;
+  // earlier runs fold to one line each; the Findings count is the current run's
+  const rs = runs(groups(inv.feed)), cur = rs[rs.length - 1], many = rs.length > 1;
+  const nCards = cur ? runCards(inv, cur) : 0;
+  const runLabel = many ? `Run ${rs.length} · ` : '';
+  const flip = i => setOpenRuns(s => { const t = new Set(s); if (t.has(i)) t.delete(i); else t.add(i); return t; });
+  const lastG = cur && cur.groups[cur.groups.length - 1];
+  const showGroups = (gs, think) => gs.map((g, i) => html`<${Group} key=${i} g=${g} inv=${inv} act=${act} open=${open} toggle=${toggle} think=${think && g === lastG ? thinking(inv, g) : null} />`);
   return html`<aside class="agent" aria-label="The research agent">
-    <div class="agent-head"><span class=${'dot ' + (working ? 'live' : inv.done && !waiting ? 'ok' : '')}></span>
-      <div><div class="t">Signals agent</div><div class="s">${working ? html`Working · <${RunProgress} inv=${inv} />` : inv.error ? 'Stopped on an error' : queued ? 'Queued · starts when your other breakdown finishes' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
+    <div class="agent-head"><span class=${'dot ' + (working || inv.starting ? 'live' : inv.done && !waiting ? 'ok' : '')}></span>
+      <div><div class="t">Signals agent</div><div class="s">${working ? html`${runLabel}Working · <${RunProgress} inv=${inv} />` : inv.starting ? `${runLabel}Starting…` : inv.error ? 'Stopped on an error' : queued ? 'Queued · starts when your other breakdown finishes' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
     <div class="atabs" role="tablist"><button role="tab" class=${ui.tab === 'findings' ? 'on' : ''} onClick=${() => act.tab('findings')}>Findings${nCards ? ` · ${nCards}` : ''}</button>
       <button role="tab" class=${ui.tab === 'activity' ? 'on' : ''} onClick=${() => act.tab('activity')}>Activity and data</button></div>
     <div class="feed" ref=${feedRef}>${ui.tab === 'activity' ? html`<${Activity} inv=${inv} />` : html`
       ${inv.needsReload && html`<div class="banner err">This page is older than the research service. Reload to see everything.</div>`}
       ${inv.feed.length === 0 && html`<div class="note"><span class="dot"></span><p class="muted">The plan appears in the workspace first. Nothing runs until you press Start.</p></div>`}
-      ${groups(inv.feed).map((g, i) => html`<${Group} key=${i} g=${g} inv=${inv} act=${act} open=${open} toggle=${toggle} />`)}`}</div>
+      ${many && rs.slice(0, -1).map((r, i) => html`<div class="runfold-wrap" key=${'r' + i}>
+        <button class="runfold" aria-expanded=${openRuns.has(i) ? 'true' : 'false'} onClick=${() => flip(i)}>
+          <span><b>Run ${i + 1}</b> · ${shortWallets(runTitle(inv, r, i))}${runCards(inv, r) ? ` · ${runCards(inv, r)} finding${runCards(inv, r) === 1 ? '' : 's'}` : ''}</span>
+          <span class="muted">${openRuns.has(i) ? 'Hide' : 'Open'}</span></button>
+        ${openRuns.has(i) && html`<div class="runpast">${showGroups(r.groups, false)}</div>`}</div>`)}
+      ${many && html`<div class="rundiv">Run ${rs.length}${cur.groups[0].ask && cur.groups[0].ask.at ? ` · started ${new Date(cur.groups[0].ask.at * 1000).toISOString().slice(11, 16)} UTC` : ''}</div>`}
+      ${cur && showGroups(cur.groups, true)}`}</div>
     <${Composer} inv=${inv} ui=${ui} act=${act} fixtures=${fixtures} />
   </aside>`;
 }
@@ -43,17 +56,18 @@ const waitingFor = inv => { const p = inv.plans[inv.planOrder[inv.planOrder.leng
 
 // One question: its answer first, then each finding on one line, then what's still running. A proposal isn't
 // here: it's the one next step, above the ask box.
-function Group({ g, inv, act, open, toggle }) {
+function Group({ g, inv, act, open, toggle, think }) {
   const answers = g.items.filter(x => x.type === 'answer');
   const fs = g.items.filter(x => x.type === 'finding').map(x => inv.findings[x.id]).filter(Boolean);
   const rows = [...fs.filter(f => f.kind !== 'data'), ...fs.filter(f => f.kind === 'data')]; // what's missing last
   const rest = g.items.filter(x => x.type !== 'answer' && x.type !== 'finding' && x.type !== 'proposal');
   return html`<section class="group">
-    ${g.ask && html`<p class="asked" title=${g.ask.text}><span class="muted">You asked${g.ask.ctx ? html` about <span class="ctx">${g.ask.ctx}</span>` : ''}:</span> ${g.ask.text}</p>`}
+    ${g.ask && html`<p class="asked" title=${g.ask.text}><span class="clamp"><span class="muted">${g.ask.proposal ? 'You said yes to' : html`You asked${g.ask.ctx ? html` about <span class="ctx">${g.ask.ctx}</span>` : ''}`}:</span> ${g.ask.text}</span></p>`}
     ${answers.map((a, i) => html`<${Answer} key=${i} a=${a} inv=${inv} act=${act} />`)}
     ${rows.length > 0 && html`<div class="frows">${answers.length > 0 && html`<h5>What it found</h5>`}
       ${rows.map(f => html`<${Finding} key=${f.finding_id} f=${f} inv=${inv} act=${act} open=${open === f.finding_id} toggle=${() => toggle(f)} />`)}</div>`}
     ${rest.map((it, i) => html`<${Item} key=${i} it=${it} inv=${inv} act=${act} />`)}
+    ${think && html`<div class="typing" role="status"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><div><p>${think.text}</p>${think.sub && html`<p class="muted small">${think.sub}</p>`}</div></div>`}
   </section>`;
 }
 
@@ -63,9 +77,9 @@ function Item({ it, inv, act }) {
   if (it.type === 'working') return html`<div class="working"><span class="dot live"></span><div>${it.lines.map(l => html`<p class=${l.done ? 'done' : ''}>${l.done ? '✓ ' : ''}${l.text}</p>`)}</div></div>`;
   if (it.type === 'plan') { const p = inv.plans[it.plan_id]; if (!p) return null;
     if (p.status !== 'proposed') return html`<div class="note"><span class="dot ok"></span><p class="muted">Plan started: ${p.title}</p></div>`;
+    // its steps are in the workspace (the Plan tab shows the current run's plan): here, what it is and Start
     return html`<div class="proposal"><div class="k">This widens the breakdown, so here's the plan first</div><p><b>${p.title}</b></p>
-      <ol style="margin:0;padding-left:1.2em;font-size:13.5px;display:flex;flex-direction:column;gap:3px">${p.steps.map(s => html`<li>${s.title}${s.source ? html` <span class="muted">(${s.source})</span>` : ''}</li>`)}</ol>
-      ${p.estimate_usd != null && html`<p class="muted small">About ${money(p.estimate_usd)} of model time.</p>`}
+      <p class="muted small">${p.steps.length} step${p.steps.length === 1 ? '' : 's'}${p.estimate_usd != null ? `, about ${money(p.estimate_usd)} of model time` : ''}. <button class="link" onClick=${() => act.stage('plan')}>See the steps</button></p>
       <div style="display:flex;gap:6px"><button class="btn sm primary" onClick=${() => act.approve(p.plan_id)}>Start</button><button class="btn sm ghost" onClick=${() => act.editPlan(p.plan_id)}>Change the plan</button></div></div>`; }
   return null;
 }
@@ -157,7 +171,7 @@ function Composer({ inv, ui, act, fixtures }) {
   const [text, setText] = useState('');
   const ta = useRef();
   useEffect(() => { if (ui.composeFocus && ta.current) { if (ui.composeText != null) setText(ui.composeText); ta.current.focus(); act.composed(); } }, [ui.composeFocus]);
-  const busy = inv.running;
+  const busy = inv.running || inv.starting;
   const ready = inv.done || inv.planOrder.length > 0;
   const send = q => { q = (q ?? text).trim(); if (!q || busy) return; setText(''); act.ask(q); };
   // one next step: the agent's latest proposal while it's open, else (in the sample) one question with a recorded

@@ -32,7 +32,50 @@ export function groups(feed) {
   }
   return out;
 }
-const ctxLabel = c => c.trade_id ? 'a trade' : c.window_id && c.t != null ? 'a moment' : c.finding_id ? 'a finding' : '';
+// An accepted next step, as the user said it: the service sends "Yes, go ahead: <the agent's suggestion>" (owner,
+// 11 Nov: the column read "Yes: Yes, go ahead: Next, I'd look at…").
+export function yesText(t) {
+  t = String(t ?? '').replace(/^\s*yes(,\s*go ahead)?\s*[:.]?\s*/i, '').replace(/^next,\s*/i, '').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+// The column's questions by run (owner, 11 Nov: after Start on a next step, "the chat is just so bombarded with
+// previous findings"). A run is what one scope answered: the first question, then each accepted next step and each
+// question that widened the breakdown (it came back with a plan). A question about the same scope stays in its run.
+export function runs(gs) {
+  const out = [];
+  for (const g of gs) {
+    if (!out.length || (g.ask && g.ask.proposal) || g.items.some(x => x.type === 'plan')) out.push({ groups: [g] });
+    else out[out.length - 1].groups.push(g);
+  }
+  return out;
+}
+// A run's name: the breakdown's title for the first, else its plan's title, else what was asked.
+export function runTitle(s, r, i) {
+  const planIt = r.groups.flatMap(g => g.items).find(x => x.type === 'plan');
+  const t = i === 0 ? (s.title || (r.groups[0].ask || {}).text) : (planIt && s.plans[planIt.plan_id] ? s.plans[planIt.plan_id].title : (r.groups[0].ask || {}).text);
+  return t || 'Breakdown';
+}
+export const runCards = (s, r) => r.groups.flatMap(g => g.items).filter(x => (x.type === 'finding' && (s.findings[x.id] || {}).counts !== false) || x.type === 'answer').length;
+
+// The plan the page shows: the current run's. Null while an accepted next step is still working its plan out.
+export function currentPlan(s) {
+  if (s.runPlan === null && (s.running || s.starting)) return null;
+  return s.plans[s.runPlan ?? s.planOrder[s.planOrder.length - 1]] || null;
+}
+
+// What the column shows under the latest question while nothing else says the agent is busy: from the click (the
+// page's own "Starting…") until its first progress line, so the column is never still while it works.
+export function thinking(s, g) {
+  if (!(s.running || s.starting)) return null;
+  if (s.feed.some(x => x.type === 'working' && !x.closed)) return null; // its own progress lines show
+  if (g.items.some(x => x.type === 'answer')) return null;
+  const planned = g.items.some(x => x.type === 'plan') || (s.planOrder.length > 0 && !(g.ask && g.ask.proposal));
+  const last = s.log.length > (s.runLog ?? s.log.length) ? s.log[s.log.length - 1].text : null;
+  return { text: s.starting ? 'Starting…' : planned ? 'Working…' : 'Drafting a plan…', sub: s.starting ? null : last };
+}
+
+const ctxLabel = c =>c.trade_id ? 'a trade' : c.window_id && c.t != null ? 'a moment' : c.finding_id ? 'a finding' : '';
 const toolName = n => ({ wallet_trades: 'Read its trades', wallet_profile: "Read its Signals record", window: 'Built a window', outside_prices: 'Read Binance and Chainlink prices', code: 'Ran a calculation', make_chart: 'Drew a chart',
   propose_plan: 'Proposed a plan', step_status: 'Updated a step', show_windows: 'Showed windows', focus: 'Moved the view', walkthrough: 'Wrote a walkthrough', finding: 'Added a finding', answer: 'Wrote the answer', propose: 'Offered a next step' }[n] || n);
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
@@ -77,24 +120,29 @@ export function apply(s, e, ui) {
       Object.assign(s, { title: e.title || s.title, subject: e.subject || null, question: e.question || '', origin: e.origin || null, scope: e.scope || null });
       break;
     case 'start': case 'ask.started': { // v1 'start', v2 'ask.started' (a question, or a plan's Start)
-      const text = e.context && e.context.plan_id ? 'Start the plan' : e.context && e.context.proposal_id ? `Yes: ${e.text ?? ''}` : (e.text ?? e.question);
-      s.running = true; s.done = false; if (!s.question) s.question = text;
+      const prop = !!(e.context && e.context.proposal_id);
+      const text = e.context && e.context.plan_id ? 'Start the plan' : prop ? yesText(e.text) : (e.text ?? e.question);
+      s.running = true; s.done = false; s.starting = false; if (!s.question) s.question = text;
       // the run's clock: the server's start time (a reload keeps counting from it), its limit, how long runs like it usually take
       s.clock = { start: e.started_at ?? Date.now() / 1000, limit: e.limit_s ?? null, typical: e.typical_s ?? null };
-      feedPush(s, { type: 'ask', text, ctx: e.context ? (e.context.label || ctxLabel(e.context)) : null, ask_id: e.ask_id, start: !!(e.context && e.context.plan_id) });
+      s.feed = s.feed.filter(x => !x.pending); // the page's own echo of what was sent, now the server's
+      s.runLog = s.log.length; // the activity lines from here on are this run's
+      if (prop) s.runPlan = null; // an accepted next step is a new run: its plan is still to come
+      feedPush(s, { type: 'ask', text, proposal: prop, at: e.started_at ?? null, ctx: e.context ? (e.context.label || ctxLabel(e.context)) : null, ask_id: e.ask_id, start: !!(e.context && e.context.plan_id) });
       break;
     }
     case 'plan.proposed': {
       const p = { ...e, status: 'proposed', steps: (e.steps || []).map(x => ({ status: 'queued', est: x.estimate_s ?? x.est_s, ...x })) };
       s.plans[e.plan_id] = p; if (!s.planOrder.includes(e.plan_id)) s.planOrder.push(e.plan_id);
+      s.runPlan = e.plan_id;
       if (s.planOrder.length > 1) feedPush(s, { type: 'plan', plan_id: e.plan_id }); // a follow-up's plan: in the column
       if (ui && s.planOrder.length === 1) ui.stage = 'plan';
       break;
     }
-    case 'plan.answered': { const p = s.plans[e.plan_id]; if (p) p.status = e.action === 'approve' ? 'approved' : 'edited'; break; }
+    case 'plan.answered': { const p = s.plans[e.plan_id]; if (p) p.status = e.action === 'approve' ? 'approved' : 'edited'; if (e.action !== 'approve') s.starting = false; break; }
     // Start pressed while another breakdown of yours works: it waits, then starts by itself (plan.answered then);
     // unqueued: it never started (a restart), so the plan waits for Start again
-    case 'plan.queued': { const p = s.plans[e.plan_id]; if (p) p.status = 'queued'; break; }
+    case 'plan.queued': { const p = s.plans[e.plan_id]; if (p) p.status = 'queued'; s.starting = false; break; }
     case 'plan.unqueued': { const p = s.plans[e.plan_id]; if (p) p.status = 'proposed'; if (e.text) feedPush(s, { type: 'note', text: e.text }); break; }
     case 'proposal.answered': { const it = s.feed.find(x => x.type === 'proposal' && x.proposal_id === e.proposal_id); if (it) it.state = e.action === 'accept' ? 'accepted' : 'declined'; break; }
     case 'step.status': {
@@ -154,8 +202,8 @@ export function apply(s, e, ui) {
       feedPush(s, { type: 'answer', label: null, text: e.text, number_check: { passed: !(e.unverified || []).length, flagged: (e.unverified || []).map(v => ({ value_text: String(v) })) }, truncated: e.truncated });
       break;
     case 'usage': s.usage = e; break;
-    case 'error': closeWork(s); s.error = e.message; s.running = false; feedPush(s, { type: 'error', text: e.message }); break;
-    case 'done': closeWork(s); s.running = false; s.done = true; for (const p of Object.values(s.plans)) if (p.status === 'approved') p.status = 'done'; break;
+    case 'error': closeWork(s); s.error = e.message; s.running = false; s.starting = false; feedPush(s, { type: 'error', text: e.message }); break;
+    case 'done': closeWork(s); s.running = false; s.starting = false; s.done = true; for (const p of Object.values(s.plans)) if (p.status === 'approved') p.status = 'done'; break;
     default: break;
   }
 }

@@ -3,7 +3,7 @@ import { html, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact
 import { Chart, Spark } from './chart.js';
 import { money, signedMoney, cents, shares, btc, signedBtc, mmss, clock, windowLabel, hm, day, plural } from './format.js';
 import { posText, fmtWhen } from './windowdata.js';
-import { splitFlagged, flagsFor, rowProgress } from './store.js';
+import { splitFlagged, flagsFor, rowProgress, currentPlan } from './store.js';
 import { RunProgress } from './clock.js';
 import { FILTERS, filterTiles, tally, buyPoints, pct, leanLine } from './allwindows.js';
 
@@ -15,11 +15,12 @@ const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduce
 const planMinutes = p => Math.max(1, Math.round((p.estimate_s ?? p.steps.reduce((s, x) => s + (x.est || 0), 0)) / 60));
 const MARK = { queued: '', running: '…', done: '✓', warning: '!', failed: '×' };
 export function PlanStage({ inv, act }) {
-  const p = inv.plans[inv.planOrder[0]];
+  // the current run's plan (owner, 11 Nov: after Start on a next step the workspace still showed the last run's)
+  const p = currentPlan(inv), busy = inv.running || inv.starting, next = inv.planOrder.length > 0;
   const working = inv.running && p && p.status === 'approved', queued = p && p.status === 'queued';
   // another breakdown of yours working (act.other, a row from the list): Start queues this one behind it
   const other = p && p.status === 'proposed' ? act.other : null;
-  if (!p) return html`<div class="plan"><div style="display:flex;gap:12px"><span class=${'dot ' + (inv.running ? 'live' : '')}></span><div><h3>${inv.running ? 'Working out a plan' : 'No plan yet'}</h3><p class="muted small">${inv.running ? 'The agent shows its plan here before it reads anything.' : 'Ask a question to start.'}</p></div></div></div>`;
+  if (!p) return html`<div class="plan"><div style="display:flex;gap:12px">${busy ? html`<span class="dots" aria-hidden="true" style="margin-top:7px"><i></i><i></i><i></i></span>` : html`<span class="dot"></span>`}<div><h3>${busy ? (next ? 'Working out the plan for the next step' : 'Working out a plan') : 'No plan yet'}</h3><p class="muted small">${busy ? 'The agent shows its plan here before it reads anything.' : 'Ask a question to start.'}</p></div></div></div>`;
   return html`<div class="plan">
     <div style="display:flex;gap:12px;align-items:flex-start"><span class=${'dot ' + (p.status === 'approved' && inv.running ? 'live' : p.status === 'done' ? 'ok' : '')} style="margin-top:6px"></span>
       <div style="flex:1;min-width:0"><h3>${p.status === 'proposed' ? 'Here is my plan' : queued ? 'Queued' : p.status === 'done' || inv.done ? 'What I did' : 'Working on it'}</h3>
