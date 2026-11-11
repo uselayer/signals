@@ -292,9 +292,11 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .fbody { padding: 0 2px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
 .fbody p, .fbody li { overflow-wrap: anywhere; }
 .fbody ul { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 3px; }
-.next { display: flex; align-items: center; gap: 10px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 12px; padding: 8px 8px 8px 12px; font-size: 13.5px; }
-.next p { flex: 1; min-width: 0; }
-.next .btn { flex: none; }
+/* the one next step: label, its words at full width, the button under them (never side by side: its text runs long) */
+.next { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; font-size: 13.5px; background: var(--bg); }
+.next .k { font-size: 12px; color: var(--muted); }
+.next p { line-height: 1.45; overflow-wrap: break-word; }
+.next .btn { margin-top: 4px; }
 .compose { border-top: 1px solid var(--line); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--card); }
 .sugg { display: flex; gap: 6px; flex-wrap: wrap; }
 .sugg button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 4px 10px; font-size: 12.5px; text-align: left; }

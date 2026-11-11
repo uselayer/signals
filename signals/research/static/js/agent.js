@@ -166,7 +166,7 @@ function Composer({ inv, ui, act, fixtures }) {
   const next = !busy && inv.done && !ui.ctx && lastP && lastP.state === 'open' ? lastP : null;
   const sugg = ui.ctx ? ['Why here?', 'What happened here?'] : next ? [] : (fixtures ? ['Why does it buy below the asking price?'] : []);
   return html`<div class="compose">
-    ${next && html`<div class="next"><p><span class="muted">Next:</span> ${next.text}</p><button class="btn sm primary" onClick=${() => act.proposal(next, true)}>${next.accept_label || 'Yes'}</button></div>`}
+    ${next && html`<div class="next"><div class="k">The agent suggests</div><p>${next.text}</p><button class="btn sm primary" onClick=${() => act.proposal(next, true)}>${next.accept_label || 'Yes'}</button></div>`}
     ${!busy && inv.done && sugg.length > 0 && html`<div class="sugg">${sugg.map(s => html`<button onClick=${() => send(s)}>${s}</button>`)}</div>`}
     <div class="cbox">
       ${ui.ctx && html`<div><span class="ctx">${ui.ctx.label}<button aria-label="Remove" onClick=${() => act.clearCtx()}>×</button></span></div>`}
