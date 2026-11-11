@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Breakdowns Follow-up Flow</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a guide strip (steps + designer notes) above a full Signals screen (page left, agent chat right). Single dark look, matching the live app. */
+:root{
+  --bg:#0d0d0f; --panel:#141417; --panel2:#1b1b1f; --line:#28282d; --line2:#34343a;
+  --fg:#ececee; --muted:#8d8d94; --dim:#5d5d64;
+  --accent:#f26b3a; --accent-soft:rgba(242,107,58,.14);
+  --amber:#f2b24a; --amber-soft:rgba(242,178,74,.12);
+  --green:#3ecf8e; --red:#ef5b5b; --cyan:#5ac8e0; --violet:#b48cf2;
+  --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,.chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1320px;margin:0 auto;display:grid;gap:16px}
+
+/* guide */
+.guide{display:grid;gap:12px}
+.guide h1{font-size:20px;margin:0;font-weight:600;text-wrap:balance}
+.guide .sub{color:var(--muted);margin:0;max-width:75ch}
+.steps{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line2);background:var(--panel);border-radius:999px;padding:7px 14px;display:flex;gap:8px;align-items:center;color:var(--muted)}
+.chip b{font-weight:600;color:var(--fg)}
+.chip .t{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.chip[aria-current="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--fg)}
+.chip[aria-current="true"] .t{color:var(--accent)}
+.notes{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:start;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.notes ul{margin:0;padding-left:18px;display:grid;gap:4px}
+.notes li{max-width:90ch}
+.notes .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;font-weight:600}
+.navbtns{display:flex;gap:8px}
+.btn{border:1px solid var(--line2);background:var(--panel2);border-radius:8px;padding:7px 14px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#1a0d07;font-weight:600}
+.btn:disabled{opacity:.35;cursor:default}
+
+/* app frame */
+.app{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--bg)}
+.topnav{display:flex;align-items:center;gap:22px;padding:12px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.logo{display:flex;align-items:center;gap:8px;font-weight:600;font-size:16px}
+.logo i{width:24px;height:24px;border-radius:6px;background:var(--accent);display:inline-block}
+.topnav a{color:var(--muted);text-decoration:none}
+.topnav a.on{color:var(--accent);border:1px dashed var(--accent);border-radius:999px;padding:4px 12px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 380px}
+@media (max-width:960px){.grid{grid-template-columns:minmax(0,1fr)}.agent{border-left:0;border-top:1px solid var(--line)}}
+
+.page{padding:20px 24px;min-width:0;display:grid;gap:14px;align-content:start}
+.crumb{color:var(--muted);font-size:13px}
+.qtitle{font-size:22px;line-height:1.3;font-weight:600;margin:0;text-wrap:balance}
+.meta{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;color:var(--muted)}
+.pill{border:1px solid var(--line2);border-radius:999px;padding:3px 10px;background:var(--panel)}
+.pos{color:var(--green)} .neg{color:var(--red)}
+.runs{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.runs .lbl{font-size:12px;color:var(--dim);margin-right:4px}
+.run{border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:6px 12px;display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+.run[aria-pressed="true"]{border-color:var(--fg);color:var(--fg);background:var(--panel2)}
+.run .st{font-size:11px;padding:1px 7px;border-radius:999px;background:var(--line);color:var(--muted)}
+.run .st.live{background:var(--accent-soft);color:var(--accent)}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.tab{padding:8px 12px;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;font-size:14px}
+.tab.on{color:var(--fg);border-color:var(--fg)}
+.tab.off{color:var(--dim)}
+.sec-h{font-size:16px;font-weight:600;margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:6px 18px;font-variant-numeric:tabular-nums}
+.stats span{color:var(--muted)} .stats b{color:var(--fg);font-weight:600}
+.warn{color:var(--amber);font-size:13px}
+.chartbox{border:1px solid var(--line);border-radius:10px;padding:10px;background:#101013;position:relative;overflow-x:auto}
+.chartbox svg{display:block;width:100%;min-width:560px;height:auto}
+.caption{font-size:13px;color:var(--muted);display:flex;gap:8px;align-items:center}
+.banner{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:8px 12px;font-size:13px}
+.linkbtn{background:none;border:0;color:var(--accent);padding:0}
+
+/* agent */
+.agent{border-left:1px solid var(--line);display:flex;flex-direction:column;min-width:0;height:760px}
+@media (max-width:960px){.agent{height:auto}}
+.ahead{padding:14px 18px 10px;border-bottom:1px solid var(--line);display:grid;gap:6px}
+.ahead .row{display:flex;gap:10px;align-items:flex-start}
+.dot{width:10px;height:10px;border-radius:50%;margin-top:5px;flex:none;background:var(--dim)}
+.dot.live{background:var(--accent);animation:pulse 1.4s infinite}
+.dot.done{background:var(--green)}
+.ahead .name{font-weight:600;font-size:15px}
+.ahead .status{color:var(--muted);font-size:13px}
+.ahead .status b{color:var(--fg);font-weight:600}
+.bar{height:3px;background:var(--line);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);transition:width .6s}
+.atabs{display:flex;gap:4px;padding:0 14px;border-bottom:1px solid var(--line)}
+.chat{flex:1;overflow-y:auto;padding:14px 16px;display:grid;gap:12px;align-content:start;min-height:0}
+@media (max-width:960px){.chat{max-height:none}}
+.finding{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:6px;background:var(--panel)}
+.finding p{margin:0;color:var(--amber)}
+.tag{display:inline-block;font-size:11px;border:1px solid currentColor;border-radius:999px;padding:0 7px;margin-right:6px;vertical-align:1px}
+.tag.seen{color:var(--green)} .tag.inf{color:var(--amber)}
+.finding.new{animation:fadein .5s ease-out}
+.suggest{border:1px solid var(--accent);background:var(--accent-soft);border-radius:10px;padding:12px;display:grid;gap:10px}
+.suggest .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);font-weight:600}
+.suggest .acts{display:flex;gap:8px}
+.folded{display:flex;gap:10px;align-items:center;justify-content:space-between;border:1px dashed var(--line2);border-radius:8px;padding:8px 10px;color:var(--muted);font-size:13px;text-align:left;background:none;width:100%}
+.folded b{color:var(--fg);font-weight:500}
+.divider{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:12px}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--line)}
+.me{justify-self:end;max-width:85%;background:var(--panel2);border:1px solid var(--line2);border-radius:12px 12px 2px 12px;padding:8px 12px}
+.bot{display:grid;gap:8px}
+.typing{display:flex;gap:10px;align-items:center;color:var(--muted)}
+.dots{display:inline-flex;gap:4px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:bounce 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+.small{font-size:12px;color:var(--dim)}
+.plan{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px;display:grid;gap:8px}
+.plan ol{list-style:none;margin:0;padding:0;display:grid;gap:7px}
+.plan li{display:grid;grid-template-columns:18px 1fr;gap:8px;align-items:start}
+.plan li .ic{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--dim);margin-top:3px}
+.plan li.ok .ic{border-color:var(--green);background:var(--green)}
+.plan li.now .ic{border-color:var(--accent);background:radial-gradient(var(--accent) 40%,transparent 45%);animation:pulse 1.4s infinite}
+.plan li.later{color:var(--muted)}
+.plan li .sub{display:block;font-size:12px;color:var(--accent)}
+.compose{border-top:1px solid var(--line);padding:12px 14px}
+.compose .box{border:1px solid var(--line2);border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:flex-end;justify-content:space-between;min-height:70px;background:var(--panel)}
+.compose .ph{color:var(--dim)}
+.compose .ask{background:var(--accent);color:#1a0d07;border:0;border-radius:999px;padding:6px 14px;font-weight:600}
+.mono{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.skel{fill:var(--line)}
+.shimmer{animation:shim 1.6s infinite}
+
+@keyframes pulse{50%{opacity:.35}}
+@keyframes bounce{0%,80%,100%{transform:translateY(0);opacity:.5}40%{transform:translateY(-4px);opacity:1}}
+@keyframes fadein{from{opacity:.2;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes shim{50%{opacity:.45}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:640px){.notes{grid-template-columns:1fr}.qtitle{font-size:19px}.page{padding:16px}}
+</style>
+
+<div class="wrap">
+  <section class="guide">
+    <h1>What happens when a user accepts the agent's follow-up</h1>
+    <p class="sub">Click the steps, or press Start inside the screen. The numbers in Run 2 are made up for the mock.</p>
+    <div class="steps" id="steps" role="tablist"></div>
+    <div class="notes">
+      <div><div class="lbl" id="noteLbl"></div><ul id="noteList"></ul></div>
+      <div class="navbtns"><button class="btn" id="prev">Back</button><button class="btn primary" id="next">Next</button></div>
+    </div>
+  </section>
+
+  <section class="app" aria-label="Signals screen mock-up">
+    <div class="topnav">
+      <span class="logo"><i></i>Signals</span>
+      <a class="on">Breakdowns</a><a>Feed</a><a>Watchlist</a><a>Traders</a>
+    </div>
+    <div class="grid">
+      <div class="page" id="page"></div>
+      <aside class="agent">
+        <div class="ahead" id="ahead"></div>
+        <div class="atabs"><span class="tab on" id="ftab">Findings · 9</span><span class="tab">Activity and data</span></div>
+        <div class="chat" id="chat"></div>
+        <div class="compose"><div class="box"><span class="ph" id="ph"></span><button class="ask" tabindex="-1">Ask</button></div></div>
+      </aside>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+// ---------- example data ----------
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const r=rng(7);
+const day=[];for(let i=0;i<96;i++){const traded=r()<0.64;day.push(traded?Math.round((r()-0.28)*9000)/100:null)}
+day[26]=173.21; day[57]=-64.10; day[25]=88.40; day[27]=41.75;
+const traded=day.filter(v=>v!==null), wins=traded.filter(v=>v>0).length, losses=traded.length-wins;
+const total=traded.reduce((a,b)=>a+b,0);
+const money=v=>(v<0?"−$":"+$")+Math.abs(v).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+const hhmm=i=>String(Math.floor(i/4)).padStart(2,"0")+":"+String((i%4)*15).padStart(2,"0");
+
+// ---------- steps ----------
+const STEPS=[
+ {name:"Run 1 done",t:"before",lbl:"Before: the agent suggests a next step",notes:[
+  "Run 1 answered one window. The agent offers one follow-up as a clear card at the end of the chat, with a <b>Start</b> button.",
+  "The card says what will change: a whole day instead of one window, and roughly how long it takes.",
+  "Press <b>Start</b> in the chat, or Next."]},
+ {name:"Click",t:"0.1 s",lbl:"The instant after Start is clicked",notes:[
+  "<b>Something moves where the user is looking.</b> Their choice shows as a chat bubble right away, then a typing row: “Drafting a plan…”.",
+  "<b>The old run folds into one line</b> at the top of the chat. It isn't deleted, so one click opens it again.",
+  "<b>The page switches with the question.</b> New title, a Run 1 / Run 2 switcher, and a day chart that starts as grey bars. Nothing on screen still belongs to the old answer.",
+  "I changed my mind on dimming the old chart: grey bars that fill in show progress better."]},
+ {name:"Plan ready",t:"~20 s",lbl:"The plan arrives and the work starts",notes:[
+  "The plan shows up as a checklist in the chat, and the current step has a live count (“41 of 96 windows”).",
+  "The day chart fills in bar by bar as each window is read. The user sees results build up, not a spinner.",
+  "The header shows the same step count as the plan, so the two never disagree."]},
+ {name:"First results",t:"~1 min",lbl:"Findings stream in",notes:[
+  "Findings show up one at a time. The Findings tab counts only Run 2's findings.",
+  "The plan shrinks to one line once it's running, so findings get the space.",
+  "On the chart, Run 1's window is marked so the user can link the old answer to the new one."]},
+ {name:"Small question",t:"later",lbl:"A small question stays in the same run",notes:[
+  "<b>The rule:</b> a new scope (another day, window or wallet) starts a new run. A question about this run stays in this chat.",
+  "“Why did it lose at 14:15?” doesn't reset anything. The agent answers inline and highlights that bar.",
+  "Clicking <b>Run 1</b> in the switcher (try it) opens the old answer as read-only, with a way back."]}
+];
+let step=0, view=2; // view: which run the left page shows (1 or 2)
+
+const stepsEl=document.getElementById("steps");
+STEPS.forEach((s,i)=>{const b=document.createElement("button");b.className="chip";b.setAttribute("role","tab");
+ b.innerHTML=`<b>${i+1}</b> ${s.name} <span class="t">${s.t}</span>`;b.onclick=()=>go(i);stepsEl.appendChild(b)});
+document.getElementById("prev").onclick=()=>go(step-1);
+document.getElementById("next").onclick=()=>go(step+1);
+function go(i){step=Math.max(0,Math.min(STEPS.length-1,i));view=step===0?1:2;render()}
+
+// ---------- charts ----------
+function windowChart(){ // Run 1: one 15-min window
+  const R=rng(3),W=760,H=230,L=58,T=18,PW=W-L-110,PH=150;let p=0;const pts=[];
+  for(let i=0;i<=180;i++){p+=(R()-0.5)*3.2+(i<8?-1.6:0)+(i>120?0.25:0);pts.push(p)}
+  const mn=Math.min(...pts)-3,mx=Math.max(...pts)+3,x=i=>L+i/180*PW,y=v=>T+(1-(v-mn)/(mx-mn))*PH;
+  const line=pts.map((v,i)=>(i?"L":"M")+x(i).toFixed(1)+" "+y(v).toFixed(1)).join(" ");
+  const beat=y(pts[0]-2);let tri="";
+  for(let k=0;k<34;k++){const i=Math.floor(R()*178)+1,up=R()<0.45,cx=x(i),cy=y(pts[i])+(up?-10:10),s=3+R()*4;
+   tri+=up?`<path d="M${cx} ${cy-s}L${cx+s} ${cy+s}L${cx-s} ${cy+s}Z" fill="var(--cyan)" opacity=".7"/>`:`<path d="M${cx} ${cy+s}L${cx+s} ${cy-s}L${cx-s} ${cy-s}Z" fill="var(--violet)" opacity=".7"/>`}
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Run 1 window chart">
+   <rect x="${L}" y="${T}" width="${PW*0.04}" height="${PH}" fill="var(--panel2)"/>
+   <line x1="${L}" x2="${L+PW}" y1="${beat}" y2="${beat}" stroke="var(--muted)" stroke-dasharray="5 4"/>
+   <path d="${line}" fill="none" stroke="var(--fg)" stroke-width="1.4"/>${tri}
+   <line x1="${x(9)}" x2="${x(9)}" y1="${T}" y2="${T+PH}" stroke="var(--amber)" stroke-dasharray="3 3"/>
+   <text x="${x(9)+4}" y="${T+10}" fill="var(--amber)" font-size="11">First Down fill, 60 cents</text>
+   <line x1="${x(103)}" x2="${x(103)}" y1="${T}" y2="${T+PH}" stroke="var(--amber)" stroke-dasharray="3 3"/>
+   <text x="${x(103)+4}" y="${T+10}" fill="var(--amber)" font-size="11">Up bid 16 cents filled</text>
+   <text x="${L+PW+8}" y="${beat-4}" fill="var(--cyan)" font-size="11">Settled Up</text>
+   <text x="${L+PW+8}" y="${beat+10}" fill="var(--muted)" font-size="11">Price to beat</text>
+   <text x="${L-8}" y="${T+12}" fill="var(--muted)" font-size="11" text-anchor="end">$74,700</text>
+   <text x="${L-8}" y="${T+PH}" fill="var(--muted)" font-size="11" text-anchor="end">$74,600</text>
+   <text x="${L}" y="${H-14}" fill="var(--muted)" font-size="11">06:30</text>
+   <text x="${L+PW}" y="${H-14}" fill="var(--muted)" font-size="11" text-anchor="end">06:45</text></svg>`;
+}
+function dayChart(filled,highlight){ // Run 2: profit per window across the day
+  const W=760,H=230,L=58,T=20,PW=W-L-20,PH=170,bw=PW/96,mid=T+PH*0.62,sc=(PH*0.58)/180;
+  let g=`<line x1="${L}" x2="${L+PW}" y1="${mid}" y2="${mid}" stroke="var(--line2)"/>`;
+  [["+$150",150],["−$50",-50]].forEach(([t,v])=>{const yy=mid-v*sc;g+=`<line x1="${L}" x2="${L+PW}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-dasharray="2 4"/><text x="${L-8}" y="${yy+4}" fill="var(--muted)" font-size="11" text-anchor="end">${t}</text>`});
+  for(let i=0;i<96;i++){const x=L+i*bw+1,w=Math.max(1,bw-2);
+   if(i>=filled){g+=`<rect class="skel shimmer" x="${x}" y="${mid-14}" width="${w}" height="14" rx="1.5"/>`;continue}
+   const v=day[i];if(v===null){g+=`<rect x="${x}" y="${mid-1}" width="${w}" height="2" fill="var(--line2)"/>`;continue}
+   const h=Math.max(2,Math.abs(v)*sc),hi=highlight===i;
+   g+=`<rect x="${x}" y="${v>0?mid-h:mid}" width="${w}" height="${h}" rx="1.5" fill="${v>0?"var(--green)":"var(--red)"}" opacity="${highlight!=null&&!hi&&i!==26?0.35:0.9}" ${hi?'stroke="var(--fg)" stroke-width="1.5"':""}/>`}
+  if(filled>26){const x=L+26.5*bw;g+=`<line x1="${x}" x2="${x}" y1="${T}" y2="${mid-day[26]*sc-4}" stroke="var(--amber)" stroke-dasharray="3 3"/><text x="${x+4}" y="${T+10}" fill="var(--amber)" font-size="11">Run 1's window, 06:30</text>`}
+  if(highlight!=null){const x=L+(highlight+.5)*bw;g+=`<text x="${x}" y="${mid-day[highlight]*sc+16}" fill="var(--fg)" font-size="11" text-anchor="middle">${hhmm(highlight)} · ${money(day[highlight])}</text>`}
+  ["00:00","06:00","12:00","18:00","24:00"].forEach((t,k)=>g+=`<text x="${L+k*PW/4}" y="${H-6}" fill="var(--muted)" font-size="11" text-anchor="${k===0?"start":k===4?"end":"middle"}">${t}</text>`);
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Profit per 15-minute window on 10 Nov">${g}</svg>`;
+}
+
+// ---------- page (left) ----------
+const Q1="How does this wallet make money on BTC 15-minute markets? Look at 05:30 to 06:45 UTC on 10 Nov. Wallet: 0xb945…db68";
+const Q2="Does this wallet make money the same way all day? Every BTC 15-minute window on 10 Nov. Wallet: 0xb945…db68";
+function runSwitch(){
+  if(step===0)return"";
+  const st2=step>=4?'<span class="st">done</span>':'<span class="st live">working</span>';
+  return `<div class="runs"><span class="lbl">Runs</span>
+   <button class="run" data-run="1" aria-pressed="${view===1}">Run 1 · One window <span class="st">done</span></button>
+   <button class="run" data-run="2" aria-pressed="${view===2}">Run 2 · All of 10 Nov ${step>=4?'<span class="st">done</span>':st2}</button></div>`;
+}
+function renderPage(){
+  const el=document.getElementById("page");
+  if(view===1){
+    el.innerHTML=`<div class="crumb">Breakdowns /</div>
+    <h2 class="qtitle">${Q1}</h2>
+    <div class="meta"><span class="pill">Trader 0xb9…68</span><span>BTC Up or Down 15m</span><span>· 36 windows</span><span>· <span class="pos">+$478.87</span> from its fills</span></div>
+    ${runSwitch()}
+    ${step>0?`<div class="banner"><span>You're looking at Run 1. It's finished and won't change.</span><button class="linkbtn" data-run="2">Back to Run 2 →</button></div>`:""}
+    <div class="tabs"><span class="tab">Plan and data</span><span class="tab">Windows · 36</span><span class="tab on">Window: 10 Nov, 06:30–06:45</span><span class="tab">Fills · 155</span></div>
+    <h3 class="sec-h">10 Nov, 06:30–06:45 UTC: BTC on Binance and Chainlink, the Up and Down prices, its fills <span class="pill" style="font-size:12px;font-weight:500">Resolved <span style="color:var(--cyan)">Up</span></span></h3>
+    <div class="stats"><span><b>155</b> fills</span><span>Spent <b>$1,063.44</b></span><span><b class="pos">+$173.21</b> on this window</span><span>Held <b>both sides</b> at once</span></div>
+    <div class="warn">no order book for 35 of 900 s · 1,210 of 1,290 market trades recorded (93.8%)</div>
+    <div class="chartbox">${windowChart()}</div>`;
+  } else {
+    const filled=step===1?0:step===2?41:96, done=filled===96;
+    const tWin=day.slice(0,filled).filter(v=>v!==null);
+    el.innerHTML=`<div class="crumb">Breakdowns /</div>
+    <h2 class="qtitle">${Q2}</h2>
+    <div class="meta"><span class="pill">Trader 0xb9…68</span><span>BTC Up or Down 15m</span><span>· 96 windows</span><span>· ${done?`<span class="pos">${money(total)}</span> from its fills`:`<span style="color:var(--dim)">total when done</span>`}</span></div>
+    ${runSwitch()}
+    <div class="tabs"><span class="tab ${step<3?"on":"off"}">Plan and data</span><span class="tab ${step>=3?"on":"off"}">Day view</span><span class="tab ${done?"":"off"}">Windows · 96</span><span class="tab ${done?"":"off"}">Fills</span></div>
+    <h3 class="sec-h">10 Nov, 00:00–24:00 UTC: profit on each 15-minute window</h3>
+    <div class="stats">${filled===0?`<span>Waiting for the plan…</span>`:`<span><b>${filled}</b> of 96 windows read</span><span>Traded in <b>${tWin.length}</b></span><span><b class="pos">${tWin.filter(v=>v>0).length}</b> won · <b class="neg">${tWin.filter(v=>v<0).length}</b> lost</span>${done?`<span><b class="pos">${money(total)}</b> for the day</span>`:""}`}</div>
+    <div class="chartbox">${dayChart(filled,step===4?57:null)}</div>
+    <div class="caption">${step===1?`<span class="dots"><i></i><i></i><i></i></span> Each bar fills in as the agent reads that window.`:step===2?`<span class="dots"><i></i><i></i><i></i></span> Reading window ${hhmm(41)}…`:step===3?"Every window read. Green = profit, red = loss, flat line = no trades.":"14:15 highlighted from your question."}</div>`;
+  }
+  el.querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>{view=+b.dataset.run;render()});
+}
+
+// ---------- agent (right) ----------
+function head(){
+  const h=document.getElementById("ahead");
+  const S=[
+   ["done","Done · 5 of 5 steps · 4:12",100],
+   ["live","<b>Run 2</b> · Planning · <span id='el'>0:01</span>",4],
+   ["live","<b>Run 2</b> · Working · <b>Step 2 of 5</b> · <span id='el'>0:24</span> · stops by 10 min at the latest",34],
+   ["live","<b>Run 2</b> · Working · <b>Step 4 of 5</b> · <span id='el'>1:08</span> · stops by 10 min at the latest",72],
+   ["done","<b>Run 2</b> · Done · 5 of 5 steps · 2:51",100]][step];
+  h.innerHTML=`<div class="row"><span class="dot ${S[0]}"></span><div><div class="name">Signals agent</div><div class="status">${S[1]}</div></div></div><div class="bar"><i style="width:${S[2]}%"></i></div>`;
+  document.getElementById("ftab").textContent="Findings · "+(step===0?9:step<3?0:step===3?2:4);
+  document.getElementById("ph").textContent=step===0?"Ask about this window…":step<4&&step>0?"Add a note. The agent reads it at the next step.":"Ask about 10 Nov…";
+}
+const F1=[["inf","It helped the position in two ways. It pulled the pair cost back toward $1 and evened out the extra Down shares."],["inf","The data shows fills, not when orders were placed or moved. Whether it chose 16 cents on purpose can't be confirmed from these reads."]];
+const folded=`<button class="folded" data-run="1"><span><b>Run 1</b> · One window, 06:30–06:45 · 9 findings · <span class="pos">+$173.21</span></span><span>Open ▸</span></button>`;
+const meMsg=`<div class="divider">Run 2 · started 14:02</div><div class="me">Go ahead: every BTC 15-min window on 10 Nov</div>`;
+const planList=(nowIdx,count)=>{const items=["Find every BTC 15-min window on 10 Nov","Read this wallet's fills in each window","Chart profit per window","Check where the 06:30 pattern repeats","Write findings"];
+ return `<ol>${items.map((t,i)=>`<li class="${i<nowIdx?"ok":i===nowIdx?"now":"later"}"><span class="ic"></span><span>${t}${i===0&&nowIdx>0?' <span class="small">· 96 found</span>':""}${i===nowIdx&&count?`<span class="sub">${count}</span>`:""}</span></li>`).join("")}</ol>`};
+function finding(tag,txt,isNew){return `<div class="finding${isNew?" new":""}"><p><span class="tag ${tag==="seen"?"seen":"inf"}">${tag==="seen"?"Seen":"Inferred"}</span>${txt}</p></div>`}
+function renderChat(){
+  const c=document.getElementById("chat");let h="";
+  if(step===0){
+    h+=F1.map(f=>finding(f[0],f[1])).join("")+`<div class="small">Marked on the chart.</div>
+    <div class="suggest"><div class="k">Suggested next</div><div>Look at the whole of 10 Nov, every BTC 15-minute window. That shows if this pattern repeats or was one good window. About 3 min.</div>
+    <div class="acts"><button class="btn primary" id="start">Start</button><button class="btn">Not now</button></div></div>`;
+  } else {
+    h+=folded+meMsg;
+    if(step===1) h+=`<div class="bot"><div class="typing"><span class="dots"><i></i><i></i><i></i></span> Drafting a plan…</div><div class="small">Plans usually take about 20 s.</div></div>`;
+    if(step===2) h+=`<div class="bot"><div>Here's the plan. 5 steps, about 3 min. I'll post findings as I go.</div><div class="plan">${planList(1,"41 of 96 windows read")}</div></div>`;
+    if(step>=3){
+      h+=`<button class="folded" style="border-style:solid"><span>Plan · ${step===3?"step 4 of 5":"all 5 steps done"}</span><span>Show ▸</span></button>`;
+      h+=finding("seen",`It traded in ${traded.length} of 96 windows. Profit in ${wins}, loss in ${losses}.`,step===3);
+      h+=finding("inf","The 06:30 pattern (buy both sides, pull the pair cost under $1) shows up in most of its winning windows.",step===3);
+      if(step===3) h+=`<div class="typing"><span class="dots"><i></i><i></i><i></i></span> Writing finding 3…</div>`;
+      else h+=finding("seen","Its 4 biggest losses all came when BTC moved more than $150 in the first 2 minutes.")+finding("inf","It looks like it does better on quiet windows than on fast ones.")
+       +`<div class="me">Why did it lose at 14:15?</div><div class="bot">${finding("seen","At 14:15 it bought Down at 71 cents, then BTC jumped $190 in 3 minutes. It never bought the Up side, so there was no pair to fall back on. "+money(day[57])+" on the window.",true)}<div class="small">Marked on the chart.</div></div>`;
+    }
+  }
+  c.innerHTML=h;c.scrollTop=c.scrollHeight;
+  const s=document.getElementById("start");if(s)s.onclick=()=>go(1);
+  c.querySelectorAll("[data-run]").forEach(b=>b.onclick=()=>{view=+b.dataset.run;render()});
+}
+
+// ---------- notes + render ----------
+function render(){
+  [...stepsEl.children].forEach((b,i)=>b.setAttribute("aria-current",i===step));
+  document.getElementById("noteLbl").textContent=`Step ${step+1} · ${STEPS[step].lbl}`;
+  document.getElementById("noteList").innerHTML=STEPS[step].notes.map(n=>`<li>${n}</li>`).join("");
+  document.getElementById("prev").disabled=step===0;document.getElementById("next").disabled=step===STEPS.length-1;
+  renderPage();head();renderChat();
+}
+// live elapsed timer while working
+let base={1:1,2:24,3:68},t0=Date.now(),last=-1;
+setInterval(()=>{if(step!==last){last=step;t0=Date.now()}const el=document.getElementById("el");if(!el||!base[step])return;const s=base[step]+Math.floor((Date.now()-t0)/1000);el.textContent=Math.floor(s/60)+":"+String(s%60).padStart(2,"0")},1000);
+render();
+})();
+</script>
+
+</html>
