@@ -3987,6 +3987,29 @@
     "accept_label": "Read them"
    },
    {
+    "type": "answer.card",
+    "ask_id": 2,
+    "label": "In short",
+    "observed": [
+     "It buys before each window opens, usually both Up and Down, and holds both sides to the close. It lost money in all 3 windows, −$176.43 together."
+    ],
+    "inferred": [
+     "It seems to quote both sides rather than pick a direction."
+    ],
+    "annotations": [],
+    "focus": null,
+    "finding_ids": [
+     "F1",
+     "F2",
+     "F3",
+     "F4"
+    ],
+    "number_check": {
+     "passed": true,
+     "flagged": {}
+    }
+   },
+   {
     "type": "usage",
     "cost_usd": 0.41,
     "rounds": 6,

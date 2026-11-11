@@ -20,6 +20,18 @@ const working = s => s.feed.find(x => x.type === 'working' && !x.closed);
 const workLine = (s, text) => { let w = working(s); if (!w) { w = { type: 'working', lines: [] }; s.feed.push(w); } w.lines.forEach(l => { l.done = true; }); w.lines.push({ text }); };
 const closeWork = s => { const w = working(s); if (w) { w.closed = true; s.feed = s.feed.filter(x => x !== w); } };
 export const KNOWN_V = 2;
+
+// The agent column's feed by question: each question with what came back for it. A plan's Start isn't a new
+// question: its run answers the question that made the plan.
+export function groups(feed) {
+  const out = [];
+  for (const it of feed) {
+    if (it.type === 'ask' && !(it.start && out.length)) { out.push({ ask: it, items: [] }); continue; }
+    if (!out.length) out.push({ ask: null, items: [] });
+    if (it.type !== 'ask') out[out.length - 1].items.push(it);
+  }
+  return out;
+}
 const ctxLabel = c => c.trade_id ? 'a trade' : c.window_id && c.t != null ? 'a moment' : c.finding_id ? 'a finding' : '';
 const toolName = n => ({ wallet_trades: 'Read its trades', wallet_profile: "Read its Signals record", window: 'Built a window', outside_prices: 'Read Binance and Chainlink prices', code: 'Ran a calculation', make_chart: 'Drew a chart',
   propose_plan: 'Proposed a plan', step_status: 'Updated a step', show_windows: 'Showed windows', focus: 'Moved the view', walkthrough: 'Wrote a walkthrough', finding: 'Added a finding', answer: 'Wrote the answer', propose: 'Offered a next step' }[n] || n);
@@ -69,7 +81,7 @@ export function apply(s, e, ui) {
       s.running = true; s.done = false; if (!s.question) s.question = text;
       // the run's clock: the server's start time (a reload keeps counting from it), its limit, how long runs like it usually take
       s.clock = { start: e.started_at ?? Date.now() / 1000, limit: e.limit_s ?? null, typical: e.typical_s ?? null };
-      feedPush(s, { type: 'ask', text, ctx: e.context ? (e.context.label || ctxLabel(e.context)) : null, ask_id: e.ask_id });
+      feedPush(s, { type: 'ask', text, ctx: e.context ? (e.context.label || ctxLabel(e.context)) : null, ask_id: e.ask_id, start: !!(e.context && e.context.plan_id) });
       break;
     }
     case 'plan.proposed': {

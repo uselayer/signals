@@ -176,6 +176,12 @@ def build() -> dict[str, Any]:
          "evidence": {"supporting_window_ids": [], "against_window_ids": [], "trade_ids": []},
          "example": None, "based_on": [], "would_change_mind": None, "number_check": {"passed": True, "flagged": {}}, "counts": True},
         {"type": "proposal", "proposal_id": "P1", "ask_id": 2, "text": f"Every BTC 15-minute window it traded on 9 Nov, to see whether these {n} are typical.", "accept_label": "Read them"},
+        # the run ends on its answer, as a live one does (the agent's answer tool); the column pins it on top
+        {"type": "answer.card", "ask_id": 2, "label": "In short",
+         "observed": [f"It buys before each window opens, usually both Up and Down, and holds both sides to the close. "
+                      f"It lost money in all {n} windows, {signed(total)} together."],
+         "inferred": ["It seems to quote both sides rather than pick a direction."],
+         "annotations": [], "focus": None, "finding_ids": ["F1", "F2", "F3", "F4"], "number_check": {"passed": True, "flagged": {}}},
         {"type": "usage", "cost_usd": 0.41, "rounds": 6, "tool_calls": 3 + n},
         {"type": "done"},
     ]

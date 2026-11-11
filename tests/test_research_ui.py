@@ -286,3 +286,26 @@ def test_a_queued_start_shows_queued_then_runs_or_goes_back_to_start() -> None:
         "out.push(b.plans.p1.status, b.feed.map(f => f.text));\n"
         "process.stdout.write(JSON.stringify(out));")
     assert got == ["queued", "approved", "proposed", ["Press Start again."]]
+
+
+def test_the_column_puts_the_answer_first_and_offers_one_next_step() -> None:
+    """Owner, 11 Nov: "so much information combined in the right-hand side that it mentally overloads the trader".
+    Answer first, proof on demand: the sample's run ends on its answer (as a live one does) in two or three
+    sentences; the column groups the feed by question (a plan's Start isn't a new question), the agent's proposal
+    is the one next step above the ask box (not a card in the feed), and no finding carries an id or a "numbers
+    checked" line: only a failed check is marked."""
+    sample = json.loads((FIX / "events.sample.json").read_text())
+    events = [e for run in sample["runs"] for e in run]
+    cards = [e for e in sample["runs"][1] if e["type"] == "answer.card"]
+    assert len(cards) == 1
+    sentences = re.findall(r"[.!?](?:\s|$)", " ".join(cards[0]["observed"] + cards[0]["inferred"]))
+    assert 2 <= len(sentences) <= 3, cards[0]
+    seq = [{**e, "seq": i, "v": 2} for i, e in enumerate(events)]
+    got = _page_store(f"const inv = S.emptyInv('x'); for (const e of {json.dumps(seq)}) S.apply(inv, e, null);\n"
+                      "process.stdout.write(JSON.stringify(S.groups(inv.feed).map(g => [g.ask && g.ask.text, g.items.map(x => x.type)])));")
+    assert len(got) == 1, got  # the question, and its Start's run under it
+    assert got[0][0] == sample["runs"][0][0]["question"]
+    assert "answer" in got[0][1] and "finding" in got[0][1]
+    js = (STATIC / "js" / "agent.js").read_text()
+    assert "Next, I'd look at" not in js and "Numbers checked" not in js and "f.finding_id}</span>" not in js
+    assert "x.type !== 'proposal'" in js and "lastP.state === 'open'" in js
