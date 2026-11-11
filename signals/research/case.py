@@ -158,7 +158,12 @@ CASE_TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "propose",
-        "description": "Offers the user a next step as a card ('Next, I'd look at…') with a button; they accept or decline.",
+        "description": (
+            "Offers the user one next step above the ask box, with a button; they accept or decline. text: what "
+            "you'd look at and why, in one or two short sentences (under 30 words), starting with the thing itself "
+            "('Every BTC 15-minute window on 10 Nov, to see whether…'), never 'Next, I'd look at'. accept_label: "
+            "two to four words."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {"text": {"type": "string"}, "accept_label": {"type": "string"}},
