@@ -78,6 +78,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     n = recover()
     if n:
         print(f"research: closed {n} breakdowns the last process was running", flush=True)
+    if q := unqueue_stale():
+        print(f"research: {q} queued Starts never ran (a restart): back to Start", flush=True)
     _on_sigterm()  # uvicorn has installed its handlers by now: this one runs first, then hands over
     yield
 
@@ -86,6 +88,13 @@ app = FastAPI(title="Signals research", docs_url=None, redoc_url=None, lifespan=
 _agent: Any = None
 _reads: Any = None  # the service's reads when no agent is running yet (tests set it)
 _running: dict[str, str] = {}  # session -> user, while a run is going
+# Runs that only draft a plan (a new breakdown's first question): they may run beside their person's other breakdown,
+# so you can ask for a second while the first works (Drew, 10 Nov). Still within AT_ONCE.
+_planning: set[str] = set()
+# Starts waiting for their person's running breakdown, oldest first: {sid, user, plan_id, chosen}. Kept in memory;
+# a restart turns each back into a plan you can Start (``unqueue_stale``).
+_queue: list[dict[str, Any]] = []
+MAX_QUEUED = 3  # per person
 _lock = threading.Lock()
 _changed = threading.Condition()
 
@@ -182,6 +191,8 @@ def sessions(user: str = Depends(auth.user_of)) -> JSONResponse:
     """Your breakdowns, newest first; one still running says so, with where it has got to (``run_progress``)."""
     rows, last = store.sessions(user), store.last_runs(user)
     for r in rows:
+        if _queued(r["id"]):
+            r["queued"] = True
         if r["id"] in _running:
             r["running"] = True
             r["progress"] = run_progress(store.events(r["id"]))
@@ -240,16 +251,30 @@ def tell_ready(sid: str, user: str) -> bool:
         return False
 
 
+def _busy(user: str) -> bool:
+    """Whether ``user`` has a breakdown working (not just drafting a plan). Call with ``_lock`` held."""
+    return any(u == user and s not in _planning for s, u in _running.items())
+
+
+def _queued(sid: str) -> dict[str, Any] | None:
+    return next((q for q in _queue if q["sid"] == sid), None)
+
+
 def start_run(sid: str, user: str, text: str, *, context: dict[str, Any] | None = None,
-              facts: dict[str, Any] | None = None, origin: str | None = None) -> JSONResponse:  # fmt: skip
-    """Starts one run (a question, a Start, an accepted proposal) in a thread; 202 with the event position."""
+              facts: dict[str, Any] | None = None, origin: str | None = None, planning: bool = False) -> JSONResponse:  # fmt: skip
+    """Starts one run (a question, a Start, an accepted proposal) in a thread; 202 with the event position. One
+    working run per person; a ``planning`` run (a new breakdown's first question) may run beside it."""
     a = agent()
     with _lock:
-        if sid in _running or user in _running.values():
+        if sid in _running:
+            raise HTTPException(409, detail="This breakdown is still running. Wait for it to finish.")
+        if not planning and _busy(user):
             raise HTTPException(409, detail="A breakdown of yours is still running. Wait for it to finish.")
         if len(_running) >= AT_ONCE:
             raise HTTPException(429, detail="Research is busy right now. Try again in a minute.")
         _running[sid] = user
+        if planning:
+            _planning.add(sid)
     after = (store.events(sid)[-1:] or [{"seq": -1}])[0]["seq"]
 
     def emit(event: dict[str, Any]) -> None:
@@ -263,13 +288,57 @@ def start_run(sid: str, user: str, text: str, *, context: dict[str, Any] | None 
         finally:
             with _lock:
                 _running.pop(sid, None)
+                _planning.discard(sid)
             with _changed:
                 _changed.notify_all()
         if (context or {}).get("action") == "approve":
             tell_ready(sid, user)
+        start_queued()
 
     threading.Thread(target=go, name=f"research-{sid}", daemon=True).start()
     return _private({"started": True, "after": after}, 202)
+
+
+def _start_plan(sid: str, user: str, plan_id: str, chosen: list[dict[str, Any]]) -> JSONResponse:
+    """Run a plan's Start now: the run, then ``plan.answered`` (approve) for the page."""
+    text = "Start the plan." + "".join(f"\nAlso: {o.get('text')}" for o in chosen)
+    started = start_run(sid, user, text, context={"plan_id": plan_id, "action": "approve"})
+    _emit(sid, {"type": "plan.answered", "plan_id": plan_id, "action": "approve",
+                "scope_option_ids": [o.get("id") for o in chosen], "text": None})  # fmt: skip
+    return started
+
+
+def start_queued() -> int:
+    """Start each queued Start whose person has nothing working any more, oldest first, while there's room (a run
+    ending calls this). One that can't start yet stays queued. How many started."""
+    n = 0
+    while True:
+        with _lock:
+            q = next((q for q in _queue if not _busy(q["user"])), None) if len(_running) < AT_ONCE else None
+            if q is None:
+                return n
+            _queue.remove(q)
+        try:
+            _start_plan(q["sid"], q["user"], q["plan_id"], q["chosen"])
+            n += 1
+        except HTTPException:  # someone else took the room first: back to the front, tried when the next run ends
+            with _lock:
+                _queue.insert(0, q)
+            return n
+
+
+def unqueue_stale() -> int:
+    """At startup: Starts that were queued when the last process ended never ran. Each plan goes back to waiting for
+    Start, with a note, so its page doesn't say Queued for ever."""
+    n = 0
+    for sid in store.sessions_with_event("plan.queued"):
+        evs = store.events(sid)
+        last = next((e for e in reversed(evs) if e.get("type") in ("plan.queued", "plan.answered", "plan.unqueued")), None)
+        if last and last["type"] == "plan.queued":
+            _emit(sid, {"type": "plan.unqueued", "plan_id": last.get("plan_id"),
+                        "text": "This didn't start: Signals restarted while it waited. Press Start again."})  # fmt: skip
+            n += 1
+    return n
 
 
 @app.post("/api/research/sessions/{sid}/ask")
@@ -284,7 +353,8 @@ def ask(sid: str, body: Ask, user: str = Depends(auth.user_of)) -> JSONResponse:
         facts = resolve_context(store, _reads or agent().reads, sid, body.context)
     except ReadError as e:
         raise HTTPException(404, detail=str(e)) from e
-    return start_run(sid, user, body.question, context=body.context, facts=facts, origin=body.origin)
+    first = not store.events(sid)  # a new breakdown's first question only drafts its plan: it may run beside another
+    return start_run(sid, user, body.question, context=body.context, facts=facts, origin=body.origin, planning=first)
 
 
 def _latest(sid: str, kind: str, key: str, value: str) -> dict[str, Any] | None:
@@ -298,16 +368,25 @@ def plan(sid: str, body: PlanAnswer, user: str = Depends(auth.user_of)) -> JSONR
     p = _latest(sid, "plan.proposed", "plan_id", body.plan_id)
     if p is None:
         raise HTTPException(404, detail="No such plan.")
-    if _latest(sid, "plan.answered", "plan_id", body.plan_id):
+    if _latest(sid, "plan.answered", "plan_id", body.plan_id) or _queued(sid):
         raise HTTPException(409, detail="This plan was already started or changed.")
     if body.action == "edit" and not (body.text or "").strip():
         raise HTTPException(400, detail="Say what to change.")
     chosen = [o for o in p.get("scope_options") or [] if o.get("id") in set(body.scope_option_ids or [])]
     if body.action == "approve":
-        text = "Start the plan." + "".join(f"\nAlso: {o.get('text')}" for o in chosen)
-    else:
-        text = f"Change the plan: {body.text}"
-    started = start_run(sid, user, text, context={"plan_id": body.plan_id, "action": body.action})
+        with _lock:  # another breakdown of yours is working: this Start waits its turn (start_queued runs it)
+            wait = _busy(user) and sid not in _running
+            if wait:
+                if sum(q["user"] == user for q in _queue) >= MAX_QUEUED:
+                    raise HTTPException(429, detail=f"You have {MAX_QUEUED} breakdowns waiting already. Start this one when one finishes.")
+                after = (store.events(sid)[-1:] or [{"seq": -1}])[0]["seq"]
+                # written before start_queued can see it (it takes _lock), so plan.queued always comes first
+                _emit(sid, {"type": "plan.queued", "plan_id": body.plan_id, "scope_option_ids": [o.get("id") for o in chosen]})
+                _queue.append({"sid": sid, "user": user, "plan_id": body.plan_id, "chosen": chosen})
+        if wait:
+            return _private({"started": False, "queued": True, "after": after}, 202)
+        return _start_plan(sid, user, body.plan_id, chosen)
+    started = start_run(sid, user, f"Change the plan: {body.text}", context={"plan_id": body.plan_id, "action": body.action})
     _emit(sid, {"type": "plan.answered", "plan_id": body.plan_id, "action": body.action,
                 "scope_option_ids": [o.get("id") for o in chosen], "text": body.text})  # fmt: skip
     return started
@@ -342,7 +421,7 @@ def events(sid: str, request: Request, after: int = -1, user: str = Depends(auth
                 at = e["seq"]
                 yield f"id: {at}\ndata: {json.dumps(e, default=str)}\n\n"
                 last_sent = time.monotonic()
-            if sid not in _running and not store.events(sid, at):
+            if sid not in _running and not _queued(sid) and not store.events(sid, at):  # a queued Start: keep following
                 return
             with _changed:
                 _changed.wait(timeout=1.0)

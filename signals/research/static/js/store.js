@@ -80,6 +80,10 @@ export function apply(s, e, ui) {
       break;
     }
     case 'plan.answered': { const p = s.plans[e.plan_id]; if (p) p.status = e.action === 'approve' ? 'approved' : 'edited'; break; }
+    // Start pressed while another breakdown of yours works: it waits, then starts by itself (plan.answered then);
+    // unqueued: it never started (a restart), so the plan waits for Start again
+    case 'plan.queued': { const p = s.plans[e.plan_id]; if (p) p.status = 'queued'; break; }
+    case 'plan.unqueued': { const p = s.plans[e.plan_id]; if (p) p.status = 'proposed'; if (e.text) feedPush(s, { type: 'note', text: e.text }); break; }
     case 'proposal.answered': { const it = s.feed.find(x => x.type === 'proposal' && x.proposal_id === e.proposal_id); if (it) it.state = e.action === 'accept' ? 'accepted' : 'declined'; break; }
     case 'step.status': {
       for (const p of Object.values(s.plans)) { const st = p.steps.find(x => x.id === e.step_id); if (st) Object.assign(st, { status: e.status, progress: e.progress, summary: e.summary ?? st.summary, warnings: e.warnings ?? st.warnings }); }
@@ -195,6 +199,7 @@ export function rowProgress(p, now = Date.now() / 1000) {
 // `opened` {id: seconds} is what you opened (signals.breakdowns.opened, shared with the main page's pill).
 export function rowState(r, opened, since, now = Date.now() / 1000) {
   if (r.running) return 'running';
+  if (r.queued) return 'queued';
   if (r.stopped) return 'stopped';
   return r.ended && r.ended > since && r.ended > (opened[r.id] || 0) && now - r.ended < 86400 ? 'ready' : 'saved';
 }
