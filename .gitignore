@@ -5,3 +5,5 @@ __pycache__/
 .env
 *.db
 research/.cache/
+node_modules/
+signals/static/copy/

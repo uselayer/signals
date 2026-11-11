@@ -167,6 +167,14 @@ All optional.
 | `SIGNALS_OWNER_USER` | Your Clerk user id: Signals messages the Telegram chat connected on that account when it breaks. |
 | `SIGNALS_OWNER_CHAT` | A Telegram chat id for those messages instead (wins over `SIGNALS_OWNER_USER`). |
 | `SIGNALS_HOSTED` | `1` on the hosted engine. Set by the `Dockerfile`. |
+| `SIGNALS_COPY_USERS` | One-tap copy's flag: the Clerk user ids that see it, comma-separated. Empty (default) = no one. |
+| `SIGNALS_COPY_URL`, `SIGNALS_COPY_TOKEN` | The order service (`SIGNALS_ROLE=copy`, a region Polymarket takes orders from) and the secret the engine sends it. Both services get the same token. |
+| `SIGNALS_COPY_USD` | What one Copy tap buys, in dollars. Default `25`. |
+| `SIGNALS_PRIVY_APP_ID` | The Privy app the /copy page signs wallets in with. |
+| `SIGNALS_BUILDER_CODE` | Polymarket builder code: credited on every copy, sent to the bridge (engine and order service). |
+| `SIGNALS_BUILDER_KEY`, `SIGNALS_BUILDER_SECRET`, `SIGNALS_BUILDER_PASSPHRASE` | Polymarket builder API key (engine only): pays the gas of a follower's wallet set-up. |
+| `SIGNALS_ROLE` | `copy` runs the image as the order service instead of the engine. |
+| `SIGNALS_COPY_KEY` | Order service only: the Fernet key its trading keys are encrypted with. Never on the engine. |
 
 `SIGNALS_SKILL_TEST=1` brings back the old skill test and its Recommended list in place of the Leaderboard. The
 switches that only matter with it on (`SIGNALS_DISCOVERY`, `SIGNALS_DISCOVERY_LIMIT`, `SIGNALS_EXPLORE`,

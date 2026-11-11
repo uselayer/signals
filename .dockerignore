@@ -6,3 +6,6 @@
 research
 tests
 web
+node_modules
+copy-web/node_modules
+signals/static/copy
