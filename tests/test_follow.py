@@ -253,15 +253,14 @@ def test_every_new_buy_alerts_with_how_far_the_price_moved(api: TestClient, monk
     engine._cache.clear()
     assert engine.alert_pass() == 2  # one message for the two fills on 0xcid:0, and one for the moved market
     text, moved = engine.tg.sent[-2]["text"], engine.tg.sent[-1]["text"]
-    assert "bought <b>Yes</b> at 40¢ ($400)" in moved and "Now 60¢, price already moved." in moved and "get in" not in moved
-    assert "Buy on Polymarket International" in moved and moved.endswith(engine.FOLLOW_DELAY)
+    assert "\n$400 at 40¢ · " in moved and "Now 60¢, price already moved." in moved and "get in" not in moved
+    assert "Buy on Polymarket International" in moved and "UTC" not in moved
     # Following is research: the alert gives the same facts for every trader, neutrally.
-    assert text.splitlines()[:3] == ["<b>Sharp &lt;Sam&gt;</b> bought <b>Yes</b> at 41¢ ($820)", "Will it &lt;rain&gt;?", "Now 41¢."]
-    assert "before this alert." in text and "you can still get in" not in text and "Buying after" not in text
+    assert text.splitlines()[:2] == ["<b>Sharp &lt;Sam&gt;</b> bought <b>Yes</b> · Will it &lt;rain&gt;?", "$820 at 41¢ · 1 min ago. Now 41¢."]
+    assert "you can still get in" not in text and "Buying after" not in text and "Matches your rule" not in text  # no rule
     assert "Buy on Polymarket International" in text and SHARP in text  # the link only opens the market
-    assert text.endswith(engine.FOLLOW_DELAY)
     keys = engine.tg.sent[-1]["reply_markup"]["inline_keyboard"]
-    assert [b["text"] for b in keys[0]] == ["Useful", "Not useful"] and keys[1][0]["callback_data"] == f"unf:{SHARP}"
+    assert [b["text"] for b in keys[1]] == ["Useful", "Not useful"] and keys[0][0]["callback_data"] == f"re:{SHARP}"
     trades.insert(0, buy(5, fresh))
     engine._cache.clear()
     assert engine.alert_pass() == 0  # the same market again within ALERT_AGAIN_S: no second message
@@ -293,25 +292,32 @@ def test_an_alert_gives_the_same_facts_for_every_trader_and_never_a_copy_line(
     at = datetime(2026, 10, 13, 14, 2, tzinfo=UTC).timestamp()
     links = (f'<a href="{engine.SITE}/#/check/{SHARP}/0xcid:0">Check current price</a> · '
              f'<a href="{engine.SITE}/#/worth/{SHARP}">Their record</a> · <a href="https://polymarket.com/event/rain">Buy on Polymarket International</a>')  # fmt: skip
-    facts = ["<b>Sharp &lt;Sam&gt;</b> bought <b>Yes</b> at 40¢ ($40)", "Will it &lt;rain&gt;?", "Now 41¢.",
-             "Traded 14:02 UTC, 6 min before this alert.", engine.TRADED_INTL]  # fmt: skip
+    facts = ["<b>Sharp &lt;Sam&gt;</b> bought <b>Yes</b> · Will it &lt;rain&gt;?", "$40 at 40¢ · 6 min ago. Now 41¢.",
+             engine.TRADED_INTL]  # fmt: skip
     # the copy estimate isn't shown anywhere: a trader it calls copyable gets the same alert as anyone
     monkeypatch.setattr(engine, "copy_offer", lambda s: (True, None))
     text = engine._alert_text(SHARP, buy(1, datetime.now(UTC)), 0.40, 0.41, 40, at, at + 6 * 60 + 10)
-    assert text.splitlines() == [*facts, links, engine.FOLLOW_DELAY]
+    assert text.splitlines() == [*facts, links]
     assert not hasattr(engine, "COPY_LINE")
     monkeypatch.setattr(engine, "copy_offer", lambda s: (False, "No."))
     neutral = engine._alert_text(SHARP, buy(1, datetime.now(UTC)), 0.40, 0.41, 40, at, at + 6 * 60 + 10)
-    assert neutral.splitlines() == [*facts, links, engine.FOLLOW_DELAY]
+    assert neutral.splitlines() == [*facts, links]
 
 
-def test_each_alert_says_how_late_it_can_be_for_where_its_trade_came_from(api: TestClient) -> None:
-    # a trader you follow is read on their own every round: no "3–5 minutes", and never "instant"
-    assert "3–5" not in engine.FOLLOW_DELAY and str(engine.LIVE_POLL_S) in engine.FOLLOW_DELAY
-    # big trades come from Polymarket's feed of every trade, which does run 3–5 minutes behind
-    assert "typically runs 3–5 minutes behind" in engine.BIG_DELAY and "typically" in engine.FOLLOW_DELAY
-    for line in (engine.FOLLOW_DELAY, engine.BIG_DELAY):
-        assert not any(w in line.lower() for w in ("instant", "real time", "real-time", "immediately"))
+def test_alerts_say_how_long_ago_never_a_utc_time_or_a_delay_sentence(api: TestClient) -> None:
+    # owner, 10 Nov: "too much words", and people think in their own time zone: "6 min ago", "2 h ago"; never "just
+    # now", "live" or "instant"; no "Traded 14:02 UTC" and no "Signals typically reads…" line in Telegram alerts
+    at = datetime(2026, 10, 13, 14, 2, tzinfo=UTC).timestamp()
+    assert [engine._ago(at, at + s) for s in (0, 20, 89, 6 * 60, 59 * 60, 61 * 60, 2 * 3600 + 1700, 30 * 3600)] == [
+        "1 min ago", "1 min ago", "1 min ago", "6 min ago", "59 min ago", "1 h ago", "2 h ago", "30 h ago"]
+    texts = [engine._alert_text(SHARP, buy(1, datetime.now(UTC)), 0.40, 0.41, 40, at, at + 20),
+             engine._sell_text(SHARP, buy(1, datetime.now(UTC)), 0.40, 40, True, 0.41, at, at + 20),
+             engine._group_text([(SHARP, 0.4, at), ("0x" + "cd" * 20, 0.41, at + 60)], buy(1, datetime.now(UTC)), 0.41, at + 120),
+             engine._whale_text(buy(1, datetime.now(UTC)), 0.41, "Politics", at + 20)]  # fmt: skip
+    for text in texts:
+        assert "UTC" not in text and "typically" not in text and "before this alert" not in text, text
+        assert not any(w in text.lower() for w in ("just now", "live", "instant", "real time", "real-time"))
+    assert not hasattr(engine, "FOLLOW_DELAY") and not hasattr(engine, "BIG_DELAY")
     page = api.get("/").text
     assert "Polymarket's public data runs 3–5 minutes behind" not in page  # no blanket figure on the page either
 

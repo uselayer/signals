@@ -3509,17 +3509,15 @@ CODE_TTL_S = 15 * 60  # a "Connect Telegram" link works this long, once
 ALERT_EVERY_S = 30
 ALERT_MAX_AGE_S = 30 * 60  # a buy first seen later than this isn't alerted (Polymarket shows trades minutes late)
 ALERT_AGAIN_S = 6 * 3600  # one alert per trader and market in this long, however many fills
-# How late an alert can be, for where its trade came from. Every alert also says when the trade was made (its
-# Polymarket timestamp: the block time of the trade's transaction) and how long before the alert that was, measured.
-# A trader you follow is read on their own every round (Polymarket returns a trade there within seconds, measured
-# 1–14 s on 2026-10-14), so their alerts come one round or so after the trade. A big trade comes from Polymarket's
-# feed of every trade, which runs 3–5 minutes behind (its newest trade was 158–299 s old when read).
-# "typically": both vary with load and with how Polymarket's API is answering; the measured line is the real one
-FOLLOW_DELAY = f"Signals typically reads followed traders' trades every {LIVE_POLL_S} seconds."
-BIG_DELAY = "Big trades come from Polymarket's feed of every trade, which typically runs 3–5 minutes behind."
+# How late an alert can be: a trader you follow is read on their own every round (Polymarket returns a trade there
+# within seconds, measured 1–14 s on 2026-10-14), so their alerts come one round or so after the trade; a big trade
+# comes from Polymarket's feed of every trade, which runs 3–5 minutes behind (its newest trade was 158–299 s old when
+# read). Since 10 Nov (owner: "too much words", and people think in their own time zone, not UTC) a Telegram alert
+# says only how long ago the trade was made, measured from its Polymarket timestamp ("6 min ago", _ago): no UTC time
+# and no delay sentence. The website's own delay notes stay.
 # Alerts per person per UTC day (a group counts once, a summary once), then one "limit reached" message that says when
 # they resume. Only a safety limit (owner, 2026-10-16): you get every trade of a trader you follow unless you choose
-# fewer for them (ALERT_MODES), and following a very busy one says so (BUSY_PER_DAY).
+# fewer for them (an alert rule: ALERT_MODES), and every follow with Telegram connected asks for one (_setup_text).
 DAILY_CAP = 200
 
 
@@ -3533,13 +3531,25 @@ def cap_text(now: float | None = None) -> str:
             f" traders you follow is still in your Feed: {SITE}/#/")  # fmt: skip
 
 
-# What you get from each trader you follow (follows.json: "alert_for" {wallet: {"mode", "usd"}}): every trade (the
+# What you get from each trader you follow (follows.json: "alert_for" {wallet: {"mode", "usd", …}}): every trade (the
 # default), only trades of at least "usd" dollars, or a summary every SUMMARY_S. Trades you don't get are still in the
 # Feed. Whatever the choice, a sale of something their buy alert told you about (_told) still comes.
+# Since 10 Nov each one is an alert rule (owner: 4,140 alerts in 30 days, 0.2% tapped, one follower at the 200-a-day
+# cap): besides "mode" and "usd" (the smallest trade: under "over", or kept under "summary"), "cats" (the markets,
+# from INTEREST_CHOICES like big-trade interests; none or [] = all), "first_only" (skip a buy that adds to an outcome
+# they already held: _held_before), "px" ([lo, hi] in cents: only trades priced within it, ends included) and
+# "paused_until" (unix time: nothing from them, buys or sells, until then). Missing fields are the defaults, so an
+# older follows.json reads as it did. _rule reads one, _change_rule writes one, _wants applies it.
 ALERT_MODES = ("all", "over", "summary")
 SUMMARY_S = 6 * 3600  # "summary": their trades go out as one summary per person this long after the first was held
-# A trader who made more alerts than this a day over the past week (PACE_S) is busy: following them says so, with an
-# amount that about SUGGEST_PER_DAY of their bets a day reached that week (an estimate from the past, not a promise).
+RULE_PRESETS = (100, 500, 1000)  # "Alert me when they buy at least…" buttons, in dollars
+RULE_MAX_USD = 10_000_000  # the most a smallest trade can be (as the page's choice)
+SKIP_PX = (10, 90)  # "Prices above 90¢ or below 10¢": the px a Skip toggle sets
+PAUSE_S = 24 * 3600  # "Pause 24 h"
+TYPING_S = 10 * 60  # "Type my own": the chat's next message is read as the amount for this long (alerts.db: typing)
+# A trader who made more alerts than this a day over the past week (PACE_S) is busy (the page says so, and the old
+# "Fewer alerts" menu); the rule setup offers the amount about SUGGEST_PER_DAY of their buys a day reached that week
+# (an estimate from the past, not a promise).
 BUSY_PER_DAY = 20
 SUGGEST_PER_DAY = 3
 PACE_S = 7 * 86400
@@ -3660,10 +3670,11 @@ def _private(response: Response) -> None:
 def _me_view(u: dict[str, Any]) -> dict[str, Any]:
     """``interests``: the markets you picked, saved to your account (None until you've saved any; [] is all
     markets). Big-trade alerts go only to people who have saved them. ``alert_for``: what you get from each trader you
-    follow ({"mode", "usd"}: ALERT_MODES); ``pace``: how busy each was over the past week, where measured
-    ({"per_day", "usd": the suggested amount, "busy"})."""
+    follow ({"mode", "usd"}: ALERT_MODES, plus the alert rule's "cats", "first_only", "px" and "paused_until" when
+    set: _rule_view); ``pace``: how busy each was over the past week, where measured ({"per_day", "usd": the
+    suggested amount, "busy"})."""
     follows = list(u.get("follows") or [])
-    choices = {w: {"mode": m, "usd": usd} for w in follows for m, usd in [_choice(u, w)]}
+    choices = {w: _rule_view(u, w) for w in follows}
     pace = {w: {"per_day": round(p["per_day"], 1), "usd": _rounded(p["usd"]) if p.get("usd") else None,
                 "busy": p["per_day"] > BUSY_PER_DAY} for w in follows if (p := _pace(w))}  # fmt: skip
     return {"follows": follows, "telegram": u.get("chat") is not None, "alerts": bool(TG_TOKEN),
@@ -3719,7 +3730,7 @@ def follow(req: Follow, response: Response, uid: str = Depends(signed_in)) -> di
             _save_follows(d)
             count("follow", uid=uid, trader=w)
             _directory_note_later([Seen(w, "follow")])  # the wallet only: who follows them stays in follows.json
-            _pace_later(uid, w)  # how busy they are; a busy one gets a message with the choices
+            _pace_later(uid, w)  # how busy they are, then the alert rule setup in Telegram (_setup_text)
     return _me_view(u)
 
 
@@ -3731,11 +3742,12 @@ class AlertChoice(BaseModel):
 @app.put("/api/me/follows/{wallet}/alerts")
 def choose_alerts(wallet: str, req: AlertChoice, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
     """What you get from a trader you follow: every trade ("all"), only trades of ``usd`` dollars or more ("over"), or
-    a summary every SUMMARY_S ("summary")."""
+    a summary every SUMMARY_S ("summary"). The rest of their alert rule (markets, skips, a pause, set in Telegram)
+    is kept as it is."""
     _private(response)
     if req.mode not in ALERT_MODES:
         raise HTTPException(400, detail="Choose every trade, only trades over an amount, or a summary.")
-    if req.mode == "over" and not (req.usd and 0 < req.usd <= 10_000_000):
+    if req.mode == "over" and not (req.usd and 0 < req.usd <= RULE_MAX_USD):
         raise HTTPException(400, detail="Enter an amount in dollars, more than $0.")
     u = _set_choice(uid, wallet.lower(), req.mode, req.usd)
     if u is None:
@@ -4122,11 +4134,11 @@ CONNECTED = (
     "more traders you follow buy the same thing, one message lists them all and is updated as more buy. Nothing comes "
     "for a market that's all but decided (2¢ or less, 98¢ or more). If you've picked markets on Signals, trades of "
     f"${WHALE_USD:,.0f} or more there come too.\n\n"
-    "You get alerts for all of a trader's trades unless you choose fewer for them: only trades over an amount you pick, "
-    f"or one summary every {SUMMARY_S // 3600} hours. Choose on their page on Signals or with Fewer alerts under any "
-    "alert. A sale of something they alerted you about still comes right away. At most "
-    f"{DAILY_CAP} alerts a day, as a safety limit."
-    "\n\nFollowing: {names}\n/list: who you follow · /stop: turn alerts off"
+    "You get alerts for all of a trader's trades unless you set a rule for them: only trades over an amount you pick, "
+    f"only in the markets you pick, skipping some, or one summary every {SUMMARY_S // 3600} hours. Set it with /rules "
+    "or Edit rule under any alert, where you can also pause a trader for 24 hours. A sale of something they alerted you "
+    f"about still comes right away. At most {DAILY_CAP} alerts a day, as a safety limit."
+    "\n\nFollowing: {names}\n/list: who you follow · /rules: your alert rules · /stop: turn alerts off"
 )
 
 
@@ -4213,8 +4225,11 @@ def _on_update(u: dict[str, Any]) -> None:
             tg("answerCallbackQuery", callback_query_id=cb.get("id"), **({"text": ack} if ack else {}))
         except RuntimeError:
             pass
-        if chat and data.startswith(("few:", "am:")):
+        if chat and data.startswith(("few:", "am:")):  # under alerts sent before the alert rules (10 Nov): still work
             _on_choice(chat, data, (cb.get("message") or {}).get("message_id"))
+            return
+        if chat and data.split(":", 1)[0] in RULE_TAPS:
+            _on_rule(chat, data, (cb.get("message") or {}).get("message_id"))
             return
         if chat and data.startswith("unf:"):
             w = data[4:]
@@ -4235,8 +4250,12 @@ def _on_update(u: dict[str, Any]) -> None:
     msg = u.get("message") or {}
     chat = str((msg.get("chat") or {}).get("id") or "")
     text = str(msg.get("text") or "").strip()
-    if not chat or not text.startswith("/"):
+    if not chat or not text:
         return
+    if not text.startswith("/"):  # plain words: only ever an amount the bot asked for ("Type my own")
+        _on_typed(chat, text)
+        return
+    _typing_end(chat)  # any command cancels a "Type my own" the bot was waiting on
     cmd, _, arg = text.partition(" ")
     cmd, arg = cmd.split("@")[0], arg.strip()
     if cmd == "/start":
@@ -4276,6 +4295,8 @@ def _on_update(u: dict[str, Any]) -> None:
         mine = next((x for x in _load_follows()["users"].values() if x.get("chat") == chat), None)
         names = [_who(w) for w in (mine or {}).get("follows", [])]
         _say(chat, html.escape("You follow: " + ", ".join(names)) if names else f"You don't follow anyone yet. Find traders on {SITE}.")
+    elif cmd == "/rules":
+        _rules_list(chat)
     elif cmd == "/stop":
         owner = _chat_owner(chat)
         if owner:  # a chat with alerts on: counted before it's let go (a Telegram-only account goes with it)
@@ -4309,8 +4330,8 @@ def _follow_from_chat(chat: str, code: str, w: str) -> None:
                 mine["follows"].append(w)
             _save_follows(d)
     if full:
-        _say(chat, f"You follow {MAX_FOLLOWS} traders already, the most there can be. Tap Stop alerts under an alert "
-                   "from one of them to make room, then tap Follow again.")  # fmt: skip
+        _say(chat, f"You follow {MAX_FOLLOWS} traders already, the most there can be. Stop alerts from one of them with "
+                   "/rules to make room, then tap Follow again.")  # fmt: skip
         return
     _followed[code] = time.time()
     if joined:
@@ -4320,7 +4341,7 @@ def _follow_from_chat(chat: str, code: str, w: str) -> None:
         count("follow", uid=uid, trader=w)
         ph("trader followed", uid, {"via": "telegram", "from": "bot", "wallet": w})
         _directory_note_later([Seen(w, "follow")])  # the wallet only: who follows them stays in follows.json
-        _pace_later(uid, w)  # how busy they are; a busy one gets a message with the choices
+        _pace_later(uid, w)  # how busy they are, then the alert rule setup (_setup_text)
     names = ", ".join(_who(x) for x in mine["follows"])
     _say(chat, f"You're following {html.escape(_who(w))}.\n\n" + CONNECTED.format(names=html.escape(names)))
 
@@ -4366,6 +4387,8 @@ def _chat_owner(chat: str) -> str | None:
 # held: trades by a trader you chose a summary for (ALERT_MODES), per account, until one summary sums them up
 # (_summaries).
 # pace: how busy each followed trader was over the past week, and the amount suggested for them (_measure_pace).
+# typing: a chat the bot asked for an amount ("Type my own"): which trader, setup or edit, and when (TYPING_S). Kept
+# here, not in memory, so a deploy while someone is typing doesn't leave their answer unread.
 
 _db_lock = threading.RLock()  # re-entrant: a nested read never hangs the alert loop
 _db_ready: set[str] = set()
@@ -4397,6 +4420,7 @@ CREATE TABLE IF NOT EXISTS seen_trades (trader TEXT NOT NULL, trade_id TEXT NOT 
   PRIMARY KEY (trader, trade_id));
 CREATE TABLE IF NOT EXISTS pace (trader TEXT PRIMARY KEY, per_day REAL NOT NULL, usd REAL, days REAL NOT NULL,
   at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS typing (chat TEXT PRIMARY KEY, trader TEXT NOT NULL, flow TEXT NOT NULL, at REAL NOT NULL);
 """
 
 
@@ -4417,6 +4441,8 @@ def _db() -> Iterator[sqlite3.Connection]:
                 for col, kind in (("trigger_at", "REAL"), *_DELIVERY_COLUMNS):
                     if col not in have:
                         con.execute(f"ALTER TABLE alerts ADD COLUMN {col} {kind}")
+                if "buys" not in {r[1] for r in con.execute("PRAGMA table_info(pace)")}:
+                    con.execute("ALTER TABLE pace ADD COLUMN buys TEXT")  # each buy's [dollars, price] (_measure_pace)
                 con.execute("CREATE INDEX IF NOT EXISTS alerts_by_state ON alerts (state, next_at)")
                 _db_ready.add(str(alerts_db()))
             yield con
@@ -4446,16 +4472,18 @@ def _sent_today(uid: str, kinds: tuple[str, ...] = COUNTED, trader: str | None =
 
 
 def _keyboard(alert_id: str, stop: str | None = None, text: str = "") -> dict[str, Any]:
-    """Under every alert: Useful / Not useful, and when it's about one trader you follow, "Stop alerts from <name>"
-    and "Fewer alerts" (the choices for them: _on_choice). With signing in from alerts on (TG_LOGIN) and a "Check
-    current price" link in the alert's ``text``, that link as a login button first (``/tg/in``)."""
-    rows: list[list[dict[str, Any]]] = [[{"text": "Useful", "callback_data": f"v:{alert_id}:1"},
-                                         {"text": "Not useful", "callback_data": f"v:{alert_id}:0"}]]  # fmt: skip
+    """Under every alert: when it's about one trader you follow (``stop``), "Edit rule" (their alert rule, where
+    "Stop alerts from <name>" now is: _on_rule) and "Pause 24 h"; then Useful / Not useful. With signing in from alerts
+    on (TG_LOGIN) and a "Check current price" link in the alert's ``text``, that link as a login button first
+    (``/tg/in``). Alerts sent before 10 Nov carry "Stop alerts from …" (``unf:``) and "Fewer alerts" (``few:``): both
+    still work."""
+    rows: list[list[dict[str, Any]]] = []
     if _tg_login_on() and f"/go/{alert_id}/check?" in text:
-        rows.insert(0, [{"text": "Check current price on Signals", "login_url": {"url": f"{SITE}/tg/in/{alert_id}"}}])
+        rows.append([{"text": "Check current price on Signals", "login_url": {"url": f"{SITE}/tg/in/{alert_id}"}}])
     if stop:
-        rows.append([{"text": f"Stop alerts from {_who(stop)}", "callback_data": f"unf:{stop}"},
-                     {"text": "Fewer alerts", "callback_data": f"few:{stop}"}])  # fmt: skip
+        rows.append([{"text": "Edit rule", "callback_data": f"re:{stop}"},
+                     {"text": "Pause 24 h", "callback_data": f"rp:{stop}"}])  # fmt: skip
+    rows.append([{"text": "Useful", "callback_data": f"v:{alert_id}:1"}, {"text": "Not useful", "callback_data": f"v:{alert_id}:0"}])
     return {"inline_keyboard": rows}
 
 
@@ -4651,65 +4679,63 @@ def _links(*pairs: tuple[str, str | None], aid: str | None = None) -> str:
                       for label, url in pairs if url)  # fmt: skip
 
 
-def _lag(at: float, seen: float) -> str:
-    """How long before this alert the trade was made, measured: "6 min", or "under a minute"."""
+def _ago(at: float, seen: float) -> str:
+    """How long before this alert the trade was made, measured from its Polymarket timestamp: "6 min ago" (at least
+    "1 min ago"), then "2 h ago". Never "just now" or "live"."""
     mins = round((seen - at) / 60)
-    return "under a minute" if mins < 1 else f"{mins} min"
+    return f"{max(1, mins)} min ago" if mins < 60 else f"{mins // 60} h ago"
 
 
-def _traded(at: float, seen: float) -> str:
-    """When they traded, and how long before this alert that was: "Traded 14:02 UTC, 6 min before this alert."."""
-    return f"Traded {datetime.fromtimestamp(at, UTC):%H:%M} UTC, {_lag(at, seen)} before this alert."
+def _now_words(paid: float, now: float) -> str:
+    """The price now, and ", price already moved" outside the "can still get in" range (``bet_status``)."""
+    return f"Now {_cents(now)}{', price already moved' if bet_status(paid, now) != 'in' else ''}."
 
 
-def _trade_text(head: str, wallet: str, t: WhaleTrade, paid: float, now: float, at: float, seen: float,
-                record: bool, aid: str | None, delay: str = FOLLOW_DELAY) -> str:  # fmt: skip
-    """What happened, the same for every trader: ``head`` (who bought which outcome, at what price, for how much),
-    the market, the price now (", price already moved" outside the "can still get in" range, ``bet_status``), and
-    when they traded, measured against this alert, and where (``_venue_line``:
-    Polymarket International, and its Kalshi match and Polymarket US twin when there's a verified one). Nothing about
+def _trade_text(head: str, wallet: str, t: WhaleTrade, paid: float, usd: float, now: float, at: float, seen: float,
+                record: bool, aid: str | None) -> str:  # fmt: skip
+    """What happened, the same for every trader, short (owner, 10 Nov: "too much words"): ``head`` (who bought which
+    outcome) and the market on one line; how much at what price, how long ago they traded (_ago) and the price now
+    (``_now_words``) on the next; where (``_venue_line``: Polymarket International, and its Kalshi match and
+    Polymarket US twin when there's a verified one). No UTC time and no delay sentence (owner, 10 Nov). Nothing about
     copying: the copy estimate isn't shown anywhere. Links: "Check current price" (the trade's own page
     on Signals, neutral for every trader), their record, "View on Kalshi" and "View on Polymarket US" with a match
-    (they lead the venues), "Buy on Polymarket International" (it only opens the market: Signals places no orders);
-    then ``delay``, how late this kind of alert can be (FOLLOW_DELAY, or BIG_DELAY for a big trade)."""
+    (they lead the venues), "Buy on Polymarket International" (it only opens the market: Signals places no orders)."""
     e = html.escape
-    status = bet_status(paid, now)
     where, us_url, k_url = _venue_line(t)
-    lines = [head, e(t.title or "A Polymarket market"), f"Now {_cents(now)}{', price already moved' if status != 'in' else ''}.",
-             _traded(at, seen), where]  # fmt: skip
+    lines = [f"{head} · {e(t.title or 'A Polymarket market')}",
+             f"${usd:,.0f} at {_cents(paid)} · {_ago(at, seen)}. {_now_words(paid, now)}", where]  # fmt: skip
     links = _links(("Check current price", f"{SITE}/#/check/{wallet}/{t.market}"),
                    ("Their record", f"{SITE}/#/worth/{wallet}" if record else None),
                    ("View on Kalshi", k_url), ("View on Polymarket US", us_url),
                    ("Buy on Polymarket International", t.url), aid=aid)  # fmt: skip
-    return "\n".join([*lines, links, delay])
+    return "\n".join([*lines, links])
 
 
 def _alert_text(wallet: str, t: WhaleTrade, paid: float, now: float, usd: float, at: float, seen: float,
                 aid: str | None = None) -> str:  # fmt: skip
     """The Telegram message for one new buy by a trader you follow, whoever they are: following is research
     first, so every trader's buy gets the same facts (``_trade_text``). ``paid`` is their average across the fills,
-    ``at`` their first fill, ``seen`` when this alert was made."""
+    ``at`` their first fill, ``seen`` when this alert was made. The line saying which rule it matched is each
+    follower's own (``_rule_tag``), put before it when it's sent."""
     e = html.escape
-    head = f"<b>{e(_who(wallet))}</b> bought <b>{e(t.outcome or 'Yes')}</b> at {_cents(paid)} (${usd:,.0f})"
-    return _trade_text(head, wallet, t, paid, now, at, seen, True, aid)
+    head = f"<b>{e(_who(wallet))}</b> bought <b>{e(t.outcome or 'Yes')}</b>"
+    return _trade_text(head, wallet, t, paid, usd, now, at, seen, True, aid)
 
 
 def _group_text(members: list[tuple[str, float, float]], t: WhaleTrade, now: float, seen: float,
                 aid: str | None = None) -> str:  # fmt: skip
-    """One message for 2+ traders you follow buying the same outcome: each one's price and buy time, in the
-    order they bought (so you see who went first), the price now, how long before this alert the latest buy was
-    made, and "Check current price" for the latest buy. Neutral for everyone: no "get in"."""
+    """One message for 2+ traders you follow buying the same outcome: each one's price and how long ago they bought,
+    in the order they bought (so you see who went first), the price now, and "Check current price" for the latest
+    buy. Neutral for everyone: no "get in"."""
     e = html.escape
-    lines = [f"<b>{len(members)} traders you follow bought {e(t.outcome or 'Yes')}</b> on {e(t.title or 'a Polymarket market')}"]
+    lines = [f"<b>{len(members)} traders you follow bought {e(t.outcome or 'Yes')}</b> · {e(t.title or 'A Polymarket market')}"]
     for w, price, at in members:
-        lines.append(f"· {e(_who(w))} paid {_cents(price)} at {datetime.fromtimestamp(at, UTC):%H:%M} UTC")
-    last, _, last_at = members[-1]  # the latest buyer: their price is the closest to now
-    moved = bet_status(members[-1][1], now) != "in"
+        lines.append(f"· {e(_who(w))} paid {_cents(price)} · {_ago(at, seen)}")
+    last = members[-1][0]  # the latest buyer: their price is the closest to now
     where, us_url, k_url = _venue_line(t)
-    lines += [f"Now {_cents(now)}{', price already moved' if moved else ''}.", f"Latest buy {_lag(last_at, seen)} before this alert.",
-              where, _links(("Check current price", f"{SITE}/#/check/{last}/{t.market}"), ("View on Kalshi", k_url),
-                            ("View on Polymarket US", us_url), ("Buy on Polymarket International", t.url), aid=aid),
-              FOLLOW_DELAY]  # fmt: skip
+    lines += [_now_words(members[-1][1], now), where,
+              _links(("Check current price", f"{SITE}/#/check/{last}/{t.market}"), ("View on Kalshi", k_url),
+                     ("View on Polymarket US", us_url), ("Buy on Polymarket International", t.url), aid=aid)]  # fmt: skip
     return "\n".join(lines)
 
 
@@ -4735,6 +4761,7 @@ class NewBuy:
         self.paid, self.now = self.usd / self.size, now  # what they paid on average, across those buys
         self.outcome = self.t.token or self.t.market  # the exact outcome token; the outcome index is sometimes junk
         self.seen = time.time() if seen is None else seen
+        self.held_before: bool | None = None  # whether they held this outcome before these buys (_held_before)
         self._text: str | None = None
 
     def text(self, aid: str) -> str:
@@ -4749,20 +4776,20 @@ EXITED = "They no longer hold it."  # a sale that leaves them none: _exited_rece
 def _sell_text(wallet: str, t: WhaleTrade, price: float, usd: float, held: bool, now: float | None, at: float,
                seen: float, aid: str | None = None) -> str:  # fmt: skip
     """The Telegram message for a sell by a trader you follow, whoever they are: information only, never a
-    suggestion to sell and nothing about copying. Who sold which outcome at what price (their average across the
-    fills) and for how much, the market, and when they traded, measured against this alert. While they still hold
-    some of it: the price now and "Check current price"; once they hold none, "They no longer hold it." and no price
+    suggestion to sell and nothing about copying. Short, as a buy's (``_trade_text``): who sold which outcome and the
+    market; how much at what price (their average across the fills) and how long ago (_ago); while they still hold
+    some of it, the price now and "Check current price"; once they hold none, "They no longer hold it." and no price
     (there's no position to read it from, and no number is made up)."""
     e = html.escape
     still = ("They still hold some." if now is None else f"Now {_cents(now)}. They still hold some.") if held else EXITED
-    lines = [f"<b>{e(_who(wallet))}</b> sold <b>{e(t.outcome or 'Yes')}</b> at {_cents(price)} (${usd:,.0f})",
-             e(t.title or "A Polymarket market"), still, _traded(at, seen)]  # fmt: skip
+    lines = [f"<b>{e(_who(wallet))}</b> sold <b>{e(t.outcome or 'Yes')}</b> · {e(t.title or 'A Polymarket market')}",
+             f"${usd:,.0f} at {_cents(price)} · {_ago(at, seen)}. {still}"]  # fmt: skip
     where, us_url, k_url = _venue_line(t)
     lines.append(where)
     links = _links(("Check current price", f"{SITE}/#/check/{wallet}/{t.market}" if held else None),
                    ("Their record", f"{SITE}/#/worth/{wallet}"), ("View on Kalshi", k_url),
                    ("View on Polymarket US", us_url), ("Open on Polymarket International", t.url), aid=aid)  # fmt: skip
-    return "\n".join([*lines, links, FOLLOW_DELAY])
+    return "\n".join([*lines, links])
 
 
 class NewSell:
@@ -4828,16 +4855,116 @@ def _choice(u: dict[str, Any], trader: str) -> tuple[str, float | None]:
     return ("summary", None) if c.get("mode") == "summary" else ("all", None)
 
 
-def _wants(u: dict[str, Any], trader: str, usd: float, told: bool = False) -> str:
+def _rule(u: dict[str, Any], trader: str) -> dict[str, Any]:
+    """This person's alert rule for this trader, every field filled in (defaults for what isn't set, so an older
+    follows.json reads as it did): "mode" (ALERT_MODES), "usd" (the smallest trade, or None), "cats" (markets, in
+    INTEREST_CHOICES' order; [] = all), "first_only", "px" ([lo, hi] cents, or None), "paused_until" (or None)."""
+    c = (u.get("alert_for") or {}).get(trader) or {}
+    mode = c.get("mode") if c.get("mode") in ALERT_MODES else "all"
+    usd = c.get("usd")
+    usd = float(usd) if isinstance(usd, int | float) and not isinstance(usd, bool) and usd > 0 and mode != "all" else None
+    if mode == "over" and usd is None:
+        mode = "all"
+    px = c.get("px")
+    ok_px = (isinstance(px, list | tuple) and len(px) == 2 and all(isinstance(v, int | float) for v in px)
+             and 0 <= px[0] < px[1] <= 100)  # fmt: skip
+    paused = c.get("paused_until")
+    cats = c.get("cats") if isinstance(c.get("cats"), list) else []
+    return {"mode": mode, "usd": usd, "cats": [x for x in INTEREST_CHOICES if x in cats],
+            "first_only": c.get("first_only") is True, "px": [px[0], px[1]] if ok_px else None,
+            "paused_until": float(paused) if isinstance(paused, int | float) and not isinstance(paused, bool) else None}  # fmt: skip
+
+
+def _rule_set(r: dict[str, Any]) -> list[str]:
+    """Which parts of a rule narrow what comes ("usd", "cats", "first_only", "px"), for analytics and the tag."""
+    return [k for k in ("usd", "cats", "first_only", "px") if r[k]]
+
+
+def _rule_view(u: dict[str, Any], trader: str) -> dict[str, Any]:
+    """A rule as /api/me gives it: {"mode", "usd"} as before (_choice), plus each other field only when it's set."""
+    mode, usd = _choice(u, trader)
+    r = _rule(u, trader)
+    extra = {k: r[k] for k in ("cats", "first_only", "px") if r[k]}
+    if r["paused_until"] and r["paused_until"] > time.time():
+        extra["paused_until"] = r["paused_until"]
+    return {"mode": mode, "usd": usd} | extra
+
+
+def _change_rule(uid: str, trader: str, change: Callable[[dict[str, Any]], None]) -> dict[str, Any] | None:
+    """Change one alert rule in follows.json: ``change`` gets the rule (_rule) and changes it in place; the rule is
+    then kept tidy (a smallest trade makes "all" "over" and its absence makes "over" "all"; a pause that's over is
+    dropped) and written with only what's set, so the other fields always survive ("all" with nothing else set is no
+    entry: every trade is the default). The rule after, or None when this account doesn't follow them."""
+    with _follow_lock:
+        d = _load_follows()
+        u = _user(d, uid)
+        if trader not in u["follows"]:
+            return None
+        r = _rule(u, trader)
+        change(r)
+        if not (r["usd"] and r["usd"] > 0):
+            r["usd"] = None
+        if r["mode"] == "all" and r["usd"]:
+            r["mode"] = "over"
+        if r["mode"] == "over" and not r["usd"]:
+            r["mode"] = "all"
+        if r["paused_until"] and r["paused_until"] <= time.time():
+            r["paused_until"] = None
+        kept = {"mode": r["mode"]} | ({"usd": round(r["usd"], 2)} if r["usd"] else {})
+        kept |= {k: r[k] for k in ("cats", "first_only", "px", "paused_until") if r[k]}
+        choices = u.setdefault("alert_for", {})
+        if kept == {"mode": "all"}:
+            choices.pop(trader, None)
+        else:
+            choices[trader] = kept
+        _save_follows(d)
+    return _rule(u, trader)
+
+
+def _rule_matches(r: dict[str, Any], usd: float, category: str | None, price: float | None,
+                  held_before: bool | None) -> bool:  # fmt: skip
+    """Whether one trade passes a rule's filters: its dollars (an alert's summed fills) at least "usd"; its market's
+    category (_categories) in "cats" when that's set (a market whose category couldn't be read doesn't match, as for
+    big trades); its price (their average) within "px", ends included (none known: it passes); and with "first_only",
+    not a buy that adds to an outcome they already held (``held_before``, _held_before; unknown: it passes)."""
+    if r["usd"] and usd < r["usd"]:
+        return False
+    if r["cats"] and category not in r["cats"]:
+        return False
+    if r["px"] and price is not None and not r["px"][0] <= round(price * 100, 4) <= r["px"][1]:
+        return False
+    return not (r["first_only"] and held_before)
+
+
+def _wants(u: dict[str, Any], trader: str, usd: float, told: bool = False, *, category: str | None = None,
+           price: float | None = None, held_before: bool | None = None, now: float | None = None) -> str:  # fmt: skip
     """What one trade by ``trader`` does for this person (``u``, from follows.json): "send" it now, "hold" it for
-    their summary, or "skip" it (it's still in their Feed). A sale of something that trader's buy alert told them
-    about (``told``) is always sent."""
-    mode, over = _choice(u, trader)
-    if told or mode == "all":
+    their summary, or "skip" it (it's still in their Feed). While their rule is paused, nothing (buys or sells).
+    Otherwise a sale of something that trader's buy alert told them about (``told``) is always sent; any other trade
+    is sent (or held, with a summary) only when it passes the rule's filters (_rule_matches). ``held_before`` is
+    for buys only (a sale passes None)."""
+    r = _rule(u, trader)
+    if r["paused_until"] and r["paused_until"] > (time.time() if now is None else now):
+        return "skip"
+    if told:
         return "send"
-    if mode == "summary":
-        return "hold"
-    return "send" if usd >= (over or 0) else "skip"
+    if not _rule_matches(r, usd, category, price, held_before):
+        return "skip"
+    return "hold" if r["mode"] == "summary" else "send"
+
+
+def _held_before(position: Any | None, bought: float, sold: float, paid: float) -> bool | None:
+    """Whether a trader already held an outcome before the buys one alert adds up ("first_only"), from what the Feed's
+    poller read with those buys: their open position in it (Polymarket's positions, the read that gives the price
+    now), less the contracts these buys added (``bought``), plus any they sold of it since the first of them
+    (``sold``, from the same trades read). They held it when what's left is worth $1 or more at what they paid
+    (WATCH_MIN_USD: less is a stray fill) and over 1% of the position (rounding). No position read: None. No new
+    read. When Polymarket's positions don't show these buys yet, what's left is less than they held, so it can only
+    call an add a first buy (an alert too many), never the other way."""
+    if position is None:
+        return None
+    before = float(position.size or 0) - bought + sold
+    return before * paid >= WATCH_MIN_USD and before > 0.01 * float(position.size or 0)
 
 
 def _hold(uid: str, trader: str, outcome: str | None, side: str, usd: float | None, now: float) -> None:
@@ -4847,21 +4974,19 @@ def _hold(uid: str, trader: str, outcome: str | None, side: str, usd: float | No
 
 
 def _set_choice(uid: str, trader: str, mode: str, usd: float | None = None, via: str = "page") -> dict[str, Any] | None:
-    """Save what this person wants from a trader they follow; their record after, or None when they don't follow
-    them. "all" clears the choice (every trade is the default). ``via``: where it was chosen (page or telegram)."""
+    """Save what this person wants from a trader they follow (the page's choice, and "Fewer alerts" under alerts
+    sent before the alert rules): the mode, and the amount for "over" ("all" and "summary" drop it, as before). The
+    rest of their rule (markets, skips, a pause) is kept. Their record after, or None when they don't follow them.
+    ``via``: where it was chosen (page or telegram)."""
     if mode not in ALERT_MODES or (mode == "over" and not (usd and usd > 0)):
         raise ValueError(mode)
-    with _follow_lock:
-        d = _load_follows()
-        u = _user(d, uid)
-        if trader not in u["follows"]:
-            return None
-        choices = u.setdefault("alert_for", {})
-        if mode == "all":
-            choices.pop(trader, None)
-        else:
-            choices[trader] = {"mode": mode} | ({"usd": round(float(usd or 0), 2)} if mode == "over" else {})
-        _save_follows(d)
+
+    def choose(r: dict[str, Any]) -> None:
+        r["mode"], r["usd"] = mode, float(usd or 0) if mode == "over" else None
+
+    if _change_rule(uid, trader, choose) is None:
+        return None
+    u: dict[str, Any] = _load_follows()["users"].get(uid) or {}
     count("alert_mode", uid=uid, trader=trader, target=mode)
     ph("alert choice saved", uid, {"wallet": trader, "mode": mode, "usd": round(float(usd), 2) if mode == "over" and usd else None,
                                    "via": via})  # fmt: skip
@@ -4876,15 +5001,22 @@ def _choice_words(mode: str, usd: float | None) -> str:
 
 
 def _pace_bets(rows: Iterable[dict[str, Any]]) -> tuple[list[float], list[float]]:
+    """A trader's bets in raw /activity trade rows, as one alert adds them up (_pace_units): (buy dollars, sell
+    dollars)."""
+    buys, sells = _pace_units(rows)
+    return [u for u, _ in buys], [u for u, _ in sells]
+
+
+def _pace_units(rows: Iterable[dict[str, Any]]) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
     """A trader's bets in raw /activity trade rows, as one alert adds them up: per outcome and side, their fills
     within UNIT_ADD_S of the first, a new bet only ALERT_AGAIN_S after the last began, none at a settled price.
-    (buy dollars, sell dollars)."""
-    out: dict[str, list[float]] = {"BUY": [], "SELL": []}
+    Each is (dollars, average price): (buys, sells)."""
+    out: dict[str, list[tuple[float, float]]] = {"BUY": [], "SELL": []}
     cur: dict[tuple[str, str], list[float]] = {}  # (side, outcome token) -> [first fill's time, dollars, contracts]
 
     def keep(side: str, c: list[float]) -> None:
         if c[2] and not _settled(c[1] / c[2]):
-            out[side].append(c[1])
+            out[side].append((c[1], c[1] / c[2]))
 
     for r in sorted(rows, key=lambda r: float(r.get("timestamp") or 0)):
         side = str(r.get("side") or "").upper()
@@ -4910,7 +5042,9 @@ def _measure_pace(trader: str, now: float | None = None) -> dict[str, Any]:
     """How busy ``trader`` was over the past PACE_S: their bets a day (buys and sells, counted as alerts count them)
     and the amount about SUGGEST_PER_DAY of their buys a day reached (None when fewer did). Their trades are read
     back by time, 500 a read, from the background budget, at most PACE_PAGES reads (the busiest traders get fewer
-    days, and the count is per day of what was read). Kept in alerts.db (pace)."""
+    days, and the count is per day of what was read). Kept in alerts.db (pace), with each buy's dollars and price
+    ("buys"), so a saved rule can say how many of last week's buys it would have let through (_week_line) without
+    reading them again."""
     now = time.time() if now is None else now
     poly = background()._poly
     since = int(now - PACE_S)
@@ -4931,12 +5065,15 @@ def _measure_pace(trader: str, now: float | None = None) -> dict[str, Any]:
         end = oldest if new else oldest - 1  # a whole page within one second: step past it
     first = min((float(r["timestamp"]) for r in rows.values()), default=now)
     days = PACE_S / 86400 if whole else max(1 / 24, (now - first) / 86400)
-    buys, sells = _pace_bets(rows.values())
+    units, sells = _pace_units(rows.values())
+    buys = [u for u, _ in units]
     k = max(1, round(SUGGEST_PER_DAY * days))
     usd = sorted(buys, reverse=True)[k - 1] if len(buys) >= k else None
     pace = {"per_day": (len(buys) + len(sells)) / days, "usd": usd, "days": days, "at": now}
+    kept = json.dumps([[round(u, 2), round(p, 4)] for u, p in units])
     with _db() as con:
-        con.execute("INSERT OR REPLACE INTO pace VALUES (?, ?, ?, ?, ?)", (trader, pace["per_day"], usd, days, now))
+        con.execute("INSERT OR REPLACE INTO pace (trader, per_day, usd, days, at, buys) VALUES (?, ?, ?, ?, ?, ?)",
+                    (trader, pace["per_day"], usd, days, now, kept))  # fmt: skip
     return pace
 
 
@@ -4945,6 +5082,16 @@ def _pace(trader: str) -> dict[str, Any] | None:
     with _db() as con:
         row = con.execute("SELECT per_day, usd, days, at FROM pace WHERE trader = ?", (trader,)).fetchone()
     return dict(zip(("per_day", "usd", "days", "at"), row)) if row else None
+
+
+def _pace_buys(trader: str) -> list[tuple[float, float]] | None:
+    """Each buy the last pace measure of ``trader`` read, as (dollars, price); None when it kept none."""
+    with _db() as con:
+        row = con.execute("SELECT buys FROM pace WHERE trader = ?", (trader,)).fetchone()
+    try:
+        return [(float(u), float(p)) for u, p in json.loads(row[0])] if row and row[0] else None
+    except (ValueError, TypeError):
+        return None
 
 
 def _rounded(usd: float) -> float:
@@ -4979,43 +5126,408 @@ def _choices_markup(trader: str, p: dict[str, Any] | None, chosen: tuple[str, fl
     return {"inline_keyboard": [row, [button("s", f"A summary every {SUMMARY_S // 3600} hours")]]}
 
 
-def _busy_text(trader: str, p: dict[str, Any]) -> str:
-    """Said once you follow a busy trader (more than BUSY_PER_DAY alerts a day over the past week)."""
-    e = html.escape
-    lines = [f"<b>{e(_who(trader))}</b> is a busy trader: about {round(p['per_day']):,} alerts a day over the past week."
-             " You'll get every one unless you choose fewer."]  # fmt: skip
-    if p.get("usd"):
-        lines.append(_estimate_line(p))
-    limit = f"At most {DAILY_CAP} alerts a day in all."
-    if p["per_day"] >= DAILY_CAP:
-        limit = f"At their pace, every trade would reach your limit of {DAILY_CAP} alerts a day."
-    lines.append(f"{limit} Every trade stays in your Feed. You can change this any time with Fewer alerts under an"
-                 " alert, or on their page on Signals.")  # fmt: skip
-    return "\n\n".join(lines)
-
-
 def _pace_after_follow(uid: str, trader: str) -> None:
-    """After someone follows ``trader``: how busy they are (measured again when over PACE_KEEP_S old), and for a
-    busy one, a message with the choices, when that person has Telegram connected. Never in the way of the follow:
-    a failed read just leaves no warning."""
+    """After someone follows ``trader``: how busy they are (measured again when over PACE_KEEP_S old), then, when
+    that person has Telegram connected, the alert rule setup (_setup_text; owner, 10 Nov: it replaces the busy-trader
+    warning, for every trader). Never in the way of the follow: a failed read only leaves the pace out."""
+    p: dict[str, Any] | None
     try:
         p = _pace(trader)
         if p is None or time.time() - p["at"] > PACE_KEEP_S:
             p = _measure_pace(trader)
     except (VenueError, RuntimeError, OSError, ValueError, KeyError):
-        return
+        p = None
     u = _load_follows()["users"].get(uid) or {}
-    if p["per_day"] <= BUSY_PER_DAY or not u.get("chat") or trader not in (u.get("follows") or []):
+    if not u.get("chat") or trader not in (u.get("follows") or []):
         return
-    try:
-        _say(u["chat"], _busy_text(trader, p), reply_markup=_choices_markup(trader, p, _choice(u, trader)))
-    except RuntimeError:
-        pass
+    _tell(u["chat"], _setup_text(trader, p), _setup_markup(trader))
 
 
 def _pace_later(uid: str, trader: str) -> None:
     """_pace_after_follow on its own thread, so following answers at once (the busiest traders take up to a minute)."""
     threading.Thread(target=_pace_after_follow, args=(uid, trader), daemon=True, name="pace").start()
+
+
+# ---- alert rules in Telegram (owner, 10 Nov; README "Alerts on Telegram") ----
+# Right after a follow: "Set my rule" (three steps: the smallest buy, which markets, what to skip) or "Every trade".
+# Under every alert about one trader: "Edit rule" (the rule, each part a button, and "Stop alerts from …") and
+# "Pause 24 h". /rules lists every trader you follow with their rule. Every tap saves at once (_change_rule): a
+# setup left halfway keeps what was picked. Taps carry the step and whether it's the setup ("s") or an edit ("e"):
+#   rs:<w> set my rule · ra:<w> every trade · rm:<w>:<dollars>:<s|e> smallest buy (0: any amount) ·
+#   rt:<w>:<s|e> type my own · rc:<w>:<i|a>:<s|e> a market (INTEREST_CHOICES[i]) or all · rk:<w>:<f|p>:<s|e> a skip ·
+#   rn:<w>:<2|3>:<s|e> done · re:<w> the rule · ro:<w>:<m|c|k|d> one part of it · rd:<w>:<e|s> delivery ·
+#   rp:<w> pause 24 h · ru:<w> undo the pause
+# Telegram's limit for a button's data is 64 bytes: the longest here (rm with 8 figures) is 56.
+RULE_TAPS = ("rs", "ra", "rm", "rt", "rc", "rk", "rn", "re", "ro", "rd", "rp", "ru")
+TYPE_ASK = "Send the smallest buy you want to hear about, in dollars. For example 750."
+TYPE_AGAIN = "That's not an amount. Send a number, like 750."
+_AMOUNT = re.compile(r"\$?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(?:\$|usd|dollars?)?", re.IGNORECASE)
+
+
+def _tell(chat: str, text: str, markup: dict[str, Any] | None = None) -> None:
+    """One message from the bot, never in the way: Telegram failing is dropped."""
+    try:
+        _say(chat, text, **({"reply_markup": markup} if markup else {}))
+    except RuntimeError:
+        pass
+
+
+def _retick(chat: str, message_id: int | None, markup: dict[str, Any]) -> None:
+    """Put the ✓s where they now are, on the message the tap was on."""
+    if message_id is None:
+        return
+    try:
+        tg("editMessageReplyMarkup", chat_id=chat, message_id=message_id, reply_markup=markup)
+    except RuntimeError:
+        pass  # deleted, or the same ✓s already
+
+
+def parse_amount(text: str) -> float | None:
+    """A typed amount in dollars ("750", "$750", "1,000", "750.50", "750 dollars"), or None when it isn't one (or
+    isn't over $0 and at most RULE_MAX_USD)."""
+    m = _AMOUNT.fullmatch(text.strip())
+    usd = float(m.group(1).replace(",", "")) if m else 0.0
+    return usd if 0 < usd <= RULE_MAX_USD else None
+
+
+def _dollars(usd: float) -> str:
+    """$1,000, or $750.50 when it has cents."""
+    return f"${usd:,.0f}" if float(usd).is_integer() else f"${usd:,.2f}"
+
+
+def _left(until: float) -> str:
+    """How long a pause has left: "23 h" or "40 min"."""
+    secs = max(0.0, until - time.time())
+    return f"{round(secs / 3600)} h" if secs >= 3600 else f"{max(1, round(secs / 60))} min"
+
+
+def _paused(r: dict[str, Any]) -> bool:
+    return bool(r["paused_until"] and r["paused_until"] > time.time())
+
+
+def _rule_short(r: dict[str, Any]) -> str:
+    """The parts of a rule that narrow what comes, short: "$500+ in Politics · 10¢–90¢ · first buys"; "" for none."""
+    where = f"in {', '.join(r['cats'])}" if r["cats"] else ""
+    parts = [" ".join(x for x in (f"{_dollars(r['usd'])}+" if r["usd"] else "", where) if x)]
+    if r["px"]:
+        parts.append(f"{r['px'][0]:g}¢–{r['px'][1]:g}¢")
+    if r["first_only"]:
+        parts.append("first buys")
+    return " · ".join(p for p in parts if p)
+
+
+def _rule_tag(r: dict[str, Any]) -> str:
+    """The first line of a buy alert sent because it passed a rule: "Matches your rule · $500+ in Politics", built
+    from the parts that are set; nothing when none is."""
+    s = _rule_short(r)
+    return f"<i>Matches your rule · {html.escape(s)}</i>\n" if s else ""
+
+
+def _rule_lines(r: dict[str, Any], delivery: bool = False) -> list[str]:
+    """A rule, a line each: when (the smallest trade), in (the markets), what's skipped, and with ``delivery`` (or a
+    summary chosen) how it comes, and a pause."""
+    lines = [f"When: {_dollars(r['usd']) + ' or more' if r['usd'] else 'any amount'}",
+             f"In: {', '.join(r['cats']) if r['cats'] else 'all markets'}"]  # fmt: skip
+    skips = (["adds to a position they already hold"] if r["first_only"] else []) + (
+        [f"prices above {r['px'][1]:g}¢ or below {r['px'][0]:g}¢"] if r["px"] else [])  # fmt: skip
+    if skips:
+        lines.append("Skip: " + " · ".join(skips))
+    if delivery or r["mode"] == "summary":
+        lines.append("Delivery: " + (f"a summary every {SUMMARY_S // 3600} hours" if r["mode"] == "summary" else "each trade as it comes"))
+    if _paused(r):
+        lines.append(f"Paused: alerts resume in {_left(r['paused_until'])}.")
+    return lines
+
+
+def _week_line(trader: str, r: dict[str, Any]) -> str | None:
+    """How many of their buys last week this rule would have alerted, from the buys the pace measure already read
+    (_pace_buys, no new read): only when that measure is under a day old and covered the whole week, and only for a
+    rule of an amount and prices, which those buys carry (their markets and what they held weren't read, so a rule
+    with markets or "first buys" gets no line). Buys only: a sale of something an alert told you about still comes.
+    None when there's nothing true to say."""
+    p, buys = _pace(trader), _pace_buys(trader)
+    if (not p or buys is None or not buys or time.time() - p["at"] > PACE_KEEP_S or p["days"] < PACE_S / 86400
+            or r["cats"] or r["first_only"] or r["mode"] == "summary" or not (r["usd"] or r["px"])):  # fmt: skip
+        return None
+    n = sum(1 for usd, price in buys if _rule_matches(r, usd, None, price, None))
+    return f"About {n:,} buy alerts last week instead of {len(buys):,}."
+
+
+def _per_day_line(p: dict[str, Any]) -> str:
+    n = p["per_day"]
+    if n == 0:
+        return "They made no trades last week."
+    if n < 1:
+        return "They made fewer than one trade a day last week."
+    return f"They made about {round(n):,} trades a day last week."
+
+
+def _setup_text(trader: str, p: dict[str, Any] | None) -> str:
+    """Said right after a follow (_pace_after_follow): who, how busy they were last week when it's measured
+    (``p``; left out when it isn't), and the question."""
+    lines = [f"You're following <b>{html.escape(_who(trader))}</b>." + (f" {_per_day_line(p)}" if p else "")]
+    if p and p["per_day"] >= DAILY_CAP:
+        lines.append(f"At their pace, every trade would reach your limit of {DAILY_CAP} alerts a day.")
+    lines.append("Choose which ones reach you?")
+    return "\n\n".join(lines)
+
+
+def _setup_markup(trader: str) -> dict[str, Any]:
+    return {"inline_keyboard": [[{"text": "Set my rule", "callback_data": f"rs:{trader}"},
+                                 {"text": "Every trade", "callback_data": f"ra:{trader}"}]]}  # fmt: skip
+
+
+def _min_text(trader: str, p: dict[str, Any] | None, flow: str) -> str:
+    """Step 1: the smallest buy, with the amount about SUGGEST_PER_DAY of their buys a day reached last week when
+    there is one, said as an estimate (_estimate_line)."""
+    head = "1 of 3 · " if flow == "s" else ""
+    lines = [f"<b>{head}Alert me when {html.escape(_who(trader))} buys at least…</b>"]
+    if p and p.get("usd"):
+        lines.append(_estimate_line(p))
+    return "\n\n".join(lines)
+
+
+def _min_markup(trader: str, p: dict[str, Any] | None, flow: str, r: dict[str, Any] | None = None) -> dict[str, Any]:
+    """$100 · $500 · $1,000, the suggested amount when there is one, "Type my own"; editing, "Any amount" too. The
+    amount picked has a ✓."""
+    have = (r or {}).get("usd")
+
+    def button(usd: float, text: str) -> dict[str, str]:
+        on = have == usd if usd else r is not None and not have
+        return {"text": f"✓ {text}" if on else text, "callback_data": f"rm:{trader}:{int(usd)}:{flow}"}
+
+    rows = [[button(a, _dollars(a)) for a in RULE_PRESETS]]
+    row = []
+    suggested = _rounded(p["usd"]) if p and p.get("usd") else None
+    if suggested and 1 <= suggested <= RULE_MAX_USD and suggested not in RULE_PRESETS:
+        row.append(button(suggested, _dollars(suggested)))
+    row.append({"text": "Type my own", "callback_data": f"rt:{trader}:{flow}"})
+    rows.append(row)
+    if flow == "e":
+        rows.append([button(0, "Any amount")])
+    return {"inline_keyboard": rows}
+
+
+def _cats_text(trader: str, flow: str) -> str:
+    head = "<b>2 of 3 · Which markets?</b>" if flow == "s" else f"<b>Which markets for {html.escape(_who(trader))}?</b>"
+    return f"{head}\n\nTap each one you want, then Done."
+
+
+def _cats_markup(trader: str, r: dict[str, Any], flow: str) -> dict[str, Any]:
+    """A button per market (INTEREST_CHOICES, the big-trade interests' and Traders' categories), ✓ on those
+    picked, then "All markets" (✓ when none is) and Done."""
+    buttons = [{"text": f"✓ {c}" if c in r["cats"] else c, "callback_data": f"rc:{trader}:{i}:{flow}"}
+               for i, c in enumerate(INTEREST_CHOICES)]  # fmt: skip
+    rows = [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+    rows.append([{"text": "All markets" if r["cats"] else "✓ All markets", "callback_data": f"rc:{trader}:a:{flow}"},
+                 {"text": "Done", "callback_data": f"rn:{trader}:2:{flow}"}])  # fmt: skip
+    return {"inline_keyboard": rows}
+
+
+def _skip_text(trader: str, flow: str) -> str:
+    head = "<b>3 of 3 · Skip these?</b>" if flow == "s" else f"<b>Skip these from {html.escape(_who(trader))}?</b>"
+    return f"{head}\n\nTap each one to skip, then Done."
+
+
+def _skip_markup(trader: str, r: dict[str, Any], flow: str) -> dict[str, Any]:
+    """"Adds to a position they already hold" (first_only) and "Prices above 90¢ or below 10¢" (px SKIP_PX), ✓
+    when on. No "markets with little trading": the engine has no fresh volume for a market without a new read."""
+    lo, hi = r["px"] or SKIP_PX
+    return {"inline_keyboard": [
+        [{"text": f"{'✓ ' if r['first_only'] else ''}Adds to a position they already hold", "callback_data": f"rk:{trader}:f:{flow}"}],
+        [{"text": f"{'✓ ' if r['px'] else ''}Prices above {hi:g}¢ or below {lo:g}¢", "callback_data": f"rk:{trader}:p:{flow}"}],
+        [{"text": "Done", "callback_data": f"rn:{trader}:3:{flow}"}]]}  # fmt: skip
+
+
+def _saved_text(trader: str, r: dict[str, Any]) -> str:
+    """"Saved: X", the rule a line each, how many alerts it would have made last week when that's known
+    (_week_line), and where to change it."""
+    lines = [f"Saved: <b>{html.escape(_who(trader))}</b>", *_rule_lines(r)]
+    if week := _week_line(trader, r):
+        lines.append(week)
+    return "\n".join([*lines, "Change it any time with /rules."])
+
+
+def _edit_text(trader: str, r: dict[str, Any]) -> str:
+    return "\n".join([f"<b>Alert rule for {html.escape(_who(trader))}</b>", *_rule_lines(r, delivery=True)])
+
+
+def _edit_markup(trader: str, r: dict[str, Any]) -> dict[str, Any]:
+    rows = [[{"text": "Minimum size", "callback_data": f"ro:{trader}:m"}, {"text": "Markets", "callback_data": f"ro:{trader}:c"}],
+            [{"text": "Skip", "callback_data": f"ro:{trader}:k"}, {"text": "Delivery", "callback_data": f"ro:{trader}:d"}]]  # fmt: skip
+    if _paused(r):
+        rows.append([{"text": "Resume alerts now", "callback_data": f"ru:{trader}"}])
+    rows.append([{"text": f"Stop alerts from {_who(trader)}", "callback_data": f"unf:{trader}"}])
+    return {"inline_keyboard": rows}
+
+
+def _delivery_markup(trader: str, r: dict[str, Any]) -> dict[str, Any]:
+    summary = r["mode"] == "summary"
+    return {"inline_keyboard": [
+        [{"text": f"{'' if summary else '✓ '}Each trade as it comes", "callback_data": f"rd:{trader}:e"}],
+        [{"text": f"{'✓ ' if summary else ''}A summary every {SUMMARY_S // 3600} hours", "callback_data": f"rd:{trader}:s"}]]}  # fmt: skip
+
+
+def _rules_list(chat: str) -> None:
+    """/rules: every trader you follow with their rule on one line, and a button each that opens it (``re:``)."""
+    uid = _chat_owner(chat)
+    u = (_load_follows()["users"].get(uid) or {}) if uid else {}
+    follows = list(u.get("follows") or [])
+    if not follows:
+        _tell(chat, f"You don't follow anyone yet. Find traders on {SITE}.")
+        return
+    lines = ["<b>Your alert rules</b>"]
+    for w in follows:
+        r = _rule(u, w)
+        line = _rule_short(r) or "every trade"
+        if r["mode"] == "summary":
+            line += f" · a summary every {SUMMARY_S // 3600} hours"
+        if _paused(r):
+            line += f" · paused, {_left(r['paused_until'])} left"
+        lines.append(f"• <b>{html.escape(_who(w))}</b>: {html.escape(line)}")
+    lines.append("Tap a trader to change their rule.")
+    _tell(chat, "\n".join(lines), {"inline_keyboard": [[{"text": _who(w), "callback_data": f"re:{w}"}] for w in follows]})
+    ph("telegram rules opened", uid, {"follows": len(follows)})
+
+
+def _rule_event(uid: str, trader: str, kind: str, event: str, r: dict[str, Any], **props: Any) -> None:
+    """Counted (alerts.db events, ``kind``; /api/metrics' "rules") and told to PostHog (``event``): the account and
+    the trader only, with which parts of the rule are set."""
+    fields = _rule_set(r)
+    count(kind, uid=uid, trader=trader, target=props.get("field") or ",".join(fields) or "none")
+    ph(event, uid, {"wallet": trader, "fields": fields, "summary": r["mode"] == "summary"} | props)
+
+
+def _typing_start(chat: str, trader: str, flow: str) -> None:
+    with _db() as con:
+        con.execute("INSERT OR REPLACE INTO typing VALUES (?, ?, ?, ?)", (chat, trader, flow, time.time()))
+
+
+def _typing_end(chat: str) -> None:
+    try:
+        with _db() as con:
+            con.execute("DELETE FROM typing WHERE chat = ?", (chat,))
+    except (sqlite3.Error, OSError):
+        pass
+
+
+def _on_typed(chat: str, text: str) -> None:
+    """A plain message: the amount the bot asked for with "Type my own", when it asked this chat in the last TYPING_S
+    (alerts.db typing; any /command cancels it). Not an amount: says so and keeps waiting. Anything else is ignored."""
+    with _db() as con:
+        row = con.execute("SELECT trader, flow, at FROM typing WHERE chat = ?", (chat,)).fetchone()
+    if row is None:
+        return
+    trader, flow, at = row
+    uid = _chat_owner(chat)
+    if time.time() - at > TYPING_S or not uid:
+        _typing_end(chat)
+        return
+    usd = parse_amount(text)
+    if usd is None:
+        count("amount_invalid", uid=uid, trader=trader)
+        ph("telegram typed amount invalid", uid, {"wallet": trader})
+        _tell(chat, TYPE_AGAIN)
+        return
+    _typing_end(chat)
+    _rule_min(chat, uid, trader, usd, flow, None)
+
+
+def _rule_min(chat: str, uid: str, trader: str, usd: float, flow: str, message_id: int | None) -> None:
+    """Save the smallest trade (0: any amount); in the setup, on to the markets, else "Saved"."""
+    r = _change_rule(uid, trader, lambda r: r.update(usd=usd or None))
+    if r is None:
+        return
+    _retick(chat, message_id, _min_markup(trader, _pace(trader), flow, r))
+    if flow == "s":
+        _tell(chat, _cats_text(trader, "s"), _cats_markup(trader, r, "s"))
+        return
+    _rule_event(uid, trader, "rule_edited", "telegram rule edited", r, field="usd")
+    _tell(chat, _saved_text(trader, r))
+
+
+def _on_rule(chat: str, data: str, message_id: int | None = None) -> None:
+    """A tap on an alert rule's button (RULE_TAPS). Only for a trader the chat's account follows."""
+    kind, _, rest = data.partition(":")
+    w, *args = rest.split(":")
+    uid = _chat_owner(chat)
+    u = (_load_follows()["users"].get(uid) or {}) if uid else {}
+    if not uid or w not in (u.get("follows") or []):
+        return
+    flow = args[-1] if args and args[-1] in ("s", "e") else "e"
+    e = html.escape
+    who = e(_who(w))
+    if kind == "rs":
+        _rule_event(uid, w, "rule_started", "telegram rule setup started", _rule(u, w))
+        _tell(chat, _min_text(w, _pace(w), "s"), _min_markup(w, _pace(w), "s"))
+    elif kind == "ra":  # every trade: no rule (a pause stays)
+        if _change_rule(uid, w, lambda r: r.update(mode="all", usd=None, cats=[], first_only=False, px=None)) is not None:
+            count("alert_mode", uid=uid, trader=w, target="all")
+            ph("alert choice saved", uid, {"wallet": w, "mode": "all", "via": "telegram"})
+            _tell(chat, f"OK, every trade from <b>{who}</b>. Change it any time with /rules.")
+    elif kind == "rm" and args and args[0].isdigit() and int(args[0]) <= RULE_MAX_USD:
+        _rule_min(chat, uid, w, float(args[0]), flow, message_id)
+    elif kind == "rt":
+        _typing_start(chat, w, flow)
+        _tell(chat, TYPE_ASK)
+    elif kind == "rc" and args and (args[0] == "a" or (args[0].isdigit() and int(args[0]) < len(INTEREST_CHOICES))):
+        def pick(r: dict[str, Any]) -> None:
+            c = INTEREST_CHOICES[int(args[0])] if args[0] != "a" else None
+            r["cats"] = [] if c is None else [x for x in INTEREST_CHOICES if (x in r["cats"]) != (x == c)]
+
+        if (r := _change_rule(uid, w, pick)) is not None:
+            _retick(chat, message_id, _cats_markup(w, r, flow))
+    elif kind == "rk" and args and args[0] in ("f", "p"):
+        def skip(r: dict[str, Any]) -> None:
+            if args[0] == "f":
+                r["first_only"] = not r["first_only"]
+            else:
+                r["px"] = None if r["px"] else list(SKIP_PX)
+
+        if (r := _change_rule(uid, w, skip)) is not None:
+            _retick(chat, message_id, _skip_markup(w, r, flow))
+    elif kind == "rn" and args and args[0] in ("2", "3"):
+        r = _rule(u, w)
+        if flow == "s" and args[0] == "2":
+            _tell(chat, _skip_text(w, "s"), _skip_markup(w, r, "s"))
+            return
+        if flow == "s":
+            _rule_event(uid, w, "rule_saved", "telegram rule saved", r, usd=r["usd"], markets=len(r["cats"]) or None)
+        else:
+            _rule_event(uid, w, "rule_edited", "telegram rule edited", r, field="cats" if args[0] == "2" else "skip")
+        _tell(chat, _saved_text(w, r))
+    elif kind == "re":
+        r = _rule(u, w)
+        _tell(chat, _edit_text(w, r), _edit_markup(w, r))
+    elif kind == "ro" and args and args[0] in ("m", "c", "k", "d"):
+        r, p = _rule(u, w), _pace(w)
+        what = args[0]
+        if what == "m":
+            _tell(chat, _min_text(w, p, "e"), _min_markup(w, p, "e", r))
+        elif what == "c":
+            _tell(chat, _cats_text(w, "e"), _cats_markup(w, r, "e"))
+        elif what == "k":
+            _tell(chat, _skip_text(w, "e"), _skip_markup(w, r, "e"))
+        else:
+            _tell(chat, f"<b>How should alerts from {who} come?</b>", _delivery_markup(w, r))
+    elif kind == "rd" and args and args[0] in ("e", "s"):
+        summary = args[0] == "s"
+        r = _change_rule(uid, w, lambda r: r.update(mode="summary" if summary else ("over" if r["usd"] else "all")))
+        if r is not None:
+            _retick(chat, message_id, _delivery_markup(w, r))
+            _rule_event(uid, w, "rule_edited", "telegram rule edited", r, field="delivery")
+            _tell(chat, _saved_text(w, r))
+    elif kind == "rp":
+        r = _change_rule(uid, w, lambda r: r.update(paused_until=time.time() + PAUSE_S))
+        if r is not None:
+            _rule_event(uid, w, "paused", "telegram trader paused", r, hours=PAUSE_S // 3600)
+            _tell(chat, f"<b>{who}</b> paused for {PAUSE_S // 3600} hours.",
+                  {"inline_keyboard": [[{"text": "Undo", "callback_data": f"ru:{w}"}]]})  # fmt: skip
+    elif kind == "ru":
+        r = _change_rule(uid, w, lambda r: r.update(paused_until=None))
+        if r is not None:
+            _rule_event(uid, w, "unpaused", "telegram trader unpaused", r)
+            _tell(chat, f"Alerts from <b>{who}</b> are back on.")
 
 
 def _recently(uid: str | None, trader: str, outcome: str, now: float) -> bool:
@@ -5042,11 +5554,13 @@ def _cluster(rows: list[tuple[str, float, float]], at: float, window: float) -> 
     return next((run for run in runs if run[0][2] <= at <= run[-1][2]), [])
 
 
-def _deliver(uid: str, chat: str, b: NewBuy, category: str | None) -> int:
-    """Tell one person about one buy by a trader they follow: alone, or grouped with other traders they follow
+def _deliver(uid: str, chat: str, b: NewBuy, category: str | None, tag: str = "") -> int:
+    """Tell one person about one buy by a trader they follow, once it passed their rule for that trader (_wants, so
+    a buy their rule skips never joins a group either): alone, or grouped with other traders they follow
     who bought the same outcome, each within GROUP_S of the one before (GROUP_FAST_S in Sports and Esports; GROUP_S
     when the category isn't known). The second buyer sends the grouped alert; later ones edit it in place (Telegram
-    editMessageText), never a new ping. Returns messages sent."""
+    editMessageText), never a new ping. Alone, ``tag`` (_rule_tag: which rule it matched) comes first. Returns
+    messages sent."""
     window = GROUP_FAST_S if category in FAST_CATEGORIES else GROUP_S
     with _db() as con:
         con.execute("INSERT INTO buys VALUES (?, ?, ?, ?, ?, ?)", (uid, b.outcome, b.wallet, b.paid, b.usd, b.at))
@@ -5073,7 +5587,8 @@ def _deliver(uid: str, chat: str, b: NewBuy, category: str | None) -> int:
         aid = _send(uid, chat, "group", lambda aid: _group_text(first, b.t, b.now, b.seen, aid), outcome=b.outcome,
                     trade_at=first[0][2], trigger_at=b.at)  # fmt: skip
         return 1 if aid else 0
-    aid = _send(uid, chat, "buy", b.text, trader=b.wallet, outcome=b.outcome, trade_at=b.at, stop=b.wallet)
+    aid = _send(uid, chat, "buy", lambda aid: tag + b.text(aid), trader=b.wallet, outcome=b.outcome, trade_at=b.at,
+                stop=b.wallet)  # fmt: skip
     return 1 if aid else 0
 
 
@@ -5215,22 +5730,29 @@ def alert_pass(now: float | None = None) -> int:
                 continue
             _alerted[(w, market)] = now
             _added_up(w, market)
+            sold_since = sum(t.size for t in d.trades if t.action == "sell" and t.market == market and t.at.timestamp() >= b.at)
+            b.held_before = _held_before(next((p for p in d.positions if p.market == market), None), b.size, sold_since, b.paid)
             new_buys.append(b)
+    # Markets' categories: for grouping, and for rules with markets. A sale's only when a rule needs it (no read else).
+    markets = [b.t.market for b in new_buys] + [s.t.market for s in new_sells
+                                                if any(_rule(users[uid], s.wallet)["cats"] for uid in to[s.wallet])]  # fmt: skip
     try:
-        cats = _categories([b.t.market for b in new_buys]) if new_buys else {}
+        cats = _categories(markets) if markets else {}
     except VenueError:
-        cats = {}  # grouped over the longer window
+        cats = {}  # grouped over the longer window; a rule with markets lets none through (_rule_matches)
     sent = 0
-    for b in new_buys:  # each follower's choice for this trader: now, in their summary, or only in their Feed
+    for b in new_buys:  # each follower's rule for this trader: now, in their summary, or only in their Feed
         for uid in to[b.wallet]:
-            want = _wants(users[uid], b.wallet, b.usd)
+            want = _wants(users[uid], b.wallet, b.usd, category=cats.get(b.t.market), price=b.paid,
+                          held_before=b.held_before, now=now)  # fmt: skip
             if want == "send":
-                sent += _deliver(uid, users[uid]["chat"], b, cats.get(b.t.market))
+                sent += _deliver(uid, users[uid]["chat"], b, cats.get(b.t.market), _rule_tag(_rule(users[uid], b.wallet)))
             elif want == "hold":
                 _hold(uid, b.wallet, b.outcome, "buy", b.usd, now)
     for sell in new_sells:  # never grouped
         for uid in to[sell.wallet]:
-            want = _wants(users[uid], sell.wallet, sell.usd, _told(uid, sell.wallet, sell.outcome, now))
+            want = _wants(users[uid], sell.wallet, sell.usd, _told(uid, sell.wallet, sell.outcome, now),
+                          category=cats.get(sell.t.market), price=sell.price, now=now)  # fmt: skip
             if want == "hold":
                 _hold(uid, sell.wallet, sell.outcome, "sell", sell.usd, now)
             elif want == "send" and _send(uid, users[uid]["chat"], "sell", sell.text, trader=sell.wallet,
@@ -5299,13 +5821,13 @@ _whale_alerted: dict[tuple[str, str, str], float] = {}  # (account, trader, mark
 def _whale_text(t: WhaleTrade, now: float, category: str | None, seen: float, aid: str | None = None) -> str:
     """A big trade in your markets, with the same facts as a followed trader's buy (``_trade_text``): who (linked
     to their Signals page when we've scored them, else "Trader 0x91…76"), what they bought at what price, the
-    market, the price now and when they traded."""
+    market, how much at what price, how long ago and the price now."""
     e = html.escape
     w = (t.trader or "").lower()
     who = f'<a href="{e(SITE)}/#/worth/{w}">{e(_who(w))}</a>' if _scored(w) else e(_who(w))
     where = f" in {e(category)}" if category else ""
-    head = f"<b>Big trade{where}:</b> {who} bought <b>{e(t.outcome or 'Yes')}</b> at {_cents(t.price)} (${t.usd:,.0f})"
-    return _trade_text(head, w, t, t.price, now, t.at.timestamp(), seen, False, aid, BIG_DELAY)
+    head = f"<b>Big trade{where}:</b> {who} bought <b>{e(t.outcome or 'Yes')}</b>"
+    return _trade_text(head, w, t, t.price, t.usd, now, t.at.timestamp(), seen, False, aid)
 
 
 def whale_pass(users: dict[str, dict[str, Any]], now: float) -> int:
@@ -5393,7 +5915,7 @@ _alert_wake = threading.Event()
 
 METRICS_KEY = os.environ.get("SIGNALS_METRICS_KEY", "")
 EVENTS = ("tap", "stop", "unfollow", "follow", "telegram", "telegram_lost", "picked", "no_profile", "alert_mode",
-          "fewer", "tg_stop")  # fmt: skip
+          "fewer", "tg_stop", "rule_started", "rule_saved", "rule_edited", "paused", "unpaused", "amount_invalid")  # fmt: skip
 _ALERT_ID = re.compile(r"[A-Za-z0-9_-]{4,16}")
 
 
@@ -5410,7 +5932,8 @@ def count(kind: str, *, uid: str | None = None, alert_id: str | None = None, tar
 # ---- Telegram in PostHog (README, "Analytics") ----
 # What happens in Telegram never reaches the page, so the engine tells PostHog itself (owner, 10 Nov: "we need
 # connected events to telegram"): connected (from the bot's own confirmation, so a closed tab no longer loses it),
-# each alert sent or failed, taps on its links, "Fewer alerts" opened and the choice made, "Stop alerts", /stop, votes,
+# each alert sent or failed, taps on its links, "Fewer alerts" opened and the choice made, alert rules (setup started,
+# saved, edited, paused, a typed amount that isn't one), "Stop alerts", /stop, votes,
 # a chat lost. Same rules as the page: the person is their account id only (a Clerk user id, or a Telegram-only
 # follower's random tg_ id), never a chat id, Telegram name or anything else about them. Sent in the background,
 # a batch at a time; never in the way: with no key, a full queue or PostHog down, the event is dropped.
@@ -5679,7 +6202,12 @@ def metrics(request: Request, response: Response, days: int = 30) -> dict[str, A
         modes = dict(con.execute("SELECT target, COUNT(*) FROM events WHERE kind = 'alert_mode' AND at >= ? GROUP BY target",
                                  (since,)).fetchall())  # fmt: skip
         fewer_people = con.execute("SELECT COUNT(DISTINCT uid) FROM events WHERE kind = 'fewer' AND at >= ?", (since,)).fetchone()[0]
+        saved_with = Counter(f for (t,) in con.execute("SELECT target FROM events WHERE kind = 'rule_saved' AND at >= ?", (since,))
+                             for f in (t or "").split(",") if f and f != "none")  # fmt: skip
+        edited = dict(con.execute("SELECT target, COUNT(*) FROM events WHERE kind = 'rule_edited' AND at >= ? GROUP BY target",
+                                  (since,)).fetchall())  # fmt: skip
     users = _load_follows()["users"].values()
+    rules = [_rule(u, w) for u in users for w in u.get("follows") or []]
     followers = [u for u in users if u.get("follows")]
     with_interests = [u for u in users if u.get("interests") is not None]
     counted = sum(v for k, v in sent.items() if k in COUNTED)
@@ -5703,6 +6231,14 @@ def metrics(request: Request, response: Response, days: int = 30) -> dict[str, A
         # "Fewer alerts" under an alert: how often it's opened (and by how many accounts), and every choice saved
         # (in the chat or on a trader's page) by what was picked: all (back to every trade), over an amount, summary
         "fewer": {"menu_opened": n.get("fewer", 0), "accounts": fewer_people, "choices_saved": modes},
+        # alert rules in Telegram (since 10 Nov): setups started and finished (with which parts set), edits by part,
+        # pauses, typed amounts that weren't one; and now, across every follow, how many have a rule and of what
+        "rules": {"setup_started": n.get("rule_started", 0), "saved": n.get("rule_saved", 0), "saved_with": dict(saved_with),
+                  "edited": edited, "paused": n.get("paused", 0), "unpaused": n.get("unpaused", 0),
+                  "typed_amount_invalid": n.get("amount_invalid", 0),
+                  "follows_now": len(rules), "follows_with_a_rule_now": sum(1 for r in rules if _rule_set(r)),
+                  "by_part_now": {k: sum(1 for r in rules if r[k]) for k in ("usd", "cats", "first_only", "px")},
+                  "summary_now": sum(1 for r in rules if r["mode"] == "summary"), "paused_now": sum(1 for r in rules if _paused(r))},
         "votes": {"useful": votes.get(1, 0), "not_useful": votes.get(0, 0), "alerts_voted_on": voted},
         "follows": {"interest_picks": n.get("picked", 0), "follows": n.get("follow", 0),
                     "follows_per_interest_pick": ratio(n.get("follow", 0), n.get("picked", 0)),
