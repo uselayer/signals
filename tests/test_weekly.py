@@ -231,6 +231,31 @@ def test_writer_answer_and_flags() -> None:
     assert weekly.flags(DRAFT) == []
 
 
+def test_typed_escapes_become_characters() -> None:
+    raw = {"worth_sending": True, "subject": "A \\u2014 B", "preheader": "", "tldr": ["x \\u2014 y"], "ask": "",
+           "items": [{"lead": "L.", "body": "Leave the page \\u2014 it keeps working.", "page": None, "video_hint": None}]}
+    draft, _ = weekly.to_draft(raw)
+    assert draft["subject"] == "A — B" and draft["tldr"] == ["x — y"]
+    assert draft["items"][0]["body"] == "Leave the page — it keeps working."
+
+
+def test_davids_own_draft_with_a_picture(tmp_path: Path) -> None:
+    f = Fake()
+    mine = {"subject": "Breakdowns", "preheader": "P", "tldr": ["T"], "ask": "Q?",
+            "items": [{"lead": "L.", "body": "B.", "page": "/breakdowns/", "image": "/static/email/b.jpg",
+                       "image_alt": "Breakdown", "image_link": "/static/email/b.mp4"},
+                      {"lead": "M.", "body": "C.", "page": None, "image": "javascript:x", "image_link": "/x"}]}  # fmt: skip
+    out = f.run(tmp_path, WED_1PM - 3600, force=True, given=mine)
+    assert out["draft"] == "drafted" and f.written == []  # the writer isn't asked
+    issue = weekly.get_issue(tmp_path, "2026-11-12")
+    one, two = issue["draft"]["items"]
+    assert one["image"] == "/static/email/b.jpg" and one["image_link"] == "/static/email/b.mp4"
+    assert "image" not in two
+    email = weekly.render(issue["draft"], unsubscribe="u", site=SITE)
+    assert f'<a href="{SITE}/static/email/b.mp4"><img src="{SITE}/static/email/b.jpg" alt="Breakdown"' in email["html"]
+    assert f"Watch: {SITE}/static/email/b.mp4" in email["text"]
+
+
 def test_merged_since_pages_until_the_week_ends() -> None:
     since = datetime(2026, 11, 4, tzinfo=UTC).timestamp()
 

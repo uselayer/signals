@@ -225,9 +225,18 @@ def render(draft: dict[str, Any], *, unsubscribe: str, site: str = SITE, preview
         return (f'<p style="margin:6px 0 0;"><a href="{esc(site + it["page"])}" style="color:#141519;font-weight:600;">'
                 "Open it on Signals &rarr;</a></p>")  # fmt: skip
 
+    def picture(it: dict[str, Any]) -> str:
+        if not it.get("image"):
+            return ""
+        src = it["image"] if it["image"].startswith("https://") else site + it["image"]
+        img = (f'<img src="{esc(src)}" alt="{esc(it.get("image_alt") or "")}" width="560" style="display:block;width:100%;'
+               'max-width:560px;height:auto;margin:10px 0 2px;border:1px solid #eaeaea;border-radius:8px;">')  # fmt: skip
+        to = it.get("image_link")
+        return f'<a href="{esc(to if to.startswith("https://") else site + to)}">{img}</a>' if to else img
+
     rows = "\n".join(
         f'<li style="margin:0 0 0 1em;padding:0.4em 0 0.8em"><p style="margin:0"><strong>{esc(it["lead"])}</strong> '
-        f"{esc(it['body'])}</p>{link(it)}</li>"
+        f"{esc(it['body'])}</p>{picture(it)}{link(it)}</li>"
         for it in items
     )
     tldr = draft.get("tldr") or []
@@ -262,7 +271,9 @@ def render(draft: dict[str, Any], *, unsubscribe: str, site: str = SITE, preview
         text += ["TL;DR", *(f"- {t}" for t in tldr), ""]
     text += ["WHAT'S NEW THIS WEEK", ""]
     for it in items:
-        text += [f"- {it['lead']} {it['body']}" + (f" {site}{it['page']}" if it.get("page") else ""), ""]
+        to = it.get("image_link") or ""
+        watch = f" Watch: {to if to.startswith('https://') else site + to}" if to else ""
+        text += [f"- {it['lead']} {it['body']}" + (f" {site}{it['page']}" if it.get("page") else "") + watch, ""]
     text += [f"{draft['ask']} Just reply here.", "", "David", "Founder, Signals", "", f"Unsubscribe: {unsubscribe}"]
     return {"subject": draft["subject"], "html": body, "text": "\n".join(text)}
 
@@ -285,6 +296,7 @@ Otherwise write the email:
 - subject: plain and specific, under 60 characters, naming the biggest change. No emoji, no "newsletter", no hype words.
 - preheader: one plain sentence on what the reader gets.
 - tldr: one short line per item, in the same order as the items, value first, at most about 12 words each.
+- Most readers have never opened most of Signals. When the week's changes improve one feature, write ONE item that introduces the feature at a high level (what it is, what you can do with it) and let the improvements show in that; never list small tweaks (progress bars, queues, button states, status text) as items of their own.
 - items: 1 to 4, most useful first. lead = one bold sentence that says what the reader can now do. body = 1-2 sentences: why it matters and where to try it. Plain words: no code, no field or file names, no PR numbers, no internal names.
 - page: the one page that best shows the item, chosen ONLY from the list given, or null.
 - video_hint: if a 30-second screen recording would explain the item much better than words (a flow with several steps, something that moves), say what it should show in one sentence; else null. Only David sees this.
@@ -349,18 +361,41 @@ def allowed_page(page: str | None) -> str | None:
     return clean if clean in PAGES else None
 
 
+_ESCAPED = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
+def _clean(v: Any) -> str:
+    """Text from a draft, trimmed, with a JSON escape typed into it (a literal backslash-u2014, as the writer typed
+    in the 12 Nov draft) turned back into its character."""
+    return _ESCAPED.sub(lambda m: chr(int(m.group(1), 16)), str(v or "")).strip()
+
+
+def _media(it: dict[str, Any]) -> dict[str, str]:
+    """An item's picture, only in a draft David hands in (POST /api/weekly/draft with ``draft``): ``image`` a path
+    under /static/ or an https URL, ``image_alt``, and ``image_link`` (where a tap goes, e.g. the video) a path on the
+    site or an https URL. Anything else is dropped."""
+    img, link = _clean(it.get("image")), _clean(it.get("image_link"))
+    if not img.startswith(("/static/", "https://")):
+        return {}
+    out = {"image": img, "image_alt": _clean(it.get("image_alt"))}
+    if link.startswith(("/", "https://")):
+        out["image_link"] = link
+    return out
+
+
 def to_draft(raw: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
-    """A model answer as (draft, "") or (None, why there's nothing to send). Pages not on the list are dropped; 1–4 items."""
-    items = [{"lead": str(it.get("lead") or "").strip(), "body": str(it.get("body") or "").strip(),
-              "page": allowed_page(it.get("page")), "video_hint": (str(it.get("video_hint") or "").strip() or None)}
-             for it in raw.get("items") or [] if str(it.get("lead") or "").strip() and str(it.get("body") or "").strip()][:4]  # fmt: skip
+    """A model answer (or David's own draft) as (draft, "") or (None, why there's nothing to send). Pages not on the
+    list are dropped; 1–4 items."""
+    items = [{"lead": _clean(it.get("lead")), "body": _clean(it.get("body")), "page": allowed_page(it.get("page")),
+              "video_hint": _clean(it.get("video_hint")) or None, **_media(it)}
+             for it in raw.get("items") or [] if _clean(it.get("lead")) and _clean(it.get("body"))][:4]  # fmt: skip
     if not raw.get("worth_sending") or not items:
-        return None, str(raw.get("skip_reason") or "").strip() or "Nothing merged this week would be noticed by users."
+        return None, _clean(raw.get("skip_reason")) or "Nothing merged this week would be noticed by users."
     given = raw.get("tldr") or []
-    tldr = [(str(given[i]).strip() if i < len(given) else "") or it["lead"] for i, it in enumerate(items)]
-    return {"subject": str(raw.get("subject") or "").strip()[:90] or "What's new in Signals",
-            "preheader": str(raw.get("preheader") or "").strip(), "tldr": tldr, "items": items,
-            "ask": str(raw.get("ask") or "").strip() or "What should Signals do next?"}, ""  # fmt: skip
+    tldr = [(_clean(given[i]) if i < len(given) else "") or it["lead"] for i, it in enumerate(items)]
+    return {"subject": _clean(raw.get("subject"))[:90] or "What's new in Signals",
+            "preheader": _clean(raw.get("preheader")), "tldr": tldr, "items": items,
+            "ask": _clean(raw.get("ask")) or "What should Signals do next?"}, ""  # fmt: skip
 
 
 Writer = Callable[[list[dict[str, Any]], str], "tuple[dict[str, Any] | None, str]"]
@@ -594,9 +629,11 @@ def check(
     send: Send | None = None,
     force: bool = False,
     notes: str | None = None,
+    given: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One pass (each minute, ``_weekly_loop``): the draft once it's time, David's preview of it, and every approved
-    issue's emails. ``force`` drafts now for the next send date (replacing a draft not approved yet)."""
+    issue's emails. ``force`` drafts now for the next send date (replacing a draft not approved yet); with ``given``
+    (David's own draft) that's the draft, and the writer isn't asked."""
     env = dict(os.environ) if env is None else env
     if env.get("SIGNALS_WEEKLY", "1") == "0":
         return {"off": "SIGNALS_WEEKLY=0"}
@@ -614,8 +651,11 @@ def check(
     due = force or (is_draft_time(now, day) and (have is None or (have["status"] == "failed" and now - (have["failed_at"] or 0) >= RETRY_S)))
     if due:
         try:
-            prs = prs_since(now - 7 * 86400, env.get("GITHUB_TOKEN", ""))
-            draft, why = writer(prs, env.get("SIGNALS_WEEKLY_NOTES", "") if notes is None else notes)
+            if force and given is not None:
+                prs, (draft, why) = [], to_draft({**given, "worth_sending": True})
+            else:
+                prs = prs_since(now - 7 * 86400, env.get("GITHUB_TOKEN", ""))
+                draft, why = writer(prs, env.get("SIGNALS_WEEKLY_NOTES", "") if notes is None else notes)
         except Exception as e:  # the next hour tries again; David hears once
             reason = f"{type(e).__name__}: {e}"[:300]
             print(f"weekly: no draft for {issue_id}: {reason}", flush=True)

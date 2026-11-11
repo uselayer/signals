@@ -1804,13 +1804,15 @@ def weekly_unsubscribe(u: str = "", sig: str = "") -> HTMLResponse:
 
 class WeeklyDraft(BaseModel):
     notes: str | None = None  # David's notes for the writer this time (else SIGNALS_WEEKLY_NOTES)
+    draft: dict[str, Any] | None = None  # David's own draft (weekly.to_draft's shape; items may carry an image): no writer
 
 
 @app.post("/api/weekly/draft")
 def weekly_draft(req: WeeklyDraft, request: Request) -> dict[str, Any]:
-    """The owner's: draft the next issue now, replacing one not approved yet; a fresh preview follows."""
+    """The owner's: draft the next issue now (or take ``draft`` as it), replacing one not approved yet; a fresh
+    preview follows."""
     _owner(request)
-    return weekly.check(time.time(), STORE_DIR, site=SITE, force=True, notes=req.notes)
+    return weekly.check(time.time(), STORE_DIR, site=SITE, force=True, notes=req.notes, given=req.draft)
 
 
 @app.post("/api/owner-alerts/test")
