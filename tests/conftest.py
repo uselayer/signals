@@ -81,7 +81,7 @@ def no_pace_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     ``engine._pace_after_follow`` themselves, with a stand-in for the reads)."""
     from signals import app as engine
 
-    monkeypatch.setattr(engine, "_pace_later", lambda uid, trader: None)
+    monkeypatch.setattr(engine, "_pace_later", lambda uid, trader, wait_s=None: None)
     monkeypatch.setattr(engine, "_pace_later_quiet", lambda trader: None)
 
 

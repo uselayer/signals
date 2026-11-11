@@ -165,7 +165,7 @@ def test_following_on_telegram_needs_no_account(api: TestClient, monkeypatch: py
     assert uid.startswith(engine.TG_ONLY) and "900" not in uid  # a random id, never the chat's
     assert u == {"follows": [SHARP], "chat": "900"}
     said = engine.tg.sent[-1]["text"]
-    assert said.startswith("You're following Sharp &lt;Sam&gt;.") and "Connected" in said
+    assert said.startswith("Connected.") and "Sharp" not in said and "/rules" in said  # the setup names them, once
     engine._on_update({"message": {"chat": {"id": 900}, "text": f"/start {code}"}})  # used already
     assert "expired" in engine.tg.sent[-1]["text"]
     follow_on_telegram(api, 900, "0x" + "cd" * 20)  # a second trader: the same follower
