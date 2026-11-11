@@ -103,6 +103,11 @@ class Store:
         return [dict(r) for r in self._q(
             "SELECT id, created, title FROM sessions WHERE user = ? ORDER BY created DESC LIMIT ?", (user, limit))]  # fmt: skip
 
+    def sessions_with_event(self, kind: str) -> list[str]:
+        """Every session that has an event of type ``kind`` (events are kept as JSON: "type": "<kind>")."""
+        like = f'%"type": {json.dumps(kind)}%'
+        return [r["session"] for r in self._q("SELECT DISTINCT session FROM events WHERE event LIKE ?", (like,))]
+
     def last_runs(self, user: str) -> dict[str, dict[str, Any]]:
         """Each of ``user``'s sessions' latest run: when it ended (None: still going, or the process died in it) and
         how it stopped (``error``: None when it ran to its end), for the list's Ready and Stopped."""

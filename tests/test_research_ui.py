@@ -271,3 +271,18 @@ def test_a_finished_breakdown_is_ready_until_you_open_it() -> None:
     got = _page_store(f"const opened = {{c: {now - 30}}};\n"
                       f"process.stdout.write(JSON.stringify({json.dumps(rows)}.map(r => S.rowState(r, opened, {since}, {now}))));")
     assert got == ["running", "ready", "saved", "stopped", "saved", "saved", "saved"]
+    assert _page_store("process.stdout.write(JSON.stringify(S.rowState({id: 'q', queued: true}, {}, 0, 1)));") == "queued"
+
+
+def test_a_queued_start_shows_queued_then_runs_or_goes_back_to_start() -> None:
+    plan = {"type": "plan.proposed", "plan_id": "p1", "title": "Plan", "steps": [{"id": "a", "title": "Read"}]}
+    got = _page_store(
+        f"const out = []; const inv = S.emptyInv('x'); S.apply(inv, {json.dumps({'seq': 0, 'v': 2, **plan})}, null);\n"
+        "S.apply(inv, {seq: 1, v: 2, type: 'plan.queued', plan_id: 'p1'}, null); out.push(inv.plans.p1.status);\n"
+        "S.apply(inv, {seq: 2, v: 2, type: 'plan.answered', plan_id: 'p1', action: 'approve'}, null); out.push(inv.plans.p1.status);\n"
+        "const b = S.emptyInv('y'); S.apply(b, {...inv.plans.p1, seq: 0, v: 2, type: 'plan.proposed', status: undefined}, null);\n"
+        "S.apply(b, {seq: 1, v: 2, type: 'plan.queued', plan_id: 'p1'}, null);\n"
+        "S.apply(b, {seq: 2, v: 2, type: 'plan.unqueued', plan_id: 'p1', text: 'Press Start again.'}, null);\n"
+        "out.push(b.plans.p1.status, b.feed.map(f => f.text));\n"
+        "process.stdout.write(JSON.stringify(out));")
+    assert got == ["queued", "approved", "proposed", ["Press Start again."]]
