@@ -136,9 +136,12 @@ function Investigation({ api, id }) {
         const s = await api.session(id);
         for (const e of s.events) apply(inv, e, ui);
         if (!inv.title) inv.title = s.title || '';
+        inv.loaded = true; // its history is in: the plan, findings and title are real from here, not an empty breakdown
+        if (inv.done && api.windows) inv.winsLoading = true;
+        redraw();
         if (s.running || api.fixtures || !inv.done) startFollow();
         if (api.fixtures && !s.events.length && !s.running) await api.ask(id, 'start'); // opened straight from the list
-        if (inv.done && api.windows) { const w = await api.windows(id).catch(() => null); if (w) for (const x of w.windows) apply(inv, { type: 'window.summary', ...x }, null); }
+        if (inv.done && api.windows) { const w = await api.windows(id).catch(() => null); inv.winsLoading = false; if (w) for (const x of w.windows) apply(inv, { type: 'window.summary', ...x }, null); }
         if (ui.win) loadWin(ui.win);
         redraw();
       } catch (e) { inv.loadError = e.message; redraw(); }
@@ -201,6 +204,12 @@ function Investigation({ api, id }) {
   }, [wallet]);
   const rec = st.current.record;
 
+  // 11 Nov (owner): opening a saved breakdown showed "No plan yet / Ask a question to start" and the agent "Ready"
+  // until its history arrived, as if it were empty. Until then, say it's opening.
+  if (!inv.loaded && !inv.loadError) return html`<div class="inv"><section class="main" aria-label="Workspace">
+      <div class="head"><div class="muted small"><a href="#/">Breakdowns</a> /</div><h1>Opening this breakdown…</h1></div>
+      <div class="plan"><div style="display:flex;gap:12px"><span class="dot live"></span><div><h3>Loading its plan, windows and findings</h3><p class="muted small">Nothing is re-run: this is the saved breakdown.</p></div></div></div>
+    </section></div>`;
   const totalProfit = inv.summaries.reduce((s, x) => s + (x.profit || 0), 0);
   const tabs = [['plan', 'Plan and data'], ['windows', `Windows${inv.summaries.length ? ' · ' + inv.summaries.length : ''}`]];
   if (cur && cur.id) tabs.push(['window', `Window: ${windowLabel(cur.start, cur.start + cur.end).replace(' UTC', '')}`], ['trades', `Fills · ${cur.trades.length}`]);
@@ -213,21 +222,15 @@ function Investigation({ api, id }) {
           ${inv.summaries.length > 0 && html`<span>· ${plural(inv.summaries.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
         ${rec && html`<${RecordLine} r=${rec} wallet=${wallet} />`}
-        <div class="acts"><button class="btn sm later" onClick=${() => { ui.laterOpen = !ui.laterOpen; redraw(); }}>Watch for new trades · later</button></div>
-        ${ui.laterOpen && html`<div class="later-pop"><span class="tag plain" style="align-self:flex-start">Later, not in this version</span><b>Keep this breakdown up to date</b>
-          <p>Re-run it when the wallet trades a new window, and tell you on Telegram when a pattern breaks or something new shows up. Those alerts will count in Signals' 20 a day.</p>
-          <p class="muted small">For now the breakdown is saved: reopen it any time from Breakdowns.</p><button class="btn sm" onClick=${() => { ui.laterOpen = false; redraw(); }}>OK</button></div>`}
       </div>
       ${SAMPLE && html`<div class="banner sample"><span>A sample breakdown, recorded from a real run: real windows, with the agent's steps played back. <a class="link" href="./?signin#/">Sign in to ask your own.</a></span></div>`}
       ${FIXTURES && !SAMPLE && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
-      <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}
-        <button class=${'later ' + (ui.stage === 'later' ? 'on' : '')} onClick=${() => act.stage('later')}>+ New view</button></div>
+      <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}</div>
       ${ui.stage === 'plan' && html`<${PlanStage} inv=${inv} act=${act} />`}
       ${ui.stage === 'windows' && html`<${WindowsStage} inv=${inv} ui=${ui} act=${act} />`}
       ${ui.stage === 'window' && html`<${ReplayStage} inv=${inv} ui=${ui} act=${act} w=${cur} steps=${steps} />`}
       ${ui.stage === 'trades' && html`<${TradesStage} w=${cur} act=${act} />`}
-      ${ui.stage === 'later' && html`<div class="ghostbox"><b>Your own views come here later.</b><br />Ask for any chart or table ("plot its average fill price by minute"), and it's kept in this breakdown and refreshes with new trades. Not in this version.</div>`}
     </section>
     <${AgentColumn} inv=${inv} ui=${ui} act=${act} fixtures=${!!api.fixtures} />
   </div>`;
@@ -241,7 +244,7 @@ function RecordLine({ r, wallet }) {
   const w = r.win && (r.win['90d'] || r.win['30d'] || r.win['7d']);
   const win = w && w.closed >= WIN_MIN ? `${Math.round(100 * w.won / w.closed)}% of positions closed in profit (${count(w.won)} of ${count(w.closed)}, last ${w.days} days)` : null;
   const paid = r.paid_30d != null ? `pays ${cents(100 * r.paid_30d)} on average over 30 days` : null;
-  return html`<p class="recline muted small"><b>Its Signals record, every Polymarket market:</b> ${[win, paid].filter(Boolean).join('; ') || 'no win rate yet'}. <a class="link" href=${`/#/worth/${wallet.toLowerCase()}`}>See its record</a></p>`;
+  return html`<p class="recline muted small"><b>Its Signals record, every Polymarket market:</b> ${[win, paid].filter(Boolean).join('; ') || 'no win rate yet'}. <a class="link" href=${`/#/worth/${wallet.toLowerCase()}`} target="_blank" rel="noopener">See its record</a></p>`;
 }
 
 // Fixtures mode only: a pointed question answered from the window itself, observed facts only (readings of why are
