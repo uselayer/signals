@@ -28,6 +28,10 @@ from pydantic import BaseModel, Field
 
 GEOBLOCK_URL = "https://polymarket.com/api/geoblock"
 GEOBLOCK_S = 600  # asked again at most every 10 minutes
+# Polymarket's geoblock "blocked" also covers places that are close-only on its website but whose API isn't
+# restricted (docs.polymarket.com/api-reference/geoblock, 11 Nov 2026). The order service only uses the API, so a
+# server there may send orders. Followers in these places are still refused at set-up (/copy asks "blocked").
+API_OPEN = frozenset({"IE", "JP", "NL", "KR"})
 
 app = FastAPI(title="Signals copy", docs_url=None, redoc_url=None, openapi_url=None)
 _creds: dict[str, Any] = {}  # trading key address → its CLOB credentials (made once per key per process)
@@ -48,6 +52,11 @@ def engine_only(request: Request) -> None:
     got = request.headers.get("authorization", "")
     if not token or not hmac.compare_digest(got.encode(), f"Bearer {token}".encode()):
         raise HTTPException(401, detail="Not allowed.")
+
+
+def server_may_order(g: dict[str, Any]) -> bool:
+    """Whether Polymarket's API takes orders from this server's IP: not blocked, or blocked only on the website."""
+    return not g.get("blocked") or g.get("country") in API_OPEN
 
 
 def geoblock(now: float | None = None) -> dict[str, Any]:
@@ -82,7 +91,7 @@ def health() -> dict[str, Any]:
         g = geoblock()
     except (OSError, ValueError):
         return {"ok": False, "geoblock": None}
-    return {"ok": not g.get("blocked"), "country": g.get("country"), "region": g.get("region")}
+    return {"ok": server_may_order(g), "country": g.get("country"), "region": g.get("region")}
 
 
 @app.post("/keys", dependencies=[Depends(engine_only)])
@@ -100,7 +109,7 @@ def order(req: OrderIn) -> dict[str, Any]:
         g = geoblock()
     except (OSError, ValueError) as e:
         raise HTTPException(503, detail="Couldn't check Polymarket just now. Nothing was bought.") from e
-    if g.get("blocked"):
+    if not server_may_order(g):
         raise HTTPException(503, detail="Polymarket isn't taking orders from Signals' server right now. Nothing was bought.")
     try:
         key = _fernet().decrypt(req.enc.encode()).decode()

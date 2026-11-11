@@ -233,7 +233,10 @@ def test_no_order_leaves_while_polymarket_blocks_the_server(svc_app: TestClient,
     order = {"enc": enc, "wallet": DEPOSIT, "token": "123", "usd": 25, "max_price": 0.45}
     r = svc_app.post("/order", json=order, headers=ENGINE)
     assert r.status_code == 503 and "isn't taking orders from Signals' server" in r.json()["detail"] and placed == []
-    monkeypatch.setattr(copy_service, "geoblock", lambda: {"blocked": False, "country": "NL"})
+    monkeypatch.setattr(copy_service, "geoblock", lambda: {"blocked": True, "country": "GB"})  # close-only on the API too
+    assert svc_app.post("/order", json=order, headers=ENGINE).status_code == 503 and placed == []
+    monkeypatch.setattr(copy_service, "geoblock", lambda: {"blocked": True, "country": "NL"})  # website only: API open
+    assert svc_app.get("/health").json()["ok"] is True
     assert svc_app.post("/order", json=order, headers=ENGINE).json() == {"ok": True} and len(placed) == 1
     assert placed[0][1:] == (DEPOSIT, "123", 25.0, 0.45)
 
