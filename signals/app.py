@@ -56,7 +56,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import basket, copying, monitoring, owner_alerts, records, us_match, watch, welcome, why
+from signals import basket, copying, monitoring, own_trading, owner_alerts, records, us_match, watch, welcome, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -4347,11 +4347,16 @@ def _on_update(u: dict[str, Any]) -> None:
     if cb:  # a button under an alert: "Useful" / "Not useful", or "Stop alerts from …"
         chat = str(((cb.get("message") or {}).get("chat") or {}).get("id") or "")
         data = str(cb.get("data") or "")
-        ack = _vote(chat, data) if data.startswith("v:") else "Buying…" if data.startswith("cp:") else None
+        ack = _vote(chat, data) if data.startswith("v:") else "Buying…" if data.startswith(("cp:", "cv:")) else None
         try:  # quietly: a small note on the tap, no message in the chat
             tg("answerCallbackQuery", callback_query_id=cb.get("id"), **({"text": ack} if ack else {}))
         except RuntimeError:
             pass
+        if chat and data.startswith("cv:") and data.count(":") == 2:  # the owner's Kalshi / Polymarket US copy
+            mid = (cb.get("message") or {}).get("message_id")
+            _, aid, code = data.split(":")
+            threading.Thread(target=_on_own_copy, args=(chat, aid, code, mid), daemon=True, name="copy").start()
+            return
         if chat and data.startswith("cp:"):  # "Copy $25" (signals/copying.py): off the bot's loop, an order takes seconds
             mid = (cb.get("message") or {}).get("message_id")
             threading.Thread(target=_on_copy, args=(chat, data[3:], mid), daemon=True, name="copy").start()
@@ -4514,6 +4519,47 @@ def _chat_owner(chat: str) -> str | None:
     return next((uid for uid, x in _load_follows()["users"].items() if x.get("chat") == chat), None)
 
 
+def _own_offers(uid: str, t: WhaleTrade) -> list[tuple[str, str, str]]:
+    """For the owner's own account (own_trading): the Kalshi and Polymarket US markets a buy alert's outcome is
+    verified to match, where they have a key: (venue code, market, side)."""
+    if not own_trading.on_for(uid):
+        return []
+    out: list[tuple[str, str, str]] = []
+    k, us = kalshi_of(t.market, t.token, t.outcome), us_of(t.market, t.token, t.outcome)
+    if us and us.get("found") and us.get("market_id") and own_trading.has("u"):
+        out.append(("u", str(us["market_id"]), str(us["side"])))
+    if k and k.get("found") and k.get("market_id") and own_trading.has("k"):
+        out.append(("k", str(k["market_id"]), str(k["side"])))
+    return out
+
+
+def _on_own_copy(chat: str, alert_id: str, code: str, message_id: int | None = None) -> None:
+    """A tap on "Copy $25 on Kalshi / Polymarket US" (own_trading): only the owner's account, with their own key."""
+    uid = _chat_owner(chat)
+    reply = {"reply_to_message_id": message_id} if message_id else {}
+    try:
+        with _db() as con:
+            order = own_trading.claim(con, alert_id, uid or "", code)
+    except copying.CopyError as e:
+        _say(chat, html.escape(str(e), quote=False), **reply)
+        return
+    try:
+        answer = own_trading.place(order, STORE_DIR)
+    except Exception as e:  # noqa: BLE001  (anything the venue or the SDK throws: said plainly, kept)
+        answer = {"ok": False, "code": "outcome_unknown", "message": type(e).__name__}
+    with _db() as con:
+        if answer.get("code") == "outcome_unknown":  # may have gone through: counted, never re-sent
+            con.execute("UPDATE copy_orders SET state = 'delayed', error = 'outcome_unknown' WHERE alert_id = ?", (alert_id,))
+        else:
+            copying.record(con, alert_id, answer)
+    ph("telegram copy tapped", uid, {"venue": order["venue"], "filled": bool(answer.get("ok")),
+                                     "code": None if answer.get("ok") else answer.get("code")} | _alert_facts(alert_id)[1])  # fmt: skip
+    try:
+        _say(chat, html.escape(own_trading.result_text(order, answer), quote=False), **reply)
+    except RuntimeError:
+        pass
+
+
 def _on_copy(chat: str, alert_id: str, message_id: int | None = None) -> None:
     """A tap on "Copy $25" under an alert (signals/copying.py): the order is kept as placing (a second tap never
     buys twice), the order service places it from the follower's own wallet, and the reply under the alert says what
@@ -4590,7 +4636,7 @@ CREATE TABLE IF NOT EXISTS seen_trades (trader TEXT NOT NULL, trade_id TEXT NOT 
 CREATE TABLE IF NOT EXISTS pace (trader TEXT PRIMARY KEY, per_day REAL NOT NULL, usd REAL, days REAL NOT NULL,
   at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS typing (chat TEXT PRIMARY KEY, trader TEXT NOT NULL, flow TEXT NOT NULL, at REAL NOT NULL);
-""" + copying.SCHEMA
+""" + copying.SCHEMA + own_trading.SCHEMA
 
 
 def alerts_db() -> Path:
@@ -4640,7 +4686,8 @@ def _sent_today(uid: str, kinds: tuple[str, ...] = COUNTED, trader: str | None =
         return int(con.execute(q, (uid, _today(), *kinds)).fetchone()[0])
 
 
-def _keyboard(alert_id: str, stop: str | None = None, text: str = "", copy: bool = False) -> dict[str, Any]:
+def _keyboard(alert_id: str, stop: str | None = None, text: str = "", copy: bool = False,
+              own: tuple[str, ...] = ()) -> dict[str, Any]:  # fmt: skip
     """Under every alert: when it's about one trader you follow (``stop``), "Edit rule" (their alert rule, where
     "Stop alerts from <name>" now is: _on_rule) and "Pause 24 h"; then Useful / Not useful. With signing in from alerts
     on (TG_LOGIN) and a "Check current price" link in the alert's ``text``, that link as a login button first
@@ -4650,6 +4697,8 @@ def _keyboard(alert_id: str, stop: str | None = None, text: str = "", copy: bool
     rows: list[list[dict[str, Any]]] = []
     if copy:
         rows.append([{"text": f"Copy ${copying.COPY_USD:g}", "callback_data": f"cp:{alert_id}"}])
+    for code in own:  # the owner's own Kalshi / Polymarket US copy (signals/own_trading.py)
+        rows.append([own_trading.button(alert_id, code)])
     if _tg_login_on() and f"/go/{alert_id}/check?" in text:
         rows.append([{"text": "Check current price on Signals", "login_url": {"url": f"{SITE}/tg/in/{alert_id}"}}])
     if stop:
@@ -4675,6 +4724,7 @@ RETRY_S = (30.0, 60.0, 120.0, 240.0)  # waits before each try again of a tempora
 def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, trader: str | None = None,
           outcome: str | None = None, trade_at: float | None = None, stop: str | None = None,
           trigger_at: float | None = None, copy: tuple[str, float] | None = None,
+          own: list[tuple[str, str, str]] | None = None,
           on_queue: Callable[[sqlite3.Connection], Any] | None = None) -> str | None:  # fmt: skip
     """Send one alert if today's cap allows it; its id when it went out now, else None (not sent, or sent later by
     a retry). At the cap, the first alert that doesn't fit sends cap_text (the limit, and when alerts resume) instead,
@@ -4709,12 +4759,16 @@ def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, tra
     if copy and copying.on_for(uid):
         with _db() as con:
             can_copy = copying.ready(con, uid)
-    body = json.dumps({"text": text, "markup": _keyboard(aid, stop, text, can_copy)})
+    own_codes = tuple(o[0] for o in own or ())
+    body = json.dumps({"text": text, "markup": _keyboard(aid, stop, text, can_copy, own_codes)})
     with _db() as con:
         if on_queue is not None:
             on_queue(con)
         if can_copy and copy:
             copying.offer(con, aid, uid, copy[0], copy[1])
+        if own and copy:
+            for code, market, side in own:
+                own_trading.offer(con, aid, uid, code, market, side, copy[1])
         con.execute("INSERT INTO alerts (id, uid, chat, kind, trader, outcome, message_id, sent_at, trade_at, day,"
                     " trigger_at, state, tries, queued_at, next_at, body) VALUES"
                     " (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)",
@@ -5782,7 +5836,8 @@ def _deliver(uid: str, chat: str, b: NewBuy, category: str | None, tag: str = ""
                     trade_at=first[0][2], trigger_at=b.at)  # fmt: skip
         return 1 if aid else 0
     aid = _send(uid, chat, "buy", lambda aid: tag + b.text(aid), trader=b.wallet, outcome=b.outcome, trade_at=b.at,
-                stop=b.wallet, copy=(b.t.token, b.now) if b.t.token and b.now else None)  # fmt: skip
+                stop=b.wallet, copy=(b.t.token, b.now) if b.t.token and b.now else None,
+                own=_own_offers(uid, b.t))  # fmt: skip
     return 1 if aid else 0
 
 

@@ -96,6 +96,14 @@ behind Vercel (see README, "Hosting").
   `SIGNALS_COPY_USD` (default $25) at most `COLLAR` (3¢) above the price the alert showed, kept as "placing" first
   so a second tap never buys twice; the reply says what was bought or plainly why nothing was. Never a sell, never
   without a tap, never a size the follower didn't choose.
+- The owner's own copy on Kalshi and Polymarket US (`signals/own_trading.py`, owner 11 Nov 2026): only the account in
+  `SIGNALS_OWN_UID`, with the owner's own exchange keys, so Signals' software trades its owner's own account (Kalshi's
+  Developer Agreement allows "a member's own trading"). Never anyone else's exchange keys: Kalshi (Developer Agreement
+  §3.2, "Facilitating trading ... by other members") and Polymarket US (Participant Agreement §I.24, credentials
+  never shared) forbid it; other people in the US get there only through an exchange partner programme. A buy alert
+  whose outcome has a verified match gets "Copy $25 on Kalshi / Polymarket US"; a tap is an IOC buy at most 3¢
+  above the alert's price, once per alert, at most `SIGNALS_OWN_DAILY_USD` a day; "may have gone through" is said
+  so and never re-sent.
 - "What buying now costs" (`/api/trade/preview`, the page's `costBox`) is on every trade with a market,
   whoever made it: a quote only, never an order. Pricing a trade reads no score, and no copy estimate is shown
   beside it (below). The engine reads everything it
