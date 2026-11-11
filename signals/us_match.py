@@ -124,6 +124,9 @@ def _twin(intl: dict[str, Any], us: dict[str, Any], side: str, checked_at: str) 
         "event": u.get("event"),
         # the outcome on Polymarket US: the matched one, or in a plain Yes/No market, its No ("No on Both teams to score")
         "outcome": u.get("outcome") if side == "same" else f"No on {u['outcome']}" if u.get("outcome") else "No",
+        # what an order buys there (uselayer: a slug, or slug:long / slug:short, and yes or no on it)
+        "market_id": u["market_id"],
+        "side": "yes" if side == "same" else "no",
         "via": "kalshi",
         "confidence": min(float(intl.get("confidence") or 0), float(us.get("confidence") or 0)),
         "differences": ([dict(SITS_OUT)] if _player_prop(intl) else []) + _differences(intl, us),

@@ -175,6 +175,10 @@ All optional.
 | `SIGNALS_BUILDER_KEY`, `SIGNALS_BUILDER_SECRET`, `SIGNALS_BUILDER_PASSPHRASE` | Polymarket builder API key (engine only): pays the gas of a follower's wallet set-up. |
 | `SIGNALS_ROLE` | `copy` runs the image as the order service instead of the engine. |
 | `SIGNALS_COPY_KEY` | Order service only: the Fernet key its trading keys are encrypted with. Never on the engine. |
+| `SIGNALS_OWN_UID` | The owner's Clerk id: the only account whose alerts get "Copy $25 on Kalshi / Polymarket US". |
+| `SIGNALS_OWN_KALSHI_KEY_ID`, `SIGNALS_OWN_KALSHI_PRIVATE_KEY` | The owner's own Kalshi API key (trading). |
+| `SIGNALS_OWN_PMUS_KEY_ID`, `SIGNALS_OWN_PMUS_SECRET` | The owner's own Polymarket US API key. |
+| `SIGNALS_OWN_USD`, `SIGNALS_OWN_DAILY_USD` | One tap's dollars (default `25`) and the most a UTC day (default `250`). |
 
 `SIGNALS_SKILL_TEST=1` brings back the old skill test and its Recommended list in place of the Leaderboard. The
 switches that only matter with it on (`SIGNALS_DISCOVERY`, `SIGNALS_DISCOVERY_LIMIT`, `SIGNALS_EXPLORE`,
