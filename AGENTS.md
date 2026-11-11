@@ -79,10 +79,23 @@ behind Vercel (see README, "Hosting").
   through `track` (README lists them) and say where on the page (`from`) and, since 7 Nov (the owner: a trader's
   page link carried the wallet anyway), which trader: `traderFacts` (wallet, the name Signals shows, main category,
   categories), only from what the page has read, never made up. Still never anything about the person.
-- Signals is a consumer website (usesignals.app); running it locally is for development. It places no orders:
-  no sandbox, no in-app trading, no automatic copying, and it never holds anyone's keys or funds. Buying means
-  "What buying now costs", then "Buy on Polymarket ↗", where the user buys it themselves. A session never
-  places a real-money order, not even a test one.
+- Signals is a consumer website (usesignals.app); running it locally is for development. It places an order only
+  when the user taps "Copy" under an alert (one-tap copy, owner 11 Nov 2026: "Copying a trade" below), from their
+  own wallet: no automatic copying, no other in-app trading, and it never holds anyone's funds or their wallet's
+  owner key. Everywhere else buying means "What buying now costs", then "Buy on Polymarket ↗", where the user buys
+  it themselves. A session never places a real-money order, not even a test one: the owner or a tester taps Copy.
+- Copying a trade (`signals/copying.py`, `signals/copy_service.py`, `copy-web/`): only accounts in
+  `SIGNALS_COPY_USERS` (the owner's flag; only the owner's account until the owner says otherwise) see it. A
+  follower sets it up on /copy: Polymarket's geoblock is asked from their own browser and where Polymarket doesn't
+  allow new trades (the US and the rest of its list) it stops there; they keep the alert's Polymarket US / Kalshi
+  links. Privy holds their wallet's owner key; Polymarket deploys their Deposit Wallet (gas paid by Signals' builder
+  key, only for relayer calls, `SIGNS_PER_HOUR`); they approve one Signals trading key (a Polymarket session key,
+  scope CLOB: trades, never withdraws, 180 days, revocable). That key is made, encrypted and used only by the order
+  service, which runs in a region Polymarket takes orders from (the engine runs in the US and never places an
+  order) and refuses to send one while Polymarket's geoblock blocks its own IP. A tap is a FAK buy of
+  `SIGNALS_COPY_USD` (default $25) at most `COLLAR` (3¢) above the price the alert showed, kept as "placing" first
+  so a second tap never buys twice; the reply says what was bought or plainly why nothing was. Never a sell, never
+  without a tap, never a size the follower didn't choose.
 - "What buying now costs" (`/api/trade/preview`, the page's `costBox`) is on every trade with a market,
   whoever made it: a quote only, never an order. Pricing a trade reads no score, and no copy estimate is shown
   beside it (below). The engine reads everything it
