@@ -223,6 +223,14 @@ behind Vercel (see README, "Hosting").
   measures from it ("6 min ago"). The website's delay notes stay. The engine checks Clerk's session token itself (public keys,
   no Clerk secret). Never let one account see or change another's follows, and never let an answer about a
   signed-in person be cached.
+- The weekly email (`signals/weekly.py`, owner 11 Nov 2026, Layer's weekly update for Signals): the only email to
+  every account. Drafted by Claude from the week's merged pull requests the afternoon before the send day, previewed to
+  the owner, and sent only after the owner clicks "Approve and send" (never by a session, never without that click);
+  9 AM in each reader's time zone; every email has a one-click unsubscribe, and an unsubscribed reader is never
+  emailed again. The writer's rules (`SYSTEM`) keep only what every user can open today: nothing owner-only or behind
+  a flag (copying, the skill test, Kalshi), the page's words ("trade", never "bet"; never "copy", "paper",
+  "sandbox"), no advice and nothing that implies following makes money; a draft that breaks one is flagged in the
+  owner's preview (`NEVER`).
 - The owner's alerts (`signals/owner_alerts.py`, README "When something breaks"): a Telegram message to the owner
   (`SIGNALS_OWNER_USER`'s connected chat, or `SIGNALS_OWNER_CHAT`) when the disk is 85% full, a page answers 500, or
   trader scoring fails for 30 min (2026-11-02→04: a full volume broke Traders for ~50 hours and nobody knew). Sent

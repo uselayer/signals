@@ -39,7 +39,7 @@ from typing import Any
 import jwt
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from uselayer import Client, Trader, TraderDetail, VenueError, Whales, WhaleTrade
@@ -56,7 +56,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import basket, copying, monitoring, own_trading, owner_alerts, records, us_match, watch, welcome, why
+from signals import basket, copying, monitoring, own_trading, owner_alerts, records, us_match, watch, weekly, welcome, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -117,11 +117,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if LAYER_KEY:  # Polymarket US twins of the International markets, from Layer's matches (us_match)
         threading.Thread(target=us_match.loop, args=(reads.matches, _us_stop), daemon=True).start()
     threading.Thread(target=_monitor_loop, daemon=True).start()  # resources each minute; the day's counts kept
+    threading.Thread(target=_weekly_loop, daemon=True, name="weekly").start()  # the weekly email (off without its keys)
     if CATEGORY_READS_ON:  # recommended traders' realized profit by category, daily, for Traders' category picker
         threading.Thread(target=_categories_loop, daemon=True).start()
     yield
     _category_stop.set()
     _monitor_stop.set()
+    _weekly_stop.set()
     _monitor_flush()  # the last minute's counts
     _us_stop.set()
     _worth_stop.set()
@@ -1701,6 +1703,114 @@ def welcome_check(now: float | None = None) -> dict[str, Any]:
     return welcome.check(
         now, STORE_DIR, users_of=lambda uid: users.get(uid) or {}, activity_of=_welcome_activity, site=SITE, owner_user=OWNER_USER
     )
+
+
+# The weekly "what's new in Signals" email (signals/weekly.py): drafted the afternoon before the send day, previewed to
+# David, and sent to every reader at 9 AM in their time zone only once he approves. Its own thread: a draft waits on
+# the writer up to a few minutes, which the monitor's minute shouldn't.
+_weekly_stop = threading.Event()
+
+
+def _weekly_loop() -> None:
+    while not _weekly_stop.wait(60):
+        try:
+            out = weekly.check(time.time(), STORE_DIR, site=SITE)
+        except Exception as e:  # never the loop's end: the next minute tries again
+            print(f"weekly: the check failed: {type(e).__name__}", flush=True)
+            continue
+        if out and "off" not in out:
+            print(f"weekly: {json.dumps(out, default=str)}", flush=True)
+
+
+def _weekly_issue(issue: str, sig: str) -> tuple[dict[str, Any] | None, HTMLResponse | None]:
+    """The issue an approve link names, or the page that says why it can't be approved."""
+    if not weekly.verify("approve", issue, sig, dict(os.environ)):
+        return None, HTMLResponse(weekly.page("This link isn't valid", "<p>Open the newest preview email and use its button.</p>"), 403)
+    found = weekly.get_issue(STORE_DIR, issue)
+    if not found or not found["draft"]:
+        return None, HTMLResponse(weekly.page("No such issue", "<p>This week's draft was replaced or removed.</p>"), 404)
+    if found["status"] != "drafted":
+        return None, HTMLResponse(weekly.page("Already approved", f"<p>The {weekly.esc(weekly.long_date(issue))} update was approved already. Nothing more to do.</p>"))
+    if weekly.too_late(found, time.time()):
+        return None, HTMLResponse(weekly.page("Too late to send", f"<p>The {weekly.esc(weekly.long_date(issue))} update's day has passed, so nothing was sent.</p>"))
+    return found, None
+
+
+@app.get("/api/weekly/approve")
+def weekly_approve_page(issue: str = "", sig: str = "") -> HTMLResponse:
+    """The "Approve and send" link in David's preview: a button only, so a mail scanner opening the link sends nothing."""
+    found, refused = _weekly_issue(issue, sig)
+    if refused:
+        return refused
+    try:
+        n = len(weekly.readers(STORE_DIR, weekly.clerk_all(CLERK_SECRET), dict(os.environ)))
+        who = f"{n} {'reader' if n == 1 else 'readers'}"
+    except (OSError, ValueError):
+        who = "every reader"
+    action = f"/api/weekly/approve?issue={urllib.parse.quote(issue)}&sig={urllib.parse.quote(sig)}"
+    return HTMLResponse(weekly.page(f'Send "{found["draft"]["subject"]}"?',
+                                    f"<p>It goes to {who} at 9 AM on {weekly.esc(weekly.long_date(issue))}, each in their own "
+                                    f"time zone. You can't undo it once they're scheduled.</p>{weekly.button('Approve and send', action)}"))  # fmt: skip
+
+
+@app.post("/api/weekly/approve")
+def weekly_approve(issue: str = "", sig: str = "") -> HTMLResponse:
+    """Approves the issue (once) and schedules every reader's email; the weekly loop retries any that didn't go."""
+    _, refused = _weekly_issue(issue, sig)
+    if refused:
+        return refused
+    now = time.time()
+    if not weekly.approve(STORE_DIR, issue, now):
+        return HTMLResponse(weekly.page("Already approved", "<p>This update was approved already, so nothing more was sent.</p>"))
+    env = dict(os.environ)
+    if not env.get("RESEND_API_KEY"):
+        return HTMLResponse(weekly.page("Approved, not sent yet", "<p>RESEND_API_KEY isn't set, so nothing can be scheduled. "
+                                        "The emails are scheduled once it is.</p>"), 500)  # fmt: skip
+    try:
+        people = weekly.readers(STORE_DIR, weekly.clerk_all(CLERK_SECRET), env)
+    except (OSError, ValueError):
+        return HTMLResponse(weekly.page("Approved", "<p>Clerk couldn't be read just now, so the emails are scheduled within a few minutes.</p>"))
+    r = weekly.schedule(STORE_DIR, issue, people, welcome.resend_send(env["RESEND_API_KEY"]), now, env, SITE)
+    rest = (f" {r['failed']} couldn't be scheduled yet; they're tried again each minute." if r["failed"] else "") + (
+        f" Resend refused {r['dropped']} {'address' if r['dropped'] == 1 else 'addresses'}." if r["dropped"] else "")
+    return HTMLResponse(weekly.page("Approved", f"<p>Scheduled {r['scheduled']} of {r['total']} emails for 9 AM in each "
+                                    f"reader's time zone.{rest}</p>"))  # fmt: skip
+
+
+def _unsub_ok(u: str, sig: str) -> bool:
+    return weekly.verify("unsubscribe", u, sig, dict(os.environ))
+
+
+@app.get("/api/weekly/unsubscribe")
+def weekly_unsubscribe_page(u: str = "", sig: str = "") -> HTMLResponse:
+    """A button only (a mail scanner opening the link unsubscribes nobody); mail apps' one-click unsubscribe POSTs."""
+    if u == "preview":
+        return HTMLResponse(weekly.page("This is the preview", "<p>In the real email this link unsubscribes the reader.</p>"))
+    if not _unsub_ok(u, sig):
+        return HTMLResponse(weekly.page("This link isn't valid", "<p>Reply to any of David's emails and he'll take you off the list.</p>"), 403)
+    action = f"/api/weekly/unsubscribe?u={urllib.parse.quote(u)}&sig={urllib.parse.quote(sig)}"
+    return HTMLResponse(weekly.page("Unsubscribe from Signals' weekly update?",
+                                    "<p>You'll stop getting the weekly email about what's new in Signals. Your account, the "
+                                    f"traders you follow and your alerts stay as they are.</p>{weekly.button('Unsubscribe', action)}"))  # fmt: skip
+
+
+@app.post("/api/weekly/unsubscribe")
+def weekly_unsubscribe(u: str = "", sig: str = "") -> HTMLResponse:
+    if not _unsub_ok(u, sig):
+        return HTMLResponse(weekly.page("This link isn't valid", "<p>Reply to any of David's emails and he'll take you off the list.</p>"), 403)
+    weekly.unsubscribe(STORE_DIR, u, time.time())
+    return HTMLResponse(weekly.page("You're unsubscribed", "<p>You won't get the weekly update again. Changed your mind? Reply to any of David's emails.</p>"))
+
+
+class WeeklyDraft(BaseModel):
+    notes: str | None = None  # David's notes for the writer this time (else SIGNALS_WEEKLY_NOTES)
+
+
+@app.post("/api/weekly/draft")
+def weekly_draft(req: WeeklyDraft, request: Request) -> dict[str, Any]:
+    """The owner's: draft the next issue now, replacing one not approved yet; a fresh preview follows."""
+    _owner(request)
+    return weekly.check(time.time(), STORE_DIR, site=SITE, force=True, notes=req.notes)
 
 
 @app.post("/api/owner-alerts/test")
@@ -3663,6 +3773,9 @@ def _user(d: dict[str, Any], uid: str) -> dict[str, Any]:
     return u
 
 
+_tz_seen: dict[str, str] = {}  # each account's last time zone kept, so /api/me writes only a change
+
+
 def _private(response: Response) -> None:
     """An answer about one signed-in person: never cached in front of us."""
     response.headers["Cache-Control"] = "private, no-store"
@@ -3709,9 +3822,17 @@ def save_interests(req: Interests, response: Response, uid: str = Depends(signed
 
 
 @app.get("/api/me")
-def me(response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
-    """Who you follow, and whether Telegram alerts are connected."""
+def me(request: Request, response: Response, uid: str = Depends(signed_in)) -> dict[str, Any]:
+    """Who you follow, and whether Telegram alerts are connected. The page sends the browser's time zone with it
+    (``X-Time-Zone``), kept for the weekly email's 9 AM (signals/weekly.py)."""
     _private(response)
+    tz = request.headers.get("x-time-zone")
+    if tz and _tz_seen.get(uid) != tz:
+        try:
+            weekly.remember_tz(STORE_DIR, uid, tz)
+            _tz_seen[uid] = tz
+        except sqlite3.Error:
+            pass
     return _me_view(_load_follows()["users"].get(uid) or {})
 
 

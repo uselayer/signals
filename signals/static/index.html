@@ -1623,7 +1623,9 @@ function accountIs(uid) {
 // Who you follow (/api/me). A failure is kept, so Following shows it with "Try again", never loading forever.
 async function readMe() {
   if (!signedIn()) { Object.assign(auth, { me: null, meErr: null }); return; }
-  try { auth.me = await api("/api/me"); auth.meErr = null; } catch (e) { auth.me = null; auth.meErr = e.message || "Couldn't read your account."; }
+  // the browser's time zone rides along: the weekly email goes out at 9 AM in it (signals/weekly.py)
+  let tz = ""; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { /* no zone: Eastern */ }
+  try { auth.me = await api("/api/me", tz ? { headers: { "x-time-zone": tz } } : {}); auth.meErr = null; } catch (e) { auth.me = null; auth.meErr = e.message || "Couldn't read your account."; }
 }
 
 // Which markets the Feed shows, in one line: "Your markets: Politics, Sports · Change".
