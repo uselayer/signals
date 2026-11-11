@@ -26,9 +26,10 @@ export const KNOWN_V = 2;
 export function groups(feed) {
   const out = [];
   for (const it of feed) {
-    if (it.type === 'ask' && !(it.start && out.length)) { out.push({ ask: it, items: [] }); continue; }
-    if (!out.length) out.push({ ask: null, items: [] });
+    if (it.type === 'ask' && !(it.start && out.length)) { out.push({ ask: it, items: [], askIds: it.ask_id != null ? [it.ask_id] : [] }); continue; }
+    if (!out.length) out.push({ ask: null, items: [], askIds: [] });
     if (it.type !== 'ask') out[out.length - 1].items.push(it);
+    else if (it.ask_id != null) out[out.length - 1].askIds.push(it.ask_id); // a Start's run answers this question
   }
   return out;
 }
@@ -48,7 +49,36 @@ export function runs(gs) {
     if (!out.length || (g.ask && g.ask.proposal) || g.items.some(x => x.type === 'plan')) out.push({ groups: [g] });
     else out[out.length - 1].groups.push(g);
   }
+  for (const r of out) r.askIds = r.groups.flatMap(g => g.askIds || []); // the server's run ids that answered it
   return out;
+}
+
+// One question's windows (owner, 11 Nov: the page mixed every question's windows and added their totals). Each tile
+// keeps the runs that drew it (window.summary `run`); a breakdown with no tagged tile shows them all.
+export function runSummaries(s, r) {
+  if (!r || !s.summaries.some(x => x.asks && x.asks.length)) return s.summaries;
+  const ids = new Set(r.askIds);
+  return s.summaries.filter(x => !(x.asks || []).length || x.asks.some(a => ids.has(a))); // untagged: never hidden
+}
+// A question's plan: the one its column shows, else (the first question) the breakdown's first plan.
+export function planOfRun(s, r, i) {
+  const it = r.groups.flatMap(g => g.items).find(x => x.type === 'plan');
+  return (it ? s.plans[it.plan_id] : i === 0 ? s.plans[s.planOrder[0]] : null) || null;
+}
+
+// The 15-minute windows a plan's scope covers ({from: "9 Nov 2026 11:00 UTC", to: …}), as start times in seconds;
+// null when the range can't be read or is longer than four days.
+const MON = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+const scopeTime = t => {
+  const m = /(\d{1,2}) ([A-Z][a-z]{2})\w* (\d{4}),? (\d{1,2}):(\d{2})/.exec(String(t || ''));
+  return m && MON[m[2]] != null ? Date.UTC(+m[3], MON[m[2]], +m[1], +m[4], +m[5]) / 1000 : null;
+};
+export function scopeSlots(scope) {
+  const a = scope && scopeTime(scope.from), b = scope && scopeTime(scope.to);
+  if (a == null || b == null || b <= a || b - a > 4 * 86400) return null;
+  const out = [];
+  for (let t = Math.ceil(a / 900) * 900; t < b; t += 900) out.push(t);
+  return out.length ? out : null;
 }
 // A run's name: the breakdown's title for the first, else its plan's title, else what was asked.
 export function runTitle(s, r, i) {
@@ -123,6 +153,7 @@ export function apply(s, e, ui) {
       const prop = !!(e.context && e.context.proposal_id);
       const text = e.context && e.context.plan_id ? 'Start the plan' : prop ? yesText(e.text) : (e.text ?? e.question);
       s.running = true; s.done = false; s.starting = false; if (!s.question) s.question = text;
+      if (e.ask_id != null) s.curAsk = e.ask_id; // tiles without a run id (fixtures) belong to the run going on
       // the run's clock: the server's start time (a reload keeps counting from it), its limit, how long runs like it usually take
       s.clock = { start: e.started_at ?? Date.now() / 1000, limit: e.limit_s ?? null, typical: e.typical_s ?? null };
       s.feed = s.feed.filter(x => !x.pending); // the page's own echo of what was sent, now the server's
@@ -167,6 +198,9 @@ export function apply(s, e, ui) {
     case 'window.summary': {
       const i = s.summaries.findIndex(x => x.window_id === e.window_id);
       const row = { ...e }; delete row.type; delete row.seq;
+      // which runs drew it: the event's run; a tile reloaded from /windows (no seq) adds none
+      const tag = e.run ?? (e.seq != null ? s.curAsk : null);
+      row.asks = [...new Set([...((i >= 0 && s.summaries[i].asks) || []), ...(tag != null ? [tag] : [])])];
       if (i >= 0) s.summaries[i] = row; else s.summaries.push(row);
       s.summaries.sort((a, b) => a.start - b.start);
       break;

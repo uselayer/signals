@@ -5,7 +5,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser } from './api.js';
 import { fixtureApi } from './fixtures.js';
-import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan } from './store.js';
+import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, planOfRun } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
@@ -229,7 +229,7 @@ function Investigation({ api, id }) {
   // in the column, the agent shows as starting, and the server's own ask.started replaces both.
   const sending = (text, extra) => { if (text != null) inv.feed.push({ type: 'ask', text, pending: true, ...extra }); inv.starting = true; ui.tab = 'findings'; };
   // A new run (an accepted next step, a plan's Start): the workspace moves to its plan, not the last run's chart.
-  const toPlan = () => { ui.stage = 'plan'; ui.followAgent = true; ui.hl = null; };
+  const toPlan = () => { ui.stage = 'plan'; ui.followAgent = true; ui.hl = null; ui.runView = null; };
   const act = {
     scopeOpts: st.current.scope,
     other: st.current.other || null,
@@ -266,6 +266,14 @@ function Investigation({ api, id }) {
     highlight: f => { const ev = f.evidence || {}, sup = ev.supporting_window_ids || ev.supporting || [], ag = ev.against_window_ids || ev.against || []; ui.hl = { label: `${f.stat ? f.stat.text : ''} · ${f.title}`, match: new Set(sup), base: new Set([...sup, ...ag]) }; ui.stage = 'windows'; redraw(); },
     clearHl: () => { ui.hl = null; redraw(); },
     filter: k => { ui.wf = k; redraw(); },
+    // the question switcher: an earlier question (its windows, else its plan), or back to the new one (the agent moves
+    // the view again from there)
+    viewRun: (i, n) => {
+      const last = i === n - 1, r = runs(groups(inv.feed))[i];
+      ui.runView = last ? null : i; ui.followAgent = last; ui.hl = null; ui.wf = null; ui.pop = null;
+      ui.stage = !last && r && runSummaries(inv, r).length ? 'windows' : last && inv.running ? 'plan' : last && inv.summaries.length ? 'windows' : 'plan';
+      redraw();
+    },
   };
 
   // The wallet's Signals record (the trader page's: every Polymarket position, not just these windows), read once
@@ -283,20 +291,31 @@ function Investigation({ api, id }) {
       <div class="head"><div class="muted small"><a href="#/">Breakdowns</a> /</div><h1>Opening this breakdown…</h1></div>
       <div class="plan"><div style="display:flex;gap:12px"><span class="dot live"></span><div><h3>Loading its plan, windows and findings</h3><p class="muted small">Nothing is re-run: this is the saved breakdown.</p></div></div></div>
     </section></div>`;
-  const totalProfit = inv.summaries.reduce((s, x) => s + (x.profit || 0), 0);
-  const rs = runs(groups(inv.feed)); // more than one: the header says which run the workspace is on
+  // More than one question (owner, 11 Nov): the workspace shows one at a time, the new one unless an earlier one is
+  // picked in the switcher; its windows, total and plan only, never every question's added together.
+  const rs = runs(groups(inv.feed)), many = rs.length > 1;
+  const idx = many && ui.runView != null && ui.runView < rs.length - 1 ? ui.runView : rs.length - 1, past = many && idx < rs.length - 1;
+  const vsum = many ? runSummaries(inv, rs[idx]) : inv.summaries;
+  const vinv = many ? { ...inv, summaries: vsum } : inv;
+  const vplan = past ? planOfRun(inv, rs[idx], idx) : currentPlan(inv);
+  const totalProfit = vsum.reduce((s, x) => s + (x.profit || 0), 0);
   const cp = currentPlan(inv), runWaits = cp && (cp.status === 'proposed' || cp.status === 'queued') ? cp.status : null;
-  const tabs = [['plan', 'Plan and data'], ['windows', `Windows${inv.summaries.length ? ' · ' + inv.summaries.length : ''}`]];
-  if (cur && cur.id) tabs.push(['window', `Window: ${windowLabel(cur.start, cur.start + cur.end).replace(' UTC', '')}`], ['trades', `Fills · ${cur.trades.length}`]);
+  const tabs = [['plan', 'Plan and data'], ['windows', `Windows${vsum.length ? ' · ' + vsum.length : ''}`]];
+  // the Window and Fills tabs only for a window of the question shown
+  if (cur && cur.id && (!many || vsum.some(s => s.window_id === cur.id))) tabs.push(['window', `Window: ${windowLabel(cur.start, cur.start + cur.end).replace(' UTC', '')}`], ['trades', `Fills · ${cur.trades.length}`]);
   return html`<div class="inv">
     <section class="main" aria-label="Workspace">
       <div class="head">
         <div class="muted small"><a href="#/">Breakdowns</a> /</div>
         <h1>${shortWallets(inv.title) || 'Breakdown'}</h1>
-        ${rs.length > 1 && html`<p class="nowrun"><span class=${'dot ' + (inv.running || inv.starting ? 'live' : runWaits ? '' : 'ok')}></span><span><b>Now:</b> ${shortWallets(runTitle(inv, rs[rs.length - 1], rs.length - 1))}</span>
-          <span class="muted small">${inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for you to press Start' : 'done'} · earlier questions are folded in the agent's column</span></p>`}
+        ${many && html`<div class="qruns" role="group" aria-label="Your questions"><span class="lbl">Your questions</span>
+          ${rs.map((r, i) => { const last = i === rs.length - 1;
+            const stt = !last ? 'done' : inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for Start' : 'done';
+            return html`<button class="qrun" key=${i} aria-pressed=${i === idx ? 'true' : 'false'} title=${runTitle(inv, r, i)} onClick=${() => act.viewRun(i, rs.length)}>
+              <span class="qt">${shortWallets(runTitle(inv, r, i))}</span><span class=${'st' + (stt === 'working' ? ' live' : '')}>${stt}</span></button>`; })}</div>`}
+        ${past && html`<div class="banner"><span>You're looking at an earlier question. It's finished and won't change.</span><button class="link" onClick=${() => act.viewRun(rs.length - 1, rs.length)}>Back to the new question →</button></div>`}
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}<span>BTC Up or Down 15m</span>
-          ${inv.summaries.length > 0 && html`<span>· ${plural(inv.summaries.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills</span>`}
+          ${vsum.length > 0 && html`<span>· ${plural(vsum.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills${!past && inv.running ? ' so far' : ''}</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
         ${rec && html`<${RecordLine} r=${rec} wallet=${wallet} />`}
       </div>
@@ -304,9 +323,9 @@ function Investigation({ api, id }) {
       ${FIXTURES && !SAMPLE && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
       <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}</div>
-      ${ui.stage === 'plan' && html`<${PlanStage} inv=${inv} act=${act} />`}
-      ${ui.stage === 'windows' && html`<${WindowsStage} inv=${inv} ui=${ui} act=${act} />`}
-      ${ui.stage === 'window' && html`<${ReplayStage} inv=${inv} ui=${ui} act=${act} w=${cur} steps=${steps} />`}
+      ${ui.stage === 'plan' && html`<${PlanStage} inv=${vinv} act=${act} plan=${vplan} past=${past} />`}
+      ${ui.stage === 'windows' && html`<${WindowsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} />`}
+      ${ui.stage === 'window' && html`<${ReplayStage} inv=${vinv} ui=${ui} act=${act} w=${cur} steps=${steps} />`}
       ${ui.stage === 'trades' && html`<${TradesStage} w=${cur} act=${act} />`}
     </section>
     <${AgentColumn} inv=${inv} ui=${ui} act=${act} fixtures=${!!api.fixtures} />
