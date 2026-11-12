@@ -288,6 +288,9 @@ whale, cap) and `wallet`.
   `telegram rule setup started` (Set my rule), `telegram rule saved` (the setup's last Done; `usd`, `markets`),
   `telegram rule edited` (`field`: usd, cats, skip, delivery), `telegram trader paused` (`hours`) and `telegram trader
   unpaused`, `telegram typed amount invalid` (never what was typed), `telegram rules opened` (`/rules`, `follows`).
+- The owner's own copy (`signals/own_trading.py`): `telegram copy tapped` (`venue`, `filled`, `usd`, `code` when
+  nothing was bought, `buy_now` for "Buy now at …"), `telegram limit order left` (`venue`, `minutes`, `asked`: by a
+  tap, not the setting) and `telegram limit order ended` (`venue`, `bought`, `cancelled`).
 - `telegram stop tapped` ("Stop alerts from …", with the trader), `telegram alerts stopped` (`/stop`, with `follows`),
   `telegram list opened` (`/list`), `telegram alert voted` (`useful`), `telegram chat lost` (blocked or deleted).
 
