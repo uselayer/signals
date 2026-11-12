@@ -437,3 +437,38 @@ def test_a_started_plan_sits_with_its_question_not_under_the_findings() -> None:
     assert "startedPlan(" in js and "'Plan' : 'You started'" in js
     group = js[js.index("function Group(") : js.index("function Item(")]
     assert group.index("started.map") < group.index("answers.map") < group.index("rest.map")
+
+
+def test_a_finished_question_with_no_windows_of_its_own_shows_the_ones_its_findings_read() -> None:
+    """Owner, 11 Nov (screenshot): "I'd check how many seconds after Chainlink…" counted fills in the first question's
+    windows and drew none, so its Windows tab was empty and said "Windows appear here as the agent draws them" under
+    "Done · saved". It now shows the windows its findings name (else the breakdown's), said to be from the earlier
+    question; a finished question with no windows at all says it didn't need any."""
+    got = _page_store(
+        "const s = { summaries: [{ window_id: 'a', asks: [1] }, { window_id: 'b', asks: [1] }],"
+        " findings: { f: { evidence: { supporting_window_ids: ['b'] } }, g: { evidence: {} } } };\n"
+        "const r = (ids, items) => ({ askIds: ids, groups: [{ items }] });\n"
+        "const named = S.borrowedWindows(s, r([9], [{ type: 'finding', id: 'f' }]));\n"
+        "const all = S.borrowedWindows(s, r([9], [{ type: 'finding', id: 'g' }]));\n"
+        "const own = S.borrowedWindows(s, r([1], [{ type: 'finding', id: 'f' }]));\n"
+        "process.stdout.write(JSON.stringify([named.sums.map(x => x.window_id), named.named, all.sums.length, all.named, own]));")
+    assert got == [["b"], True, 2, False, None]
+    views = (STATIC / "js" / "views.js").read_text()
+    assert "This question didn't need windows" in views and "from your earlier question" in views
+    assert "live || inv.starting || !inv.done ? 'Windows appear here as the agent draws them.'" in views
+
+
+def test_an_opened_finding_shows_only_what_is_needed() -> None:
+    """Owner, 11 Nov: "so much text on the screen, we should only show text that are necessary". An opened reading
+    said Inferred twice, "A reading:" in its title, every finding it rests on by name and a five-line "what would
+    change this reading". Now: one tag, no prefix, "Based on N findings" lights those rows, and how it was counted and
+    what would change it are a tap away (flagged text stays in view). The agent is told to keep them short."""
+    js = (STATIC / "js" / "agent.js").read_text()
+    assert "<b>Based on:</b>" not in js and "<b>What would change this reading:</b>" not in js
+    assert "<b>How I counted:</b>" not in js and "const tag = html" not in js  # the row's tag is the only one
+    assert "Based on ${based.length} finding" in js and "What would change this?" in js and "How it was counted" in js
+    assert "untagged(f.title)" in js and "a reading|reading|inferred|observed" in js
+    from signals.research.case import CASE_TOOLS
+
+    desc = next(t for t in CASE_TOOLS if t["name"] == "finding")["description"]
+    assert "at most 20 words" in desc and "never repeat the title or" in desc and "no new numbers" in desc

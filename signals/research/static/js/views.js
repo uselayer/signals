@@ -89,14 +89,19 @@ export function DayStrip({ sums, plan, live, act }) {
 }
 
 // ---------- tiles
-export function WindowsStage({ inv, ui, act, plan, live }) {
+export function WindowsStage({ inv, ui, act, plan, live, borrowed }) {
   const all = inv.summaries;
-  const strip = plan && plan.status !== 'proposed' && plan.status !== 'queued' ? html`<${DayStrip} sums=${all} plan=${plan} live=${!!live} act=${act} />` : null;
-  if (!all.length) return html`<div class="ov">${live && strip}<div class="ghostbox">${inv.winsLoading ? 'Loading its windows…' : 'Windows appear here as the agent draws them.'}</div></div>`;
+  const waits = plan && (plan.status === 'proposed' || plan.status === 'queued');
+  const strip = plan && !waits && !borrowed ? html`<${DayStrip} sums=${all} plan=${plan} live=${!!live} act=${act} />` : null;
+  // the empty box says what's true now: never "appear as the agent draws them" under "Done" (owner, 11 Nov)
+  const empty = inv.winsLoading ? 'Loading its windows…' : waits ? 'Windows appear here once the plan starts.'
+    : live || inv.starting || !inv.done ? 'Windows appear here as the agent draws them.' : "This question didn't need windows. What it found is in the column.";
+  if (!all.length) return html`<div class="ov">${live && strip}<div class="ghostbox">${empty}</div></div>`;
   const hl = ui.hl, n = tally(all), tiles = filterTiles(all, ui.wf), lean = leanLine(buyPoints(all).pts);
   const fl = FILTERS.find(f => f[0] === ui.wf);
   return html`<div class="ov">
     ${strip}
+    ${borrowed && html`<p class="muted small">${borrowed.named ? 'The windows its findings read, from your earlier question.' : 'Windows from your earlier question: this one drew none of its own.'}</p>`}
     ${n.decided > 0 && html`<p class="tally">${lean && html`<b>${lean}</b> `}Made money in <b>${n.made} of ${plural(n.decided, 'window')}</b> (<span class="gain">${signedMoney(n.profitMade)}</span>) and lost money in <b>${n.lostMoney}</b> (<span class="loss">${signedMoney(n.profitLost)}</span>). Bought more of the side that won in ${n.favWon} of ${n.decided}.</p>`}
     <div class="wfilter" role="group" aria-label="Show windows">
       <button class=${!ui.wf ? 'on' : ''} onClick=${() => act.filter(null)}>All · ${all.length}</button>

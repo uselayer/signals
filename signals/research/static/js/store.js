@@ -60,6 +60,16 @@ export function runSummaries(s, r) {
   const ids = new Set(r.askIds);
   return s.summaries.filter(x => !(x.asks || []).length || x.asks.some(a => ids.has(a))); // untagged: never hidden
 }
+// A finished question that drew no windows of its own (owner, 11 Nov: "how many seconds after Chainlink…" counted
+// fills in the first question's windows, and its Windows tab said "Windows appear here as the agent draws them"
+// under "Done"): the windows its findings name, else the breakdown's. Null when it has its own, or none exist.
+export function borrowedWindows(s, r) {
+  if (!r || runSummaries(s, r).length || !s.summaries.length) return null;
+  const ids = new Set(r.groups.flatMap(g => g.items).filter(x => x.type === 'finding').map(x => s.findings[x.id]).filter(Boolean)
+    .flatMap(f => { const ev = f.evidence || {}; return [...(ev.supporting_window_ids || ev.supporting || []), ...(ev.against_window_ids || ev.against || [])]; }));
+  const named = s.summaries.filter(x => ids.has(x.window_id));
+  return { sums: named.length ? named : s.summaries, named: named.length > 0 };
+}
 // A question's plan: the one its column shows, else (the first question) the breakdown's first plan.
 export function planOfRun(s, r, i) {
   const it = r.groups.flatMap(g => g.items).find(x => x.type === 'plan');

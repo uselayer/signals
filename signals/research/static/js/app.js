@@ -5,7 +5,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser } from './api.js';
 import { fixtureApi } from './fixtures.js';
-import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, planOfRun } from './store.js';
+import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
@@ -275,7 +275,7 @@ function Investigation({ api, id }) {
     viewRun: (i, n) => {
       const last = i === n - 1, r = runs(groups(inv.feed))[i];
       ui.runView = last ? null : i; ui.followAgent = last; ui.hl = null; ui.wf = null; ui.pop = null;
-      ui.stage = !last && r && runSummaries(inv, r).length ? 'windows' : last && inv.running ? 'plan' : last && inv.summaries.length ? 'windows' : 'plan';
+      ui.stage = !last && r && (runSummaries(inv, r).length || borrowedWindows(inv, r)) ? 'windows' : last && inv.running ? 'plan' : last && inv.summaries.length ? 'windows' : 'plan';
       redraw();
     },
   };
@@ -299,7 +299,9 @@ function Investigation({ api, id }) {
   // picked in the switcher; its windows, total and plan only, never every question's added together.
   const rs = runs(groups(inv.feed)), many = rs.length > 1;
   const idx = many && ui.runView != null && ui.runView < rs.length - 1 ? ui.runView : rs.length - 1, past = many && idx < rs.length - 1;
-  const vsum = many ? runSummaries(inv, rs[idx]) : inv.summaries;
+  const working = !past && (inv.running || inv.starting);
+  const borrowed = many && !working ? borrowedWindows(inv, rs[idx]) : null; // a finished question with none of its own
+  const vsum = borrowed ? borrowed.sums : many ? runSummaries(inv, rs[idx]) : inv.summaries;
   const vinv = many ? { ...inv, summaries: vsum } : inv;
   const vplan = past ? planOfRun(inv, rs[idx], idx) : currentPlan(inv);
   const totalProfit = vsum.reduce((s, x) => s + (x.profit || 0), 0);
@@ -328,7 +330,7 @@ function Investigation({ api, id }) {
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
       <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}</div>
       ${ui.stage === 'plan' && html`<${PlanStage} inv=${vinv} act=${act} plan=${vplan} past=${past} />`}
-      ${ui.stage === 'windows' && html`<${WindowsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} />`}
+      ${ui.stage === 'windows' && html`<${WindowsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} borrowed=${borrowed} />`}
       ${ui.stage === 'window' && html`<${ReplayStage} inv=${vinv} ui=${ui} act=${act} w=${cur} steps=${steps} />`}
       ${ui.stage === 'trades' && html`<${TradesStage} w=${cur} act=${act} />`}
     </section>
