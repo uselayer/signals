@@ -11,6 +11,13 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
   const feedRef = useRef(), n = inv.feed.length;
   const [open, setOpen] = useState(null); // the one finding opened to its proof
   const [openRuns, setOpenRuns] = useState(() => new Set()); // earlier runs opened again from their folded line
+  const [lit, setLit] = useState(null); // the findings a reading rests on, lit from its "Based on" link
+  const light = ids => {
+    const on = !(lit && ids.every(id => lit.has(id)));
+    setLit(on ? new Set(ids) : null);
+    const el = on && feedRef.current && feedRef.current.querySelector(`[data-fid="${CSS.escape(ids[0])}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  };
   // a new item keeps the latest question in view, its answer on top (not the bottom of a long feed)
   useEffect(() => {
     const el = feedRef.current; if (!el || ui.tab !== 'findings') return;
@@ -31,7 +38,7 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
   const nCards = cur ? runCards(inv, cur) : 0;
   const flip = i => setOpenRuns(s => { const t = new Set(s); if (t.has(i)) t.delete(i); else t.add(i); return t; });
   const lastG = cur && cur.groups[cur.groups.length - 1];
-  const showGroups = (gs, think) => gs.map((g, i) => html`<${Group} key=${i} g=${g} inv=${inv} act=${act} open=${open} toggle=${toggle} think=${think && g === lastG ? thinking(inv, g) : null} />`);
+  const showGroups = (gs, think) => gs.map((g, i) => html`<${Group} key=${i} g=${g} inv=${inv} act=${act} open=${open} toggle=${toggle} lit=${lit} light=${light} think=${think && g === lastG ? thinking(inv, g) : null} />`);
   return html`<aside class="agent" aria-label="The research agent">
     <div class="agent-head"><span class=${'dot ' + (working || inv.starting ? 'live' : inv.done && !waiting ? 'ok' : '')}></span>
       <div><div class="t">Signals agent</div><div class="s">${working ? html`Working · <${RunProgress} inv=${inv} />` : inv.starting ? 'Starting…' : inv.error ? 'Stopped on an error' : queued ? 'Queued · starts when your other breakdown finishes' : waiting ? 'Waiting for you to start the plan' : inv.done ? 'Done · saved' : waitingFor(inv)}</div></div></div>
@@ -57,13 +64,15 @@ const startedPlan = p => !!p && p.status !== 'proposed' && p.status !== 'signin'
 
 // One question: its answer first, then each finding on one line, then what's still running. A proposal isn't
 // here: it's the one next step, above the ask box.
-function Group({ g, inv, act, open, toggle, think }) {
+function Group({ g, inv, act, open, toggle, think, lit, light }) {
   const answers = g.items.filter(x => x.type === 'answer');
   const fs = g.items.filter(x => x.type === 'finding').map(x => inv.findings[x.id]).filter(Boolean);
   const rows = [...fs.filter(f => f.kind !== 'data'), ...fs.filter(f => f.kind === 'data')]; // what's missing last
   // A started plan is what this question set going, so it sits with the question on top (owner, 11 Nov: under the
   // findings, "● Plan started" read as the status while the header said "Done · saved").
-  const started = g.items.filter(x => x.type === 'plan' && startedPlan(inv.plans[x.plan_id])).map(x => inv.plans[x.plan_id]);
+  const same = (a, b) => String(a || '').replace(/\W+/g, ' ').trim().toLowerCase() === String(b || '').replace(/\W+/g, ' ').trim().toLowerCase();
+  const started = g.items.filter(x => x.type === 'plan' && startedPlan(inv.plans[x.plan_id])).map(x => inv.plans[x.plan_id])
+    .filter(p => !(g.ask && same(p.title, g.ask.text))); // a plan named as the question was asked isn't said twice
   const rest = g.items.filter(x => x.type !== 'answer' && x.type !== 'finding' && x.type !== 'proposal' && !(x.type === 'plan' && startedPlan(inv.plans[x.plan_id])));
   return html`<section class="group">
     ${(g.ask || started.length > 0) && html`<p class="asked" title=${[g.ask && g.ask.text, ...started.map(p => p.title)].filter(Boolean).join('\n')}>
@@ -71,7 +80,7 @@ function Group({ g, inv, act, open, toggle, think }) {
       ${started.map(p => html`<span class="clamp" key=${p.plan_id}><span class="muted">${g.ask ? 'Plan' : 'You started'}:</span> ${p.title}</span>`)}</p>`}
     ${answers.map((a, i) => html`<${Answer} key=${i} a=${a} inv=${inv} act=${act} />`)}
     ${rows.length > 0 && html`<div class="frows">${answers.length > 0 && html`<h5>What it found</h5>`}
-      ${rows.map(f => html`<${Finding} key=${f.finding_id} f=${f} inv=${inv} act=${act} open=${open === f.finding_id} toggle=${() => toggle(f)} />`)}</div>`}
+      ${rows.map(f => html`<${Finding} key=${f.finding_id} f=${f} inv=${inv} act=${act} open=${open === f.finding_id} toggle=${() => toggle(f)} lit=${lit} light=${light} />`)}</div>`}
     ${rest.map((it, i) => html`<${Item} key=${i} it=${it} inv=${inv} act=${act} />`)}
     ${think && html`<div class="typing" role="status"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><div><p>${think.text}</p>${think.sub && html`<p class="muted small">${think.sub}</p>`}</div></div>`}
   </section>`;
@@ -92,10 +101,12 @@ function Item({ it, inv, act }) {
 }
 
 // A finding (contract: finding.added/updated) on one line: its title and count, with a tag only when it's a reading
-// (Inferred) or a number failed its check. Opening it shows the proof (how it was counted, what it rests on, what
-// would change it, an example to step through) and lights its windows. A finding whose numbers didn't check out
-// (counts: false) isn't counted.
-function Finding({ f, inv, act, open, toggle }) {
+// (Inferred) or a number failed its check. Opening it shows its one line of detail, its windows and the links to the
+// rest: what it rests on (lights those rows), how it was counted and what would change it, each a tap away (owner,
+// 11 Nov: "so much text on the screen, we should only show text that are necessary"). A finding whose numbers
+// didn't check out (counts: false) isn't counted, and its flagged text stays in view.
+function Finding({ f, inv, act, open, toggle, lit, light }) {
+  const [more, setMore] = useState(null); // 'how' | 'change': the one detail opened
   const inferred = f.label === 'inferred', nc = f.number_check, data = f.kind === 'data';
   const isFlagged = (nc && nc.passed === false) || f.counts === false;
   const ev = f.evidence || {}, sup = new Set(ev.supporting_window_ids || ev.supporting || []);
@@ -107,29 +118,40 @@ function Finding({ f, inv, act, open, toggle }) {
   const ruleLines = (f.rule || '').split('\n').filter(Boolean);
   const count = f.stat && f.stat.count != null && f.stat.out_of != null ? `${f.stat.count.toLocaleString('en-US')} of ${f.stat.out_of.toLocaleString('en-US')}` : null;
   const statText = f.stat && f.stat.text ? f.stat.text : null;
-  const basedOn = (f.based_on || []).map(id => (inv.findings[id] ? inv.findings[id].title : id));
-  const tag = html`<span class=${'tag ' + (inferred ? 'inferred' : 'observed')}>${inferred ? 'Inferred' : 'Observed'}</span>`;
-  return html`<div class=${'frow' + (open ? ' open' : '') + (data ? ' data' : '')}>
+  const based = (f.based_on || []).filter(Boolean);
+  const titleFlags = flagsFor(nc, 'title'), title = titleFlags.length ? f.title : untagged(f.title); // the tag says "a reading"
+  const howFlags = flagsFor(nc, 'rule'), changeFlags = flagsFor(nc, 'would_change_mind');
+  const showHow = !data && ruleLines.length > 0 && (more === 'how' || howFlags.length > 0);
+  const showChange = f.would_change_mind && (more === 'change' || changeFlags.length > 0);
+  const flip = k => setMore(m => (m === k ? null : k));
+  const links = [
+    ex && html`<button class="link" onClick=${() => act.openWin(ex.window_id, ex.step_index ?? ex.step)}>Step through an example</button>`,
+    based.length > 0 && html`<button class="link" aria-pressed=${lit && based.every(id => lit.has(id)) ? 'true' : 'false'} title=${based.map(id => (inv.findings[id] ? inv.findings[id].title : id)).join('\n')} onClick=${() => light(based)}>Based on ${based.length} finding${based.length === 1 ? '' : 's'}</button>`,
+    !data && ruleLines.length > 0 && !howFlags.length && html`<button class="link" aria-expanded=${more === 'how' ? 'true' : 'false'} onClick=${() => flip('how')}>How it was counted</button>`,
+    f.would_change_mind && !changeFlags.length && html`<button class="link" aria-expanded=${more === 'change' ? 'true' : 'false'} onClick=${() => flip('change')}>What would change this?</button>`,
+    isFlagged && html`<button class="link" onClick=${() => act.askFix(f)}>Ask the agent to fix it</button>`,
+    f.history && f.history.length > 0 && html`<span class="check">Rewritten ${f.history.length === 1 ? 'once' : f.history.length + ' times'}</span>`,
+  ].filter(Boolean);
+  return html`<div class=${'frow' + (open ? ' open' : '') + (data ? ' data' : '') + (lit && lit.has(f.finding_id) ? ' lit' : '')} data-fid=${f.finding_id}>
     <button class="fline" aria-expanded=${open ? 'true' : 'false'} onClick=${toggle}>
-      <span class="ft">${flagged(f.title, flagsFor(nc, 'title'))}</span>
+      <span class="ft">${flagged(title, titleFlags)}</span>
       ${isFlagged ? html`<span class="tag flag">Number not verified</span>` : inferred ? html`<span class="tag inferred">Inferred</span>` : f.kind === 'unsure' ? html`<span class="tag plain">Not sure yet</span>` : null}
       ${data ? html`<span class="fs">${ruleLines.length} note${ruleLines.length === 1 ? '' : 's'}</span>` : count && html`<span class="fs">${count}</span>`}
       <span class="chev" aria-hidden="true"></span></button>
     ${open && html`<div class="fbody">
       ${data ? html`<ul>${ruleLines.map(l => html`<li>${l}</li>`)}</ul>` : html`
-        ${!isFlagged && html`<p>${tag} ${statText ? flagged(statText, flagsFor(nc, 'stat')) : ''}${prev ? html` <span class="muted">(was ${prev})</span>` : ''}</p>`}
+        ${!isFlagged && (statText || prev) && html`<p>${statText ? flagged(statText, flagsFor(nc, 'stat')) : ''}${prev ? html` <span class="muted">(was ${prev})</span>` : ''}</p>`}
         ${order.length > 0 && html`<div class="waffle">${order.map(id => html`<button class=${sup.has(id) ? '' : 'no'} title=${id} aria-label=${id} onClick=${() => act.openWin(id)}></button>`)}</div>`}
-        ${f.body && html`<p>${f.body}</p>`}
-        ${ruleLines.length > 0 && html`<p class="muted small"><b>How I counted:</b> ${flagged(f.rule, flagsFor(nc, 'rule'))}</p>`}`}
+        ${f.body && html`<p>${f.body}</p>`}`}
       ${isFlagged && html`<div class="flagnote">${allFlags.length ? `${allFlags.length} number${allFlags.length === 1 ? '' : 's'} didn't match the data the agent read: ${allFlags.map(x => x.value_text).join(', ')}.${allFlags.some(x => x.data_value) ? ` The data shows ${allFlags.filter(x => x.data_value).map(x => x.data_value).join(', ')}.` : ''}` : "Its numbers didn't check out against the data."} Not counted, and nothing inferred rests on it, until it's fixed.</div>`}
-      ${basedOn.length > 0 && html`<p class="muted small"><b>Based on:</b> ${basedOn.join('; ')}.</p>`}
-      ${f.would_change_mind && html`<p class="muted small"><b>What would change this reading:</b> ${flagged(f.would_change_mind, flagsFor(nc, 'would_change_mind'))}</p>`}
-      ${(ex || isFlagged || (f.history && f.history.length > 0)) && html`<div class="acts2">${ex && html`<button class="link" onClick=${() => act.openWin(ex.window_id, ex.step_index ?? ex.step)}>Step through an example</button>`}
-        ${isFlagged && html`<button class="link" onClick=${() => act.askFix(f)}>Ask the agent to fix it</button>`}
-        ${f.history && f.history.length > 0 && html`<span class="check">Rewritten ${f.history.length === 1 ? 'once' : f.history.length + ' times'}</span>`}</div>`}
+      ${links.length > 0 && html`<div class="acts2">${links}</div>`}
+      ${showHow && html`<p class="muted small">${flagged(f.rule, howFlags)}</p>`}
+      ${showChange && html`<p class="muted small">${flagged(f.would_change_mind, changeFlags)}</p>`}
       ${f.sample_note && html`<span class="check">${f.sample_note}</span>`}</div>`}
   </div>`;
 }
+// "A reading: its timing tracks…" under an Inferred tag says it twice: the tag stays, the prefix goes.
+const untagged = t => { const m = /^\s*(?:a reading|reading|inferred|observed)\s*:\s*/i.exec(t || ''); if (!m) return t; const r = t.slice(m[0].length); return r.charAt(0).toUpperCase() + r.slice(1); };
 
 // An answer: structured (label, observed lines, inferred lines) or, when the agent wrote plain text, text whose
 // paragraphs starting "Observed:" / "Inferred:" get their tag. It sits above its question's findings.
