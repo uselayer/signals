@@ -567,14 +567,20 @@ def test_the_api_lists_makers_filters_by_style_and_a_trader_page_carries_its_boa
     assert [(b["place"], b["rank"]) for b in page["boards"]] == [("VOL ALL OVERALL", 40)]
 
 
-STYLE_ROW = ("usd", "pl", "esc", "centsSigned", "ago", "exCount", "exProfit", "exFigures", "exStats", "STYLE", "botBadge", "tier", "TIER", "SEG_ORDER", "exBadges")
+STYLE_ROW = ("usd", "pl", "esc", "centsSigned", "ago", "exCount", "exProfit", "exFigures", "exStats", "STYLE", "isBot", "botBadge", "tier", "TIER", "SEG_ORDER", "exLabel", "exBadges")
 
 
 def test_a_market_makers_row_says_what_they_are_and_what_trading_and_rewards_made_them(run_js: Any) -> None:
     r = '{group: "checked", evidence: "scored", segment: "no_view", style: "arbitrage", bot: 1, trading_pnl_window: -120, income_window: 2400}'
     got = run_js(STYLE_ROW, f"[exStats({r}), exBadges({r})]")
     assert kv(got[0]) == [["Trading profit, 30d", "−$120", None], ["Rewards, 30d", "$2.4K", None], ["Last trade", "unknown", None]]
-    assert got[1] == '<span class="tier t3">Arbitrage</span><span class="tier t2">Bot-like</span>'
+    bot = '<span class="tier t2 bot-tag" title="100 or more trades a day">Bot-like</span>'
+    assert got[1] == f'<span class="tier t3">Arbitrage</span>{bot}'
+    # 13 Nov, user feedback: every tagged wallet, not only market makers; once each, from a record's bot or a score's tags
+    tagged = run_js(STYLE_ROW, '''[{group: "checked", evidence: "scored", segment: "no_edge", bot: 1},
+      {group: "limited", tags: ["bot"]}, {group: "checked", evidence: "scored", segment: "no_edge", bot: 0}, {record: true, bot: 1}]
+      .map((r) => [exBadges(r), botBadge(r)])''')
+    assert [b.count("Bot-like") for b, _ in tagged[:3]] == [1, 1, 0] and tagged[3][1] == bot
     q = run_js(("ex", "exSearching", "exQuery"), """(() => { Object.assign(ex, { group: "checked", price: "fav", pace: 10, bots: "hide" });
       return exQuery(); })()""")
     assert "price=fav" in q and "pace=10" in q and "bots=hide" in q

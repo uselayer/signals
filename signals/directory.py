@@ -103,8 +103,6 @@ SAMPLE_KEEP = 30  # checked bets kept with a score, as the Worth following check
 
 SCORE_DAYS = 30  # the window a score reads, as the Worth following check and a trader page score
 EVIDENCE_DAYS = 90  # how far back a quick check counts buys, so a selective trader's record is kept too
-QUICK_TRADES = 500  # the latest trades a quick check reads: one read (Polymarket's most a page), so a few markets traded
-#                     heavily still reach back past the 30 days instead of cutting the read short
 
 # When a wallet is looked at again, by why it isn't recommended (``next_check_at``).
 # Freshness, one rule for every place a score is shown (Explore, a trader page, the Recommended list): a recommended
@@ -402,6 +400,13 @@ def _complete(period: str) -> str:
     closed = [f"r.closed_{d}d" for d in (90, 30, 7) if d <= days]
     # never NULL (none closed counts as 0), so NOT _complete counts the rows waiting too
     return f"(r.pnl_{period} IS NOT NULL AND r.typical_usd IS NOT NULL AND COALESCE({', '.join(closed)}, 0) >= {BOARD_WIN_MIN})"
+
+
+def bot_tag(record: dict[str, Any] | None, scored: int | None) -> int | None:
+    """Whether a wallet trades like a bot, 1 or 0 (None when nothing says): its record's (``records._bot``, the newer
+    read), else its latest kept score's tag (the wallets table's ``bot``), for a record read before records kept one."""
+    got = (record or {}).get("bot")
+    return int(got) if got is not None else scored
 
 
 def _wilson(k: int | None, n: int | None, z: float = 1.96) -> float | None:
@@ -1456,12 +1461,12 @@ class Directory:
             hidden = 0 if new else con.execute(f"SELECT COUNT(*) {base} AND {_NEW_ACCOUNT}", args).fetchone()[0]
             waiting = 0 if q else con.execute(f"SELECT COUNT(*) {shown} AND NOT {_complete(p)}", args).fetchone()[0]
             rows = con.execute(
-                f"SELECT r.wallet, w.name, COALESCE(w.category, w.seen_category), r.via, r.result {sql} "
+                f"SELECT r.wallet, w.name, COALESCE(w.category, w.seen_category), r.via, w.bot, r.result {sql} "
                 f"ORDER BY {order} DESC NULLS LAST, r.wallet LIMIT ? OFFSET ?", (*args, limit + 1, offset),
             ).fetchall()  # fmt: skip
         out = [(rec := json.loads(zlib.decompress(blob))) | {"wallet": w, "name": name, "category": cat, "via": via,
-                "new_account": (rec.get("weeks_known") or 0) < BOARD_ACCOUNT_WEEKS}
-               for w, name, cat, via, blob in rows[:limit]]  # fmt: skip
+                "new_account": (rec.get("weeks_known") or 0) < BOARD_ACCOUNT_WEEKS, "bot": bot_tag(rec, bot)}
+               for w, name, cat, via, bot, blob in rows[:limit]]  # fmt: skip
         return {"rows": out, "total": total, "more": len(rows) > limit, "new_hidden": hidden, "incomplete": waiting}
 
     def record_counts(self, now: float | None = None) -> dict[str, int]:

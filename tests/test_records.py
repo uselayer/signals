@@ -124,6 +124,21 @@ def test_the_usual_trade_is_where_their_money_goes_not_the_middle_of_their_scrap
     assert records._usual([10.0, 10.0, 10.0]) == 10 and records._usual([]) is None
 
 
+def test_a_record_tags_100_or_more_trades_a_day_bot_like_as_the_sdks_score_does() -> None:
+    """13 Nov, user feedback: show "Bot-like" on every tagged wallet. A read cut at QUICK_TRADES covers only back to its
+    oldest trade, so 500 in 2 days is 250 a day; 500 over 20 days, or a handful in one busy hour, isn't."""
+    cap = records.QUICK_TRADES
+
+    def bot(n: int, span_s: float) -> int:
+        trades = [(NOW - span_s * i / n, True, f"0xm{i}", 10.0) for i in range(n)]
+        return records.build(ProfitHistory([]), positions([]), trades, NOW)["bot"]
+
+    assert bot(cap, 2 * DAY) == 1 and bot(cap, 4.9 * DAY) == 1  # cut short: 250 and ~102 a day
+    assert bot(cap, 20 * DAY) == 0  # cut short at 25 a day
+    assert bot(120, 3600) == 0  # every trade of the 30 days read: 4 a day over the month, as the SDK counts it
+    assert records.build(ProfitHistory([]), positions([]), [], NOW)["bot"] == 0
+
+
 def test_a_record_read_takes_the_profit_history_and_the_completed_positions() -> None:
     asked: list[Any] = []
 
@@ -314,6 +329,18 @@ def test_the_leaderboard_lists_public_traders_active_in_30_days_with_a_few_posit
     d.keep_record(DAN, rec(1000), at=NOW)  # only known because someone searched for them: never listed
     got = d.leaderboard(now=NOW)
     assert [r["wallet"] for r in got["rows"]] == [AMY] and got["total"] == 1
+
+
+def test_each_leaderboard_row_says_whether_they_trade_like_a_bot_from_the_record_else_an_older_score(d: Directory) -> None:
+    d.add([Seen(w, "leaderboard", "PNL MONTH OVERALL") for w in (AMY, BEN, CAL, DAN)])
+    d.keep_record(AMY, rec(500) | {"bot": 1}, at=NOW)
+    d.keep_record(BEN, rec(400) | {"bot": 0}, at=NOW)  # a newer read says not, whatever an old score said
+    d.keep_record(CAL, rec(300), at=NOW)  # read before records kept it: its score's tag
+    d.keep_record(DAN, rec(200), at=NOW)  # neither says
+    with d._db() as con:
+        con.executemany("UPDATE wallets SET bot = ? WHERE wallet = ?", [(1, BEN), (1, CAL)])
+    got = {r["wallet"]: r["bot"] for r in d.leaderboard(now=NOW)["rows"]}
+    assert got == {AMY: 1, BEN: 0, CAL: 1, DAN: None}
 
 
 def test_each_sort_ranks_by_what_they_did_and_a_small_sample_never_tops_a_rate(d: Directory) -> None:
@@ -545,9 +572,10 @@ def test_the_leaderboard_api_pages_the_records_with_each_rows_win_rate(store: An
     busy["periods"]["30d"] |= {"won": None, "closed": None}  # closed more than a record reads in 30 days
     busy["periods"]["90d"] |= {"won": None, "closed": None}
     busy["periods"]["7d"] |= {"won": 40, "closed": 90}
-    d.keep_record(AMY, busy)
+    d.keep_record(AMY, busy | {"bot": 1})
     api = TestClient(engine.app)
     got = api.get("/api/leaderboard?period=30d&sort=profit").json()
     assert got["total"] == 1 and got["rows"][0]["name"] == "amy"
+    assert got["rows"][0]["bot"] == 1  # the row's "Bot-like"
     assert got["rows"][0]["win"] == {"won": 40, "closed": 90, "days": 7}  # the longest period read in full
     assert api.get("/api/leaderboard?sort=skill").status_code == 400

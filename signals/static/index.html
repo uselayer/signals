@@ -398,6 +398,9 @@
   .lb-rank { color: var(--faint); font-size: 14px; }
   .lb-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .lb-who .nm { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lb-nmrow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; } /* a long name keeps its room: the tag goes under it */
+  .lb-nmrow .nm { max-width: 100%; }
+  .lb-nmrow .bot-tag { flex: none; font-size: 11px; padding: 0 6px; }
   .lb-sub { display: block; font-size: 13px; color: var(--muted); white-space: nowrap; }
   /* a trader's main category: an outlined label, neutral like every tag (colour is only for gains and losses) */
   .lb-tag { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; margin-right: 6px; font-size: 12px; font-weight: 500; line-height: 18px; color: var(--fg); }
@@ -2308,7 +2311,7 @@ function renderBoard() {
     const up = s.weeks_up, known = s.weeks_known;
     return `<a class="lb-cols lb-row" href="#/worth/${esc(s.wallet)}">
       <span class="lb-rank">${offset + i + 1}</span>
-      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="nm">${esc(displayName(s.name, s.wallet))}</span><span class="lb-sub">${[s.category, s.last_buy ? `active ${ago(s.last_buy * 1000)}` : "", s.new_account ? "new account" : ""].filter(Boolean).map(esc).join(" · ")}</span></span></span>
+      <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="lb-nmrow"><span class="nm">${esc(displayName(s.name, s.wallet))}</span>${botBadge(s)}</span><span class="lb-sub">${[s.category, s.last_buy ? `active ${ago(s.last_buy * 1000)}` : "", s.new_account ? "new account" : ""].filter(Boolean).map(esc).join(" · ")}</span></span></span>
       <span class="lb-cons">${up == null || !known || !Array.isArray(s.pnl_weeks) ? `<span class="lb-none">—</span>` : `<span class="lb-weeks" aria-hidden="true">${s.pnl_weeks.map((w) => `<i class="${w == null ? "none" : w > 0 ? "up" : w < 0 ? "down" : ""}"></i>`).join("")}</span><span class="lb-sub">${up} of ${known} weeks up</span>`}</span>
       <span class="lb-pnl">${profit == null ? `<span class="lb-none">—</span>` : `<span class="lb-main">${pl(profit, usd(profit, true))}</span><span class="lb-sub">${p.return_per_dollar != null ? `${lbPct(p.return_per_dollar)} per $ traded` : ""}</span><span class="lb-sub">${p.volume != null ? `${usd(p.volume)} traded` : ""}</span>`}</span>
       <span class="lb-trend">${lbSpark(s, days)}</span>
@@ -2454,10 +2457,14 @@ const boardsRow = (boards) => boards?.length ? [{ k: "Leaderboards", v: boards.s
 const foundText = (r) => r.board ? `Found ${boardText(r.board.place, r.board.rank)}` : r.seen_in ? `Seen trading in “${r.seen_in}”`
   : r.first_source === "feed" ? "Seen in the Feed's big trades" : "Found by our checks";
 // The label of a row: what our checks found.
-// A market maker's or an arbitrage trader's style (the SDK's), and "Bot-like" when their score tags them one.
+// A market maker's or an arbitrage trader's style (the SDK's), and "Bot-like" on anyone tagged one: 100+ trades a day,
+// from their record (``records._bot``) or score (the SDK's "bot" tag). A tag, not a verdict. Every place a wallet is
+// named with its record shows it: Explore's rows, the Leaderboard, a trader's page and Watchlist header, Breakdowns.
 const STYLE = { market_maker: "Market maker", arbitrage: "Arbitrage" };
-const botBadge = (r) => r.bot === 1 ? `<span class="tier t2">Bot-like</span>` : "";
-function exBadges(r) {
+const isBot = (r) => r?.bot === 1 || r?.bot === true || (Array.isArray(r?.tags) && r.tags.includes("bot"));
+const botBadge = (r) => isBot(r) ? `<span class="tier t2 bot-tag" title="100 or more trades a day">Bot-like</span>` : "";
+const exBadges = (r) => `${exLabel(r)}${r.segment === "no_view" || r.group === "unchecked" ? "" : botBadge(r)}`;
+function exLabel(r) {
   if (r.segment === "no_view" && r.group !== "unchecked") return `<span class="tier t3">${STYLE[r.style] || "Market maker or arbitrage"}</span>${botBadge(r)}`;
   if (r.group === "unchecked") return `<span class="tier t2">Not checked yet</span>`;
   if (r.group === "passed") return tier(r.segment);
@@ -3189,7 +3196,7 @@ function renderProfile() {
   const foldOpen = $("details.fold", app)?.open; // a redraw keeps "How we measure this" as it was
   app.innerHTML = `${pf.from === "explore" ? `<a class="back" href="#/traders/explore">← Explore</a>` : `<a class="back" href="#/traders">← Traders</a>`}
     <div class="pf-head">${avatar(s.wallet, 64)}
-      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "updated" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}<span id="pfrefresh" class="pf-refresh">${refreshNote() ? ` · ${refreshNote()}` : ""}</span>${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
+      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}${botBadge(s)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "updated" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}<span id="pfrefresh" class="pf-refresh">${refreshNote() ? ` · ${refreshNote()}` : ""}</span>${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div>
         <a class="link" href="#/watch/${esc(s.wallet)}" style="font-size:14px">What they hold and every change they make →</a></div></div>
     <div class="pf-grid">
@@ -3747,7 +3754,7 @@ function renderWatch(force = false) {
   const period = span(d.since * 1000, d.read_at * 1000); // 30 days, or as far back as their last 500 trades go
   app.innerHTML = `${watchBack()}
     <div class="pf-head">${avatar(w, 64)}
-      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1></div>
+      <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${botBadge(s)}</div>
         <div class="pf-tag">Read every 30 seconds · <span id="wtread">updated ${ago(d.read_at * 1000)}</span> · <a class="link" href="#/worth/${esc(w)}">Full profile</a> · ${profileLink(`https://polymarket.com/profile/${w}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(w)}"></div></div></div>
     <div class="wt-tiles">${watchTiles(d, s, wt.cats).map(([k, v, sub]) => `<div class="tile"><span>${esc(k)}</span><b>${v}</b>${sub ? `<small>${sub}</small>` : ""}</div>`).join("")}</div>
