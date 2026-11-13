@@ -39,6 +39,11 @@ HELD_PAGES = 20
 KEEP_DAYS = 95  # positions kept per wallet: the longest period (90 days) and a little more
 FIRST_PAGES = 20  # closed positions on a wallet's first read with nothing kept: up to 1,000, to start further back
 MAX_PAGES = 40  # never more than 2,000 closed positions in one read
+QUICK_TRADES = 500  # the latest trades a quick check reads: one read (Polymarket's most a page), so a few markets traded
+#                     heavily still reach back past the 30 days instead of cutting the read short
+# Bot-like: 100 or more trades a day, the SDK's score's "bot" tag (whale_scores: fills over the 30 days read), worked
+# out from the trades a record already reads, so a wallet never scored is tagged too. It's a tag, never a verdict.
+BOT_TRADES_A_DAY = 100
 MERGE_S = 60  # fills of one market this close together are one trade, as the SDK's score merges them
 DAY = 86400
 
@@ -207,17 +212,30 @@ def _paid(buys: list[tuple[Any, ...]]) -> float | None:
     return round(statistics.fmean(prices), 4) if prices else None
 
 
+def _bot(trades: list[tuple[Any, ...]], now: float) -> int:
+    """1 when their latest trades come to BOT_TRADES_A_DAY or more a day over the 30 days, as the SDK's score tags a
+    bot, else 0. A read cut short at QUICK_TRADES covers only back to its oldest trade, so it's that span's rate; an
+    uncut one has every trade of the 30 days."""
+    month = now - 30 * DAY
+    recent = [t[0] for t in trades if t[0] >= month]
+    cut = len(trades) >= QUICK_TRADES and min(recent, default=month) > month
+    days = max((now - min(recent)) / DAY, 1 / 24) if cut else 30.0
+    return int(len(recent) / days >= BOT_TRADES_A_DAY)
+
+
 def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
     """From their latest trades (``(time, bought, market, dollars)``, newest first, as the quick check reads them,
     optionally with each one's price and outcome after): their usual trade (``_usual``, over 30 days, in dollars),
     new markets a day over the days read (30, or fewer when a busy trader's 500 latest trades reach
-    back less far), the average price they paid over 30 days (``_paid``) and their last buy."""
+    back less far), the average price they paid over 30 days (``_paid``), their last buy and whether they trade like a
+    bot (``_bot``)."""
     month = now - 30 * DAY
     buys = [t for t in trades if t[1] and t[0] >= month]
     usds = _decisions(buys)
     reached = min((t[0] for t in trades), default=now)
     days = max(1.0, (now - max(reached, month)) / DAY) if trades else 30.0
     return {
+        "bot": _bot(trades, now),
         "typical_usd": _usual(usds),
         "buys_30d": len({t[2] for t in buys}),
         "markets_per_day": round(len({t[2] for t in buys}) / days, 2),

@@ -22,7 +22,11 @@ behind Vercel (see README, "Hosting").
   looked at 4 hours ago (`top` in `due`, right after presented traders: `board_top`, the Leaderboard's first
   `SIGNALS_BOARD_FRESH_TOP` (300) by 30-day profit, each market chip's first 100, and every followed trader;
   `SIGNALS_BOARD_FRESH_HOURS`), on the background's budget like the rest (~0.3 reads a second), so a trader's page
-  mostly finds a record under 6 hours old instead of reading one on the spot. Facts only: no tier, no "recommended", nothing about whether they'll make money next. The
+  mostly finds a record under 6 hours old instead of reading one on the spot. Facts only: no tier, no "recommended", nothing about whether they'll make money next.
+  One tag, never a verdict: "Bot-like" (`bot`: 100+ trades a day, the SDK score's rule, worked out by `records._bot`
+  from the trades a record already reads; a record read before it falls back to the wallet's last score tag,
+  `directory.bot_tag`) on every wallet tagged one: the Leaderboard row, a trader's page and Watchlist header, Explore's
+  rows and the Breakdowns header (from `/api/worth`). The
   background reads a record for each wallet instead of the skill test; `SIGNALS_SKILL_TEST=1` brings back the skill
   test, Recommended and Explore as they were. With it off, no verdict reaches anything (`_worth_load` and
   `_stored_score` give nothing, and the once-a-day check doesn't run): the Feed's second part is **Top traders**

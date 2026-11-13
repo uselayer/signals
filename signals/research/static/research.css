@@ -56,6 +56,7 @@ p { margin: 0; }
 .btn.later { border-style: dashed; color: var(--muted); background: transparent; }
 .link { border: 0; background: none; padding: 0; color: var(--accent); font-size: 13.5px; font-weight: 500; text-align: left; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 10px; font-size: 13px; background: var(--soft); white-space: nowrap; }
+.chip.bot { background: transparent; border: 1px solid var(--line); padding: 2px 9px; color: var(--fg); } /* "Bot-like", as the Leaderboard's tag */
 .tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; line-height: 1.35; }
 .tag.observed { background: var(--soft); color: var(--fg); }
 .tag.observed::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--fg); }

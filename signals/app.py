@@ -68,15 +68,16 @@ from signals.directory import (
     LISTED_FRESH_S,
     PACES,
     PRICES,
-    QUICK_TRADES,
     SORTS,
     Directory,
     QuickLook,
     Seen,
+    bot_tag,
     fresh_for,
     from_sighting,
     quick_look,
 )  # fmt: skip
+from signals.records import QUICK_TRADES
 
 HERE = Path(__file__).parent
 STORE_DIR = Path(os.environ.get("SIGNALS_STORE_DIR", Path.home() / ".uselayer" / "signals"))
@@ -2694,7 +2695,8 @@ def record_profile(w: str, rec: dict[str, Any], row: dict[str, Any]) -> dict[str
     """A record in the shape a trader's page reads (a score's names where they mean the same: ``periods``,
     ``pnl_weeks``, ``pnl_daily``, ``worst_drop``, ``typical_usd``, ``stored_at``), with ``record`` True and no tier,
     label, checks or copy status. ``win`` is each period's win rate (``_win_of``), ``paid_30d`` the average price
-    paid on their buys over 30 days: the win rate their prices implied."""
+    paid on their buys over 30 days: the win rate their prices implied. ``bot`` is 1 when they trade like a bot
+    (``bot_tag``: the header's "Bot-like", the Leaderboard's and Breakdowns' too)."""
 
     def iso(t: Any) -> str | None:
         return None if t is None else datetime.fromtimestamp(float(t), UTC).isoformat()
@@ -2710,7 +2712,7 @@ def record_profile(w: str, rec: dict[str, Any], row: dict[str, Any]) -> dict[str
         "pnl_since": iso(rec.get("since")), "pnl_weeks": rec.get("pnl_weeks"), "weeks_up": rec.get("weeks_up"),
         "weeks_known": rec.get("weeks_known"), "pnl_daily": rec.get("pnl_daily"), "worst_drop": rec.get("worst_drop"),
         "typical_usd": rec.get("typical_usd"), "trades_per_day": rec.get("markets_per_day"),
-        "last_buy": iso(rec.get("last_buy")),
+        "last_buy": iso(rec.get("last_buy")), "bot": bot_tag(rec, row.get("bot")),
     }  # fmt: skip
 
 
@@ -2730,7 +2732,7 @@ def leaderboard(period: str = "30d", sort: str = "profit", category: str = "", q
     counts = cached("board:counts", LEADERBOARD_TTL_S, lambda: directory().record_counts())
     rows = [{k: r.get(k) for k in ("wallet", "name", "category", "via", "read_at", "periods", "pnl_weeks", "weeks_up",
                                    "weeks_known", "pnl_daily", "typical_usd", "markets_per_day", "last_buy",
-                                   "positions_complete", "new_account", "paid_30d")}
+                                   "positions_complete", "new_account", "paid_30d", "bot")}
             | {"win": _win_of(r, period)} for r in page["rows"]]  # fmt: skip
     return {"rows": rows, "total": page["total"], "more": page["more"], "offset": offset, "counts": counts,
             "new_hidden": page["new_hidden"], "incomplete": page["incomplete"]}
