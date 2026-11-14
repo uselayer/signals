@@ -239,7 +239,7 @@ def test_shares_sold_without_a_buy_in_the_fills_leave_the_profit_uncounted(monke
     reads.whales._poly.fills = [_act(T0, "sell", "Yes", 0.2, 100, "0xs")]  # its Yes came from a split, not a fill
     store, sid = _store_with_wallet()
     r = workspace.build(store, reads, sid, SLUG)
-    assert r["value"]["profit"] is None and r["coverage"]["bought_before_read"] and not r["coverage"]["fills_complete"]
+    assert r["value"]["profit"] is None and r["coverage"]["shares_not_from_fills"] and not r["coverage"]["fills_complete"]
     assert "splitting dollars" in " ".join(r["coverage"]["notes"])
 
 
@@ -263,7 +263,7 @@ def test_start_tiles_a_market_type_scope_and_says_what_it_left_out(monkeypatch: 
     def fake_build(store: Any, reads: Any, sid: str, slug: str, tags: Any = None) -> dict[str, Any]:
         built.append(slug)
         cov = {"window_id": slug, "kind": "market", "fills_complete": True, "price_step_s": 3600, "outside": "Binance BTCUSDT",
-               "bought_before_read": False, "chainlink": "none", "book": False, "outage": False}  # fmt: skip
+               "shares_not_from_fills": False, "chainlink": "none", "book": False, "outage": False}  # fmt: skip
         return {"kind": "market", "window_id": slug, "coverage": cov}
 
     monkeypatch.setattr(workspace, "build", fake_build)

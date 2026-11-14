@@ -115,7 +115,9 @@ TOOLS: list[dict[str, Any]] = [
             "outside line's close at or before the fill)}] (every fill over the market's whole life), position "
             "[{t, held: {Yes, No}}], hold {from, to, days, still_held}, value {cost, sold_for, held, payout, "
             "value_now, last_prices, profit, profit_kind: resolved | closed (sold out before the end) | open (valued "
-            "at the latest price, not a result)}, coverage {price_step_s, fills_complete, bought_before_read, "
+            "at the latest price, not a result)}, coverage {price_step_s, fills_complete, shares_not_from_fills "
+            "(true: it sold shares no fill shows it buying, e.g. from splitting dollars into both outcomes, so "
+            "profit is null; not missing fills), "
             "outside, outside_step, notes}}. Times are unix seconds."
         ),
         "input_schema": {

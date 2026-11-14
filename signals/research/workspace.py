@@ -414,7 +414,7 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
     coverage = {"window_id": read.get("slug"), "kind": "market", "source": "Polymarket API (uselayer)",
                 "price_step_s": (read.get("coverage") or {}).get("price_step_s"),
                 "price_points": (read.get("coverage") or {}).get("price_points"),
-                "fills_complete": bool(fills_complete and not before), "bought_before_read": before,
+                "fills_complete": bool(fills_complete and not before), "shares_not_from_fills": before,
                 "outside": f"Binance {outside.get('symbol')}" if outside and outside.get("available") else None,
                 "outside_step": (outside or {}).get("step") if outside and outside.get("available") else None,
                 "outside_why": (outside or {}).get("why") if outside and not outside.get("available") else None,
@@ -472,7 +472,7 @@ def market_summary(r: dict[str, Any]) -> dict[str, Any]:
         "profit_note": PROFIT_NOTES[v["profit_kind"]], "held_days": r["hold"]["days"],
         "spark_side": side, "spark": _thin(line),
         "outside_spark": _thin((r.get("outside") or {}).get("points") or []),
-        "coverage": {k: r["coverage"][k] for k in ("kind", "fills_complete", "bought_before_read", "price_step_s",
+        "coverage": {k: r["coverage"][k] for k in ("kind", "fills_complete", "shares_not_from_fills", "price_step_s",
                                                    "outside", "chainlink", "book", "outage")},
     }  # fmt: skip
 

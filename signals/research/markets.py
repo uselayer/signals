@@ -121,7 +121,8 @@ def btc_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
     }[kind]
     k = f"${strike:,.0f}" if strike else "the price in the question"
     return {"kind": kind, "strike": strike, "source": source, "binance": binance,
-            "says": words.format(one="Binance BTCUSDT 1-minute candle's" if binance else f"{source or 'the named source'}'s", k=k)}  # fmt: skip
+            "says": words.format(k=k, one="Binance BTCUSDT 1-minute candle's" if binance
+                                 else f"{source or 'the named source'}'s")}  # fmt: skip
 
 
 def btc_long_matches(slug: str | None, facts: dict[str, Any]) -> bool:
@@ -134,11 +135,13 @@ def btc_long_matches(slug: str | None, facts: dict[str, Any]) -> bool:
 
 
 BTC_LONG_PROMPT = """## Long-dated BTC (market_type btc-long; the unit is a market)
-A market such as "Will Bitcoin reach $X by the end of the year?" or "Will Bitcoin dip to $Y this month?" runs for weeks or months; outcomes are Yes and No, a share pays $1 if its outcome wins, and its price (0 to 1) is \
+A market such as "Will Bitcoin reach $X by the end of the year?" or "Will Bitcoin dip to $Y this month?" runs for \
+weeks or months; outcomes are Yes and No, a share pays $1 if its outcome wins, and its price (0 to 1) is \
 the market's chance. The unit is a market: one market's life for this wallet, from its first buy to its last sell, \
 the resolution, or now. A tile or a market's replay (the market tool) holds every fill the wallet made in that \
 market over its whole life (not only the plan's range), its position after each fill, the market's price at the \
-stated step (coverage.price_step_s: coarser over long spans; never claim timing finer than the step), and Binance BTCUSDT over the same span (candle closes, with each candle's high and low).
+stated step (coverage.price_step_s: coarser over long spans; never claim timing finer than the step), and Binance \
+BTCUSDT over the same span (candle closes, with each candle's high and low).
 What resolves it: read each market's rule (market tool: rule, rules) and say which applies, never assume one for \
 all: rule.kind touch_high means Yes as soon as any Binance BTCUSDT 1-minute candle's High reaches the strike before \
 the end (any moment counts); touch_low the same with a Low at or under it; close_above/close_below means one set \

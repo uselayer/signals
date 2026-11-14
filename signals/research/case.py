@@ -42,14 +42,14 @@ CASE_TOOLS: list[dict[str, Any]] = [
             "always first in a new breakdown, and before a follow-up that widens the scope (more windows, a "
             "longer range, another wallet). After calling it, end your turn without more text. steps: what you'll "
             "do, each with a short id, a title in plain words, its source in plain words ('Polymarket trades', "
-            "'Layer's recorded order books', 'Binance') and estimate_s. scope: {wallet, market_type, from, to}, "
-            "from and to as ISO times in UTC (2026-11-10T05:30:00Z), or to: 'now'. market_type is one of the "
-            "market types (" + ", ".join(f"'{t['id']}': {t['label']}, one tile per {t['unit']}" for t in M.described())
-            + "); for btc-updown-15m you may still write family 'btc-updown-15m'. For a market type whose unit is a "
-            "market, add min_days (only markets that run at least this many days; default "
+            "'Layer's recorded order books', 'Binance') and estimate_s. scope: {wallet, family "
+            "('btc-updown-15m'), from, to}, from and to as ISO times in UTC (2026-11-10T05:30:00Z), or to: 'now'. "
+            "For another market type, give market_type instead of family ("
+            + ", ".join(f"'{t['id']}': {t['label']}" for t in M.described() if t["unit"] == "market")
+            + "; one tile per market), with min_days (only markets that run at least this many days; default "
             + ", ".join(f"{t['min_days']:g} for {t['id']}" for t in M.described() if t["unit"] == "market")
-            + ") and top (how many markets to tile, the most money traded first; default 20), and read back 90 days "
-            "unless asked otherwise. scope_options: choices the user can tick, e.g. "
+            + ") and top (how many markets to tile, the most money traded first; default 20); for these, from is 90 "
+            "days back unless asked otherwise. scope_options: choices the user can tick, e.g. "
             "{id: 'october', text: 'Also look at October with 1-minute prices'}."
         ),
         "input_schema": {

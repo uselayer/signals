@@ -120,7 +120,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     event_title, start (first fill), end (end of the hold), market_end, closed, result, rule, outcomes, entries: [{t,
     side, action, price, shares, usd, outside}], shares: {outcome: bought}, held, cost, sold_for, payout, value_now,
     profit, profit_kind: resolved|closed|open, open, profit_note, held_days, spark_side, spark: [{t, p}],
-    outside_spark, coverage: {kind, fills_complete, bought_before_read, price_step_s, outside, ...}}`. `open`: still
+    outside_spark, coverage: {kind, fills_complete, shares_not_from_fills, price_step_s, outside, ...}}`. `open`: still
     held, valued at the latest price (never counted as made or lost). `profit` null: it sold shares its fills don't
     show it buying (a split or conversion), so it isn't counted.
   - `window.ready` (a market replay) `{kind: "market", window_id, market_type, market_label, title, condition_id,

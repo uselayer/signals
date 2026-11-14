@@ -69,7 +69,7 @@ export function MarketsStage({ inv, ui, act, plan, live, borrowed }) {
         <${MarketSpark} s=${s} />
         <div class="tf"><span>${plural((s.entries || []).length, 'fill')} · held ${s.held_days == null ? '–' : days(s.held_days * 86400)}</span><span class=${s.profit == null ? 'muted' : s.profit >= 0 ? 'gain' : 'loss'}>${s.profit == null ? 'not counted' : signedMoney(s.profit)}${s.open && s.profit != null ? ' open' : ''}</span></div>
         <div class="badges">${rc && html`<span class="badge" title=${(s.rule || {}).says || ''}>${rc}</span>`}${Object.values(s.shares || {}).filter(v => v > 0).length > 1 && html`<span class="badge">both sides</span>`}
-          ${c.fills_complete === false && html`<span class="badge warn" title=${c.bought_before_read ? 'It sold more shares than its fills bought: the rest came some way fills don\'t show, such as splitting dollars into both outcomes' : 'Polymarket listed more fills than one read holds'}>${c.bought_before_read ? 'shares not from fills' : 'fills cut short'}</span>`}</div></button>`;
+          ${c.fills_complete === false && html`<span class="badge warn" title=${c.shares_not_from_fills ? 'It sold more shares than its fills bought: the rest came some way fills don\'t show, such as splitting dollars into both outcomes' : 'Polymarket listed more fills than one read holds'}>${c.shares_not_from_fills ? 'shares not from fills' : 'fills cut short'}</span>`}</div></button>`;
     })}</div></div>`;
 }
 
