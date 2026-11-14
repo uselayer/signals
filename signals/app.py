@@ -115,6 +115,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if TG_TOKEN:  # alerts: the bot's messages (connecting a chat, /list, /stop), and new buys of followed traders
         threading.Thread(target=_bot_loop, daemon=True).start()
         threading.Thread(target=_alert_loop, daemon=True).start()
+        if own_trading.OWN_UID:  # the owner's resting limit orders, read back until each is over
+            threading.Thread(target=_own_loop, daemon=True, name="own-orders").start()
     if LAYER_KEY:  # Polymarket US twins of the International markets, from Layer's matches (us_match)
         threading.Thread(target=us_match.loop, args=(reads.matches, _us_stop), daemon=True).start()
     threading.Thread(target=_monitor_loop, daemon=True).start()  # resources each minute; the day's counts kept
@@ -4472,15 +4474,14 @@ def _on_update(u: dict[str, Any]) -> None:
     if cb:  # a button under an alert: "Useful" / "Not useful", or "Stop alerts from …"
         chat = str(((cb.get("message") or {}).get("chat") or {}).get("id") or "")
         data = str(cb.get("data") or "")
-        ack = _vote(chat, data) if data.startswith("v:") else "Buying…" if data.startswith(("cp:", "cv:")) else None
+        ack = _vote(chat, data) if data.startswith("v:") else OWN_ACKS.get(data[:2]) if data[:3] != "cp:" else "Buying…"
         try:  # quietly: a small note on the tap, no message in the chat
             tg("answerCallbackQuery", callback_query_id=cb.get("id"), **({"text": ack} if ack else {}))
         except RuntimeError:
             pass
-        if chat and data.startswith("cv:") and data.count(":") == 2:  # the owner's Kalshi / Polymarket US copy
+        if chat and data.split(":", 1)[0] in own_trading.TAPS:  # the owner's Kalshi / Polymarket US copy
             mid = (cb.get("message") or {}).get("message_id")
-            _, aid, code = data.split(":")
-            threading.Thread(target=_on_own_copy, args=(chat, aid, code, mid), daemon=True, name="copy").start()
+            threading.Thread(target=_on_own_tap, args=(chat, data, mid), daemon=True, name="copy").start()
             return
         if chat and data.startswith("cp:"):  # "Copy $25" (signals/copying.py): off the bot's loop, an order takes seconds
             mid = (cb.get("message") or {}).get("message_id")
@@ -4644,45 +4645,304 @@ def _chat_owner(chat: str) -> str | None:
     return next((uid for uid, x in _load_follows()["users"].items() if x.get("chat") == chat), None)
 
 
-def _own_offers(uid: str, t: WhaleTrade) -> list[tuple[str, str, str]]:
+def _own_offers(uid: str, t: WhaleTrade, wallet: str | None = None) -> list[dict[str, Any]]:
     """For the owner's own account (own_trading): the Kalshi and Polymarket US markets a buy alert's outcome is
-    verified to match, where they have a key: (venue code, market, side)."""
+    verified to match, where they have a key: the venue code, market and side, with the names the replies to a
+    tap use (the outcome, the market, the trader, the exchange's page)."""
     if not own_trading.on_for(uid):
         return []
-    out: list[tuple[str, str, str]] = []
+    out: list[dict[str, Any]] = []
     k, us = kalshi_of(t.market, t.token, t.outcome), us_of(t.market, t.token, t.outcome)
+    names = {"label": t.outcome, "title": t.title, "trader": _who(wallet) if wallet else None}
     if us and us.get("found") and us.get("market_id") and own_trading.has("u"):
-        out.append(("u", str(us["market_id"]), str(us["side"])))
+        out.append({"code": "u", "market": str(us["market_id"]), "side": str(us["side"]), "url": us.get("url")} | names)
     if k and k.get("found") and k.get("market_id") and own_trading.has("k"):
-        out.append(("k", str(k["market_id"]), str(k["side"])))
+        out.append({"code": "k", "market": str(k["market_id"]), "side": str(k["side"]), "url": k.get("url")} | names)
     return out
 
 
-def _on_own_copy(chat: str, alert_id: str, code: str, message_id: int | None = None) -> None:
-    """A tap on "Copy $25 on Kalshi / Polymarket US" (own_trading): only the owner's account, with their own key."""
+OWN_ACKS = {"cv": "Buying…", "cl": "Leaving a limit order…", "cx": "Cancelling…"}  # the small note on a tap
+OWN_CHECK_S = 20.0  # how often resting limit orders are read back
+OWN_LATE_S = 120.0  # an order still open this long after its time is cancelled here (the exchange should have ended it)
+NO_BUTTONS: dict[str, Any] = {"inline_keyboard": []}
+UNKNOWN = "outcome_unknown"
+
+
+def _own_edit(chat: str, message_id: int | None, text: str, markup: dict[str, Any] | None = None) -> None:
+    """Change one of the bot's replies in place (its buttons too); a new message when it can't be."""
+    if message_id is not None:
+        try:
+            tg("editMessageText", chat_id=chat, message_id=message_id, text=text, parse_mode="HTML",
+               disable_web_page_preview=True, reply_markup=markup or NO_BUTTONS)  # fmt: skip
+            return
+        except RuntimeError:
+            pass
+    _tell(chat, text, markup)
+
+
+def _own_alert_buttons(alert_id: str, change: Callable[[dict[str, Any]], dict[str, Any]]) -> None:
+    """Change the buttons under an alert that was sent (and in its kept body)."""
+    with _db() as con:
+        row = con.execute("SELECT chat, message_id, body FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+        if not row or not row[2]:
+            return
+        msg = json.loads(row[2])
+        msg["markup"] = change(msg.get("markup") or {})
+        con.execute("UPDATE alerts SET body = ? WHERE id = ?", (json.dumps(msg), alert_id))
+    _retick(row[0], row[1], msg["markup"])
+
+
+def _own_try(fn: Callable[..., dict[str, Any]], order: dict[str, Any]) -> dict[str, Any]:
+    """Send an order; anything the venue or the SDK throws is "may have gone through": said plainly, kept."""
+    try:
+        return fn(order, STORE_DIR)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "code": UNKNOWN, "message": type(e).__name__}
+
+
+def _own_check(order: dict[str, Any], *, cancel: bool = False) -> dict[str, Any] | None:
+    try:
+        return own_trading.check(order, STORE_DIR, cancel=cancel)
+    except Exception:  # noqa: BLE001  (couldn't be read: asked again later)
+        return None
+
+
+def _on_own_tap(chat: str, data: str, message_id: int | None = None) -> None:
+    """A tap on one of own_trading's buttons (own_trading.TAPS): only the owner's account, with their own keys."""
+    kind, *args = data.split(":")
     uid = _chat_owner(chat)
+    if kind == "noop":
+        return
+    if not uid or not own_trading.on_for(uid):
+        _tell(chat, "Copying isn't on for your account.")
+        return
+    usd = parse_amount(args[1]) if kind in ("cu", "cj", "ce") and len(args) == 2 else None
+    if kind == "cv" and args:  # "Copy $25" (two parts: an alert from when each exchange had its own button)
+        _on_own_copy(chat, uid, args[0], args[1] if len(args) > 1 else None, message_id)
+    elif kind == "ca" and args:  # "Change amount"
+        with _db() as con:
+            now_usd = own_trading.amount_of(con, args[0], uid)
+        if now_usd is not None:
+            _tell(chat, own_trading.amount_text(now_usd), own_trading.amount_markup(args[0]))
+    elif kind == "cu" and usd is not None and own_trading.valid_usd(usd):  # an amount: for which trades?
+        _own_edit(chat, message_id, own_trading.which_text(usd), own_trading.which_markup(args[0], usd))
+    elif kind == "ct" and args:
+        _typing_start(chat, args[0], "own")
+        _tell(chat, "Send the amount, in dollars. For example 5.")
+    elif kind in ("cj", "ce") and usd is not None:  # "Just this trade" / "Every trade"
+        _own_amount(chat, uid, args[0], usd, message_id, every=kind == "ce")
+    elif kind == "cl" and args:  # "Leave a limit order"
+        _own_rest(chat, uid, args[0], message_id)
+    elif kind == "cx" and args:
+        _own_cancel(chat, uid, args[0])
+    elif kind in ("os", "oa", "om", "oy") and args:
+        _own_setting(chat, uid, kind, args[0], message_id)
+
+
+def _on_own_copy(chat: str, uid: str, alert_id: str, code: str | None, message_id: int | None = None) -> None:
+    """A tap on "Copy $25". A reply says it's buying at once; the exchange with the cheaper seller is chosen
+    (own_trading.choose) and the same reply changes to what was bought, and where. When no one is selling at the top
+    price, a limit order is offered, or left at once when that's the account's setting."""
     reply = {"reply_to_message_id": message_id} if message_id else {}
     try:
         with _db() as con:
-            order = own_trading.claim(con, alert_id, uid or "", code)
+            order = own_trading.claim(con, alert_id, uid, code)
     except copying.CopyError as e:
         _say(chat, html.escape(str(e), quote=False), **reply)
         return
+    status = None
     try:
-        answer = own_trading.place(order, STORE_DIR)
-    except Exception as e:  # noqa: BLE001  (anything the venue or the SDK throws: said plainly, kept)
-        answer = {"ok": False, "code": "outcome_unknown", "message": type(e).__name__}
+        got = _say(chat, own_trading.buying_text(order), **reply)
+        status = got.get("message_id") if isinstance(got, dict) else None
+    except RuntimeError:
+        pass
+    try:
+        order = own_trading.choose(order, STORE_DIR)
+    except Exception:  # noqa: BLE001  (the prices couldn't be compared: the first exchange, as before)
+        pass
+    if order.get("none"):  # neither balance covers it: nothing sent
+        answer: dict[str, Any] = {"ok": False, "code": "no_balance"}
+    else:
+        with _db() as con:
+            own_trading.set_venue(con, order)
+        answer = _own_try(own_trading.place, order)
     with _db() as con:
-        if answer.get("code") == "outcome_unknown":  # may have gone through: counted, never re-sent
+        if answer.get("code") == UNKNOWN:  # may have gone through: counted, never re-sent
             con.execute("UPDATE copy_orders SET state = 'delayed', error = 'outcome_unknown' WHERE alert_id = ?", (alert_id,))
         else:
             copying.record(con, alert_id, answer)
-    ph("telegram copy tapped", uid, {"venue": order["venue"], "filled": bool(answer.get("ok")),
+        left = own_trading.left_today(con, uid)
+    ph("telegram copy tapped", uid, {"venue": order["venue"], "filled": bool(answer.get("ok")), "usd": order["usd"],
+                                     "venues": len(order["choices"]),
                                      "code": None if answer.get("ok") else answer.get("code")} | _alert_facts(alert_id)[1])  # fmt: skip
+    if answer.get("ok"):
+        _own_edit(chat, status, own_trading.bought_text(order, answer, left), own_trading.result_markup(order))
+        _own_alert_buttons(alert_id, lambda m: own_trading.copied(m, alert_id, answer))
+        return
+    if answer.get("code") not in own_trading.NOBODY_SELLING:
+        _own_edit(chat, status, html.escape(own_trading.result_text(order, answer), quote=False),
+                  {"inline_keyboard": [[own_trading.SETTINGS_BUTTON]]})  # fmt: skip
+        return
+    ask = order["ask"] if "ask" in order else own_trading.cheapest(order, STORE_DIR)
+    with _db() as con:
+        own_trading.offer_limit(con, order, chat, status)
+    if order["miss"] == "limit":
+        _own_rest(chat, uid, alert_id, status, by_setting=True)
+    else:
+        _own_edit(chat, status, own_trading.missed_text(order, ask), own_trading.missed_markup(order))
+
+
+def _own_rest(chat: str, uid: str, alert_id: str, message_id: int | None, *, by_setting: bool = False) -> None:
+    """Leave the limit order a miss offered: a tap on "Leave a limit order", or (``by_setting``) at once. After
+    the first one left by a tap, the bot asks once whether to do it every time."""
     try:
-        _say(chat, html.escape(own_trading.result_text(order, answer), quote=False), **reply)
-    except RuntimeError:
-        pass
+        with _db() as con:
+            l = own_trading.claim_limit(con, alert_id, uid)
+            first = own_trading.settings(con, uid)["miss"] is None
+    except copying.CopyError as e:
+        _tell(chat, html.escape(str(e), quote=False))
+        return
+    answer = _own_try(own_trading.place_limit, l)
+    if not answer.get("ok"):
+        with _db() as con:
+            own_trading.settle(con, alert_id, answer, was="placing")
+        text = own_trading.result_text(l, answer).replace("Not bought:", "No limit order:")
+        _own_edit(chat, message_id, html.escape(text, quote=False))
+        return
+    with _db() as con:
+        own_trading.rest(con, alert_id, answer, chat, message_id)
+    ph("telegram limit order left", uid, {"venue": l["venue"], "minutes": l["minutes"], "by_setting": by_setting} | _alert_facts(alert_id)[1])
+    l |= {"chat": chat, "message_id": message_id}
+    over = bool(answer.get("over"))  # it filled at once, or the exchange ended it
+    _own_edit(chat, message_id, own_trading.resting_text(l, by_setting=by_setting), None if over else own_trading.resting_markup(l))
+    if over:
+        _own_ended(l, answer)
+    if first and not by_setting:
+        _tell(chat, own_trading.ALWAYS_TEXT, own_trading.ALWAYS_MARKUP)
+
+
+def _own_ended(l: dict[str, Any], answer: dict[str, Any], *, cancelled: bool = False) -> None:
+    """A limit order is over: said once, in a new message (so the phone buzzes), and its buttons go."""
+    aid = l["alert_id"]
+    with _db() as con:
+        if not own_trading.settle(con, aid, answer):
+            return
+        left = own_trading.left_today(con, l["uid"])
+    bought = float(answer.get("shares") or 0) > 0
+    ph("telegram limit order ended", l["uid"], {"venue": l["venue"], "bought": bought, "cancelled": cancelled} | _alert_facts(aid)[1])
+    _retick(l["chat"], l.get("message_id"), NO_BUTTONS)
+    _tell(l["chat"], own_trading.ended_text(l, answer, left, cancelled=cancelled), own_trading.result_markup(l) if bought else None)
+    if bought:
+        _own_alert_buttons(aid, lambda m: own_trading.copied(m, aid, answer))
+
+
+def _own_cancel(chat: str, uid: str, alert_id: str) -> None:
+    """A tap on "Cancel order"."""
+    with _db() as con:
+        l = own_trading.limit_of(con, alert_id, uid)
+    if not l or l["state"] != "resting":
+        _tell(chat, "That limit order is already over.")
+        return
+    answer = _own_check(l, cancel=True)
+    if answer is None or not answer["over"]:
+        _tell(chat, f"Couldn't cancel it on {l['name']} just now. Tap Cancel order again.")
+        return
+    _own_ended(l, answer, cancelled=True)
+
+
+def _own_amount(chat: str, uid: str, alert_id: str, usd: float, message_id: int | None, *, every: bool) -> None:
+    """An amount picked under "Change amount": for this one trade, or (``every``) the usual one from now on too.
+    Either way the alert's Copy button now says it."""
+    if not own_trading.valid_usd(usd):
+        return
+    with _db() as con:
+        usual = own_trading.settings(con, uid)["usd"]
+        try:
+            own_trading.set_amount(con, alert_id, uid, usd)
+            changed = True
+        except copying.CopyError as e:
+            changed, why = False, str(e)
+        if every:
+            own_trading.save(con, uid, usd=usd)
+    if changed:
+        _own_alert_buttons(alert_id, lambda m: own_trading.with_amount(m, alert_id, usd))
+    says = own_trading.money(usd)
+    if every:
+        _own_edit(chat, message_id, own_trading.usual_saved(usd))
+    elif changed:
+        _own_edit(chat, message_id, f"{says} for this trade. Your usual stays {own_trading.money(usual)}.")
+    else:
+        _own_edit(chat, message_id, html.escape(why, quote=False))
+
+
+def _own_typed(chat: str, uid: str, alert_id: str, flow: str, text: str) -> None:
+    """A typed copy amount: under "Change amount" ("own": then for which trades), or the usual one ("ownusual")."""
+    usd = parse_amount(text)
+    if usd is None or not own_trading.valid_usd(usd):
+        _tell(chat, "That's not an amount I can use. " + own_trading.AMOUNT_RANGE)
+        return
+    _typing_end(chat)
+    if flow == "own":
+        _tell(chat, own_trading.which_text(usd), own_trading.which_markup(alert_id, usd))
+        return
+    with _db() as con:
+        own_trading.save(con, uid, usd=usd)
+    _tell(chat, own_trading.usual_saved(usd))
+
+
+def _own_setting(chat: str, uid: str, kind: str, arg: str, message_id: int | None) -> None:
+    """"Copy settings" and what's in it: open it or one of its two settings (``os``), save the usual amount
+    (``oa``) or what a miss does (``om``); ``oy``: the answer to "Do this every time a copy doesn't fill?"."""
+    if kind == "os":
+        with _db() as con:
+            s = own_trading.settings(con, uid)
+        if arg == "a":
+            _tell(chat, own_trading.usual_text(s), own_trading.usual_markup(s))
+        elif arg == "m":
+            _tell(chat, own_trading.MISS_TEXT, own_trading.miss_markup(s))
+        else:
+            _tell(chat, own_trading.settings_text(s), own_trading.settings_markup())
+    elif kind == "oa" and arg == "t":
+        _typing_start(chat, "", "ownusual")
+        _tell(chat, "Send your usual amount, in dollars. For example 5.")
+    elif kind == "oa":
+        usd = parse_amount(arg)
+        if usd is None or not own_trading.valid_usd(usd):
+            return
+        with _db() as con:
+            s = own_trading.save(con, uid, usd=usd)
+        _retick(chat, message_id, own_trading.usual_markup(s))
+        _tell(chat, own_trading.usual_saved(usd))
+    elif kind in ("om", "oy") and arg in ("a", "l", "0", "1"):
+        with _db() as con:
+            s = own_trading.save(con, uid, miss="limit" if arg in ("l", "1") else "ask")
+        if kind == "oy":
+            _own_edit(chat, message_id, own_trading.miss_saved(s))
+        else:
+            _retick(chat, message_id, own_trading.miss_markup(s))
+            _tell(chat, own_trading.miss_saved(s))
+
+
+def own_pass(now: float | None = None) -> int:
+    """Read every resting limit order back; each one that's over is settled and said. How many ended."""
+    now = time.time() if now is None else now
+    with _db() as con:
+        waiting = own_trading.resting(con)
+    ended = 0
+    for l in waiting:
+        answer = _own_check(l, cancel=now > (l["expires_at"] or 0) + OWN_LATE_S)
+        if answer and answer["over"]:
+            _own_ended(l, answer)
+            ended += 1
+    return ended
+
+
+def _own_loop() -> None:
+    while not _follow_stop.wait(OWN_CHECK_S):
+        try:
+            own_pass()
+        except Exception as e:  # keep checking through a bad round
+            _tg["error"] = f"{type(e).__name__}: {e}"
 
 
 def _on_copy(chat: str, alert_id: str, message_id: int | None = None) -> None:
@@ -4783,6 +5043,7 @@ def _db() -> Iterator[sqlite3.Connection]:
                         con.execute(f"ALTER TABLE alerts ADD COLUMN {col} {kind}")
                 if "buys" not in {r[1] for r in con.execute("PRAGMA table_info(pace)")}:
                     con.execute("ALTER TABLE pace ADD COLUMN buys TEXT")  # each buy's [dollars, price] (_measure_pace)
+                own_trading.migrate(con)  # an offer's amount and names
                 con.execute("CREATE INDEX IF NOT EXISTS alerts_by_state ON alerts (state, next_at)")
                 _db_ready.add(str(alerts_db()))
             yield con
@@ -4812,7 +5073,7 @@ def _sent_today(uid: str, kinds: tuple[str, ...] = COUNTED, trader: str | None =
 
 
 def _keyboard(alert_id: str, stop: str | None = None, text: str = "", copy: bool = False,
-              own: tuple[str, ...] = ()) -> dict[str, Any]:  # fmt: skip
+              own: tuple[str, ...] = (), own_usd: float | None = None) -> dict[str, Any]:  # fmt: skip
     """Under every alert: when it's about one trader you follow (``stop``), "Edit rule" (their alert rule, where
     "Stop alerts from <name>" now is: _on_rule) and "Pause 24 h"; then Useful / Not useful. With signing in from alerts
     on (TG_LOGIN) and a "Check current price" link in the alert's ``text``, that link as a login button first
@@ -4822,13 +5083,16 @@ def _keyboard(alert_id: str, stop: str | None = None, text: str = "", copy: bool
     rows: list[list[dict[str, Any]]] = []
     if copy:
         rows.append([{"text": f"Copy ${copying.COPY_USD:g}", "callback_data": f"cp:{alert_id}"}])
-    for code in own:  # the owner's own Kalshi / Polymarket US copy (signals/own_trading.py)
-        rows.append([own_trading.button(alert_id, code)])
+    if own:  # the owner's own Kalshi / Polymarket US copy (signals/own_trading.py): one button, at their usual amount
+        rows.append([own_trading.button(alert_id, own_usd)])
     if _tg_login_on() and f"/go/{alert_id}/check?" in text:
         rows.append([{"text": "Check current price on Signals", "login_url": {"url": f"{SITE}/tg/in/{alert_id}"}}])
+    amount = [own_trading.amount_button(alert_id)] if own else []  # "Change amount": in the rule's row, no row more
     if stop:
-        rows.append([{"text": "Edit rule", "callback_data": f"re:{stop}"},
+        rows.append([*amount, {"text": "Edit rule", "callback_data": f"re:{stop}"},
                      {"text": "Pause 24 h", "callback_data": f"rp:{stop}"}])  # fmt: skip
+    elif amount:
+        rows.append(amount)
     rows.append([{"text": "Useful", "callback_data": f"v:{alert_id}:1"}, {"text": "Not useful", "callback_data": f"v:{alert_id}:0"}])
     return {"inline_keyboard": rows}
 
@@ -4849,7 +5113,7 @@ RETRY_S = (30.0, 60.0, 120.0, 240.0)  # waits before each try again of a tempora
 def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, trader: str | None = None,
           outcome: str | None = None, trade_at: float | None = None, stop: str | None = None,
           trigger_at: float | None = None, copy: tuple[str, float] | None = None,
-          own: list[tuple[str, str, str]] | None = None,
+          own: list[dict[str, Any]] | None = None,
           on_queue: Callable[[sqlite3.Connection], Any] | None = None) -> str | None:  # fmt: skip
     """Send one alert if today's cap allows it; its id when it went out now, else None (not sent, or sent later by
     a retry). At the cap, the first alert that doesn't fit sends cap_text (the limit, and when alerts resume) instead,
@@ -4884,16 +5148,24 @@ def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, tra
     if copy and copying.on_for(uid):
         with _db() as con:
             can_copy = copying.ready(con, uid)
-    own_codes = tuple(o[0] for o in own or ())
-    body = json.dumps({"text": text, "markup": _keyboard(aid, stop, text, can_copy, own_codes)})
+    own_codes, own_usd = tuple(o["code"] for o in own or ()), None
+    if own and copy:
+        with _db() as con:
+            mine = own_trading.settings(con, uid)
+            own_usd = mine["usd"]
+            if not mine["intro"]:  # the first alert with Copy says what the buttons do, once
+                text += "\n\n" + own_trading.INTRO
+                own_trading.save(con, uid, intro=True)
+    body = json.dumps({"text": text, "markup": _keyboard(aid, stop, text, can_copy, own_codes, own_usd)})
     with _db() as con:
         if on_queue is not None:
             on_queue(con)
         if can_copy and copy:
             copying.offer(con, aid, uid, copy[0], copy[1])
         if own and copy:
-            for code, market, side in own:
-                own_trading.offer(con, aid, uid, code, market, side, copy[1])
+            for o in own:
+                own_trading.offer(con, aid, uid, o["code"], o["market"], o["side"], copy[1], usd=own_usd,
+                                  label=o.get("label"), title=o.get("title"), trader=o.get("trader"), url=o.get("url"))  # fmt: skip
         con.execute("INSERT INTO alerts (id, uid, chat, kind, trader, outcome, message_id, sent_at, trade_at, day,"
                     " trigger_at, state, tries, queued_at, next_at, body) VALUES"
                     " (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)",
@@ -5796,6 +6068,9 @@ def _on_typed(chat: str, text: str) -> None:
     if time.time() - at > TYPING_S or not uid:
         _typing_end(chat)
         return
+    if flow in ("own", "ownusual"):  # a copy amount (own_trading): this one trade's, or the usual one
+        _own_typed(chat, uid, trader, flow, text)
+        return
     usd = parse_amount(text)
     if usd is None:
         count("amount_invalid", uid=uid, trader=trader)
@@ -5962,7 +6237,7 @@ def _deliver(uid: str, chat: str, b: NewBuy, category: str | None, tag: str = ""
         return 1 if aid else 0
     aid = _send(uid, chat, "buy", lambda aid: tag + b.text(aid), trader=b.wallet, outcome=b.outcome, trade_at=b.at,
                 stop=b.wallet, copy=(b.t.token, b.now) if b.t.token and b.now else None,
-                own=_own_offers(uid, b.t))  # fmt: skip
+                own=_own_offers(uid, b.t, b.wallet))  # fmt: skip
     return 1 if aid else 0
 
 
