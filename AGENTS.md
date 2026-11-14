@@ -101,24 +101,25 @@ behind Vercel (see README, "Hosting").
   Developer Agreement allows "a member's own trading"). Never anyone else's exchange keys: Kalshi (Developer Agreement
   §3.2, "Facilitating trading ... by other members") and Polymarket US (Participant Agreement §I.24, credentials
   never shared) forbid it; other people in the US get there only through an exchange partner programme. A buy alert
-  whose outcome has a verified match gets "Copy $25 on Kalshi / Polymarket US"; a tap is an IOC buy at most 3¢
-  above the alert's price, once per alert, at most `SIGNALS_OWN_DAILY_USD` a day; "may have gone through" is said
-  so and never re-sent. A reply says "Buying…" at once and the same message changes to what was bought, with a link
-  to the market on that exchange; the alert's Copy buttons become "Copied · $24.51 at 43¢".
-  The amount (owner, 11 Nov: "sometimes i wanna use $5"): `/copy` in Telegram sets the usual one (`own_settings`;
-  `SIGNALS_OWN_USD` until then), "Other amount" under an alert sets it for that one trade ($5, $10, $50 or typed,
-  from $1 to the day's limit). Each alert keeps the amount its buttons show (`own_offers.usd`): a tap never buys a
-  size the button didn't say, whatever the usual amount became since.
-  When no one is selling at the top price (owner, 11 Nov: "then do a limit order"), `/copy`'s "If it doesn't fill"
-  decides: ask each time (the default: nothing rests in a book without a tap), leave a limit order, or skip. A
-  limit order is the same buy (same contracts, same top price, never more) resting for 15 min, 30 min or 1 hour;
-  the exchange itself ends it then (`expires_at`), and `own_pass` (every `OWN_CHECK_S`) reads it back and says how
-  it ended in a new message: filled, part bought, or nothing bought and the dollars back in the day's limit. It
-  counts in the day's limit while it rests. "Cancel order" ends it sooner; "Buy now at 46¢" is an IOC buy at most
-  the cheapest seller's price the reply showed (read from the exchange's book through the SDK's `client.book`),
-  only on that tap, after cancelling a resting order for the same alert (what that order bought meanwhile is the
-  copy: never both). `/orders` lists what's still waiting. Still one order per alert, never a sell. Not built:
-  "Until the game starts" as a wait, "Keep 30 min more", and a message when the market settles.
+  whose outcome has a verified match on either gets one button, "Copy $25" (owner, 13 Nov: "copy on poly and copy
+  on kalshi, i dont like those 2 buttons"). A tap buys on whichever exchange has the cheaper seller right then
+  (`own_trading.choose`: each one's best ask through the SDK's `client.book`, leaving out one whose balance can't
+  cover the amount; with one match, that one) and the reply names it: "Buying…" at once, then the same message
+  becomes "Bought on Kalshi. …" with the other exchange's price. An IOC buy at most 3¢ above the alert's price, once
+  per alert, at most `SIGNALS_OWN_DAILY_USD` a day; "may have gone through" is said so and never re-sent. The
+  alert's Copy button becomes "Copied · $23.65 at 43¢".
+  No commands (owner, 12 Nov: "hidden commands dont fit"): every choice is a button where it's needed. "Change
+  amount" sits in the alert's "Edit rule / Pause 24 h" row (no row more), then "Just this trade" or "Every trade"
+  ($5, $10, $50 or typed, $1 to the day's limit). Each alert keeps the amount its button shows (`own_offers.usd`):
+  a tap never buys a size the button didn't say. "Copy settings" is under every result (the usual amount, and what
+  a copy that doesn't fill does). The first alert with Copy carries one line saying what the buttons do, once.
+  When no one is selling at the top price (owner, 11 Nov: "then do a limit order"): "Not bought." with one button,
+  "Leave a limit order at 45¢". That is the same buy (same contracts, same top price, never more) resting on that
+  exchange for `SIGNALS_OWN_LIMIT_MIN` (30) minutes; the exchange itself ends it (`expires_at`). The first time,
+  the bot asks "Do this every time a copy doesn't fill?"; until someone says yes, nothing rests without a tap.
+  `own_pass` (every `OWN_CHECK_S`) reads a resting order back and says how it ended in a new message: filled, part
+  bought, or nothing bought and the dollars back in the day's limit. It counts in the day's limit while it rests;
+  "Cancel order" ends it sooner. Still one order per alert, never a sell.
 - "What buying now costs" (`/api/trade/preview`, the page's `costBox`) is on every trade with a market,
   whoever made it: a quote only, never an order. Pricing a trade reads no score, and no copy estimate is shown
   beside it (below). The engine reads everything it

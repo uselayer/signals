@@ -5,22 +5,23 @@ Only the owner's account (SIGNALS_OWN_UID), with the owner's own exchange keys: 
 own account, which both exchanges allow (Kalshi's Developer Agreement: the API is for "a member's own trading").
 It never takes anyone else's exchange keys: both exchanges forbid that (AGENTS.md "Copying a trade").
 
-Under a buy alert whose outcome has a verified match on Kalshi or Polymarket US (us_match), "Copy $25 on Kalshi" /
-"Copy $25 on Polymarket US". A tap sends an IOC buy through the uselayer SDK (live): that many dollars of contracts
-at most COLLAR above the price the alert showed; what doesn't fill at once is cancelled. Never a sell, never without
-a tap, at most OWN_DAILY_USD a UTC day. The engine runs in the US, where both exchanges are open.
+Under a buy alert whose outcome has a verified match on Kalshi or Polymarket US (us_match), one button: "Copy $25"
+(owner, 13 Nov 2026: "copy on poly and copy on kalshi, i dont like those 2 buttons"). A tap buys on whichever of
+the two is cheaper right then (``choose``: each one's cheapest seller, leaving out one whose balance can't cover the
+amount), and the reply names it. The buy is an IOC through the uselayer SDK (live): that many dollars of contracts at
+most COLLAR above the price the alert showed; what doesn't fill at once is cancelled. Never a sell, never without a
+tap, at most OWN_DAILY_USD a UTC day. The engine runs in the US, where both exchanges are open.
 
-The amount (owner, 11 Nov 2026: "sometimes i wanna use $5 not just $25"): the usual one is a setting (/copy, then
-Amount); "Other amount" under an alert changes it for that one trade. Each alert keeps the amount its buttons show,
-so a tap never buys a size the button didn't say.
+Nothing here is a command to remember (owner, 12 Nov 2026: "hidden commands dont fit"): every choice is a button
+where it's needed. The amount (owner, 11 Nov: "sometimes i wanna use $5 not just $25"): "Change amount" under the
+alert, then "Just this trade" or "Every trade". Each alert keeps the amount its button shows, so a tap never buys a
+size the button didn't say. "Copy settings" sits under every result.
 
-When nobody is selling at the top price (owner, 11 Nov 2026: "then do a limit order"), the setting "If it doesn't
-fill" decides: ask each time (the default: nothing rests without a tap), leave a limit order, or skip. A limit order
-is the same buy (same size, same top price) resting in the exchange's book for the minutes chosen; the exchange
-itself ends it then. "Cancel order" ends it sooner; "Buy now at 46¢" buys from the cheapest seller the reply showed,
-at most that price, and only on that tap. ``check`` (the engine's loop) reads a resting order back until it's over
-and the bot says what was bought, if anything. Still one order per alert, still counted in the day's limit while it
-rests.
+When nobody is selling at the top price (owner, 11 Nov 2026: "then do a limit order"), the reply carries "Leave a
+limit order at 45¢": the same buy (same size, same top price) resting in that exchange's book for LIMIT_MIN minutes;
+the exchange itself ends it then. The first time, the bot asks whether to do that every time; "Cancel order" ends
+one sooner. ``check`` (the engine's loop) reads a resting order back until it's over and the bot says what was
+bought, if anything. Still one order per alert, still counted in the day's limit while it rests.
 """
 
 from __future__ import annotations
@@ -38,16 +39,15 @@ from typing import Any
 from signals import copying
 
 OWN_UID = os.environ.get("SIGNALS_OWN_UID", "")
-OWN_USD = float(os.environ.get("SIGNALS_OWN_USD", "25"))  # the usual amount until /copy changes it
+OWN_USD = float(os.environ.get("SIGNALS_OWN_USD", "25"))  # the usual amount until "Every trade" changes it
 OWN_DAILY_USD = float(os.environ.get("SIGNALS_OWN_DAILY_USD", "250"))
-LIMIT_MIN = float(os.environ.get("SIGNALS_OWN_LIMIT_MIN", "30"))  # how long a limit order rests until /copy changes it
+LIMIT_MIN = float(os.environ.get("SIGNALS_OWN_LIMIT_MIN", "30"))  # how long a limit order rests
 MIN_USD = 1.0  # one contract never costs more than 99¢
-AMOUNTS = (5.0, 10.0, 50.0)  # the amounts offered as buttons; "Type it" takes any other
-WAITS = (15.0, 30.0, 60.0)  # minutes a limit order may rest
-MISS = {"l": "limit", "a": "ask", "s": "skip"}  # "If it doesn't fill"
+AMOUNTS = (5.0, 10.0, 50.0)  # the amounts offered as buttons; "Type my own" takes any other
 VENUES = {"k": ("kalshi", "Kalshi"), "u": ("polymarket_us", "Polymarket US")}
 NOBODY_SELLING = ("not_filled", "no_liquidity")  # the misses a limit order answers
-TAPS = ("cv", "ca", "cu", "ct", "cl", "cw", "ck", "cb", "cx", "os", "oa", "om", "ow", "noop")  # this module's buttons
+TAPS = ("cv", "ca", "cu", "ct", "cj", "ce", "cl", "cx", "os", "oa", "om", "oy", "noop")  # this module's buttons
+INTRO = "New: tap Copy to buy this yourself. Tap Change amount first for a different amount."  # once, on the first alert
 _lock = threading.Lock()  # one SDK client at a time on the own-trading store (a tap, a cancel, the loop's check)
 
 SCHEMA = """
@@ -56,9 +56,9 @@ CREATE TABLE IF NOT EXISTS own_offers (alert_id TEXT NOT NULL, code TEXT NOT NUL
   trader TEXT, url TEXT, PRIMARY KEY (alert_id, code));
 CREATE TABLE IF NOT EXISTS own_limits (alert_id TEXT PRIMARY KEY, uid TEXT NOT NULL, code TEXT NOT NULL,
   market TEXT NOT NULL, side TEXT NOT NULL, price REAL NOT NULL, size REAL NOT NULL, usd REAL NOT NULL,
-  minutes REAL NOT NULL, ask REAL, state TEXT NOT NULL, order_id TEXT, chat TEXT, message_id INTEGER,
+  minutes REAL NOT NULL, state TEXT NOT NULL, order_id TEXT, chat TEXT, message_id INTEGER,
   expires_at REAL, at REAL NOT NULL);
-CREATE TABLE IF NOT EXISTS own_settings (uid TEXT PRIMARY KEY, usd REAL, miss TEXT, wait REAL);
+CREATE TABLE IF NOT EXISTS own_settings (uid TEXT PRIMARY KEY, usd REAL, miss TEXT, intro INTEGER NOT NULL DEFAULT 0);
 """
 _OFFER_ADDED = (("usd", "REAL"), ("label", "TEXT"), ("title", "TEXT"), ("trader", "TEXT"), ("url", "TEXT"))
 
@@ -107,22 +107,22 @@ def _e(s: Any) -> str:
     return html.escape(str(s), quote=False)
 
 
-# ---- settings (/copy) ----
+# ---- settings ("Copy settings" under every result) ----
 
 
 def settings(con: sqlite3.Connection, uid: str) -> dict[str, Any]:
-    """The account's copy settings: the usual amount, what a copy that doesn't fill does and how long a limit order
-    waits. Ask each time until they choose otherwise: nothing rests in a book without a tap."""
-    row = con.execute("SELECT usd, miss, wait FROM own_settings WHERE uid = ?", (uid,)).fetchone() or (None, None, None)
+    """The account's copy settings: the usual amount; what a copy that doesn't fill does (``miss``: "ask", "limit",
+    or None while they've never been asked: it asks, as "ask" does); whether the first alert's line was shown."""
+    row = con.execute("SELECT usd, miss, intro FROM own_settings WHERE uid = ?", (uid,)).fetchone() or (None, None, 0)
     return {"usd": float(row[0]) if row[0] and valid_usd(float(row[0])) else min(OWN_USD, OWN_DAILY_USD),
-            "miss": row[1] if row[1] in MISS.values() else "ask",
-            "wait": float(row[2]) if row[2] in WAITS else LIMIT_MIN}  # fmt: skip
+            "miss": row[1] if row[1] in ("ask", "limit") else None, "intro": bool(row[2])}  # fmt: skip
 
 
 def save(con: sqlite3.Connection, uid: str, **changed: Any) -> dict[str, Any]:
-    """Change some settings (``usd``, ``miss``, ``wait``); all of them as they now are."""
+    """Change some settings (``usd``, ``miss``, ``intro``); all of them as they now are."""
     s = settings(con, uid) | changed
-    con.execute("INSERT OR REPLACE INTO own_settings (uid, usd, miss, wait) VALUES (?, ?, ?, ?)", (uid, s["usd"], s["miss"], s["wait"]))
+    con.execute("INSERT OR REPLACE INTO own_settings (uid, usd, miss, intro) VALUES (?, ?, ?, ?)",
+                (uid, s["usd"], s["miss"], int(bool(s["intro"]))))  # fmt: skip
     return s
 
 
@@ -131,17 +131,14 @@ def valid_usd(usd: float) -> bool:
     return MIN_USD <= usd <= OWN_DAILY_USD
 
 
-_MISS_SAYS = {"limit": "leave a limit order", "ask": "ask me each time", "skip": "skip the trade"}
+AMOUNT_RANGE = f"Send a number from {MIN_USD:g} to {OWN_DAILY_USD:g}."
+SETTINGS_BUTTON = {"text": "Copy settings", "callback_data": "os:o"}
 
 
 def settings_text(s: dict[str, Any]) -> str:
-    lines = ["<b>Your copy settings</b>", "Used every time you tap Copy under an alert.", "",
-             f"Amount: {money(s['usd'])} a trade",
-             f"Top price: up to {cents(copying.COLLAR)}¢ above the alert's price",
-             f"If it doesn't fill: {_MISS_SAYS[s['miss']]}"]  # fmt: skip
-    if s["miss"] != "skip":
-        lines.append(f"Limit order waits: {wait_text(s['wait'])}")
-    return "\n".join([*lines, f"Most in a day: {money(OWN_DAILY_USD)}"])
+    return "\n".join(["<b>Your copy settings</b>", f"Amount: {money(s['usd'])} a trade",
+                      f"If a copy doesn't fill: {'leave a limit order' if s['miss'] == 'limit' else 'ask me'}",
+                      f"Top price: {cents(copying.COLLAR)}¢ above the alert's price. Most in a day: {money(OWN_DAILY_USD)}."])  # fmt: skip
 
 
 def settings_markup() -> dict[str, Any]:
@@ -153,69 +150,66 @@ def _ticked(text: str, on: bool) -> str:
     return f"✓ {text}" if on else text
 
 
-def amount_text(s: dict[str, Any]) -> str:
-    return f"<b>Your usual amount?</b>\nEvery Copy button shows this amount. Now {money(s['usd'])}."
+def usual_text(s: dict[str, Any]) -> str:
+    return f"<b>Your usual amount?</b>\nNow {money(s['usd'])}. Smallest is {money(MIN_USD)}."
 
 
-def amount_markup(s: dict[str, Any]) -> dict[str, Any]:
+def usual_markup(s: dict[str, Any]) -> dict[str, Any]:
     row = [{"text": _ticked(money(a), a == s["usd"]), "callback_data": f"oa:{a:g}"} for a in AMOUNTS if valid_usd(a)]
-    return {"inline_keyboard": [[*row, {"text": "Type it", "callback_data": "oa:t"}]]}
+    return {"inline_keyboard": [[*row, {"text": "Type my own", "callback_data": "oa:t"}]]}
 
 
-MISS_TEXT = ("<b>If no one is selling at your top price?</b>\nA limit order waits in the exchange's book at your top "
-             "price. It buys only if a seller comes down to it, and never pays more.")  # fmt: skip
-WAIT_TEXT = "<b>How long should it wait?</b>"
+def usual_saved(usd: float) -> str:
+    return f"{money(usd)} from now on. New alerts' Copy button will say {money(usd)}."
+
+
+MISS_TEXT = (f"<b>If a copy doesn't fill?</b>\nA limit order waits on the exchange at your top price for {wait_text(LIMIT_MIN)}."
+             " It buys only if a seller comes down to it, and never pays more.")  # fmt: skip
+ALWAYS_TEXT = "<b>Do this every time a copy doesn't fill?</b>\nYou can change it later in Copy settings."
+ALWAYS_MARKUP = {"inline_keyboard": [[{"text": "Yes, always", "callback_data": "oy:1"}, {"text": "No, ask me", "callback_data": "oy:0"}]]}
 
 
 def miss_markup(s: dict[str, Any]) -> dict[str, Any]:
-    names = (("l", "Leave a limit order"), ("a", "Ask me each time"), ("s", "Skip the trade"))
-    return {"inline_keyboard": [[{"text": _ticked(t, MISS[k] == s["miss"]), "callback_data": f"om:{k}"}] for k, t in names]}
+    return {"inline_keyboard": [[{"text": _ticked("Ask me", s["miss"] != "limit"), "callback_data": "om:a"},
+                                 {"text": _ticked("Leave a limit order", s["miss"] == "limit"), "callback_data": "om:l"}]]}  # fmt: skip
 
 
-def wait_markup(s: dict[str, Any]) -> dict[str, Any]:
-    return {"inline_keyboard": [[{"text": _ticked(wait_text(w), w == s["wait"]), "callback_data": f"ow:{w:g}"} for w in WAITS]]}
-
-
-def saved_text(s: dict[str, Any]) -> str:
-    """What the settings now do when a copy doesn't fill."""
+def miss_saved(s: dict[str, Any]) -> str:
     if s["miss"] == "limit":
-        does = f"A copy that doesn't fill now becomes a limit order for {wait_text(s['wait'])}."
-    elif s["miss"] == "ask":
-        does = f"When a copy doesn't fill, I'll ask before leaving a limit order ({wait_text(s['wait'])})."
-    else:
-        does = "A copy that doesn't fill is skipped."
-    return f"Saved. {does} Change it any time with /copy."
+        return f"Saved. A copy that doesn't fill now becomes a limit order for {wait_text(LIMIT_MIN)}."
+    return "Saved. When a copy doesn't fill, I'll ask before leaving a limit order."
 
 
 # ---- what an alert offers ----
 
 
-def button(alert_id: str, code: str, usd: float | None = None) -> dict[str, str]:
-    return {"text": f"Copy {money(OWN_USD if usd is None else usd)} on {VENUES[code][1]}", "callback_data": f"cv:{alert_id}:{code}"}
+def button(alert_id: str, usd: float | None = None) -> dict[str, str]:
+    """The one Copy button: which exchange is decided on the tap (``choose``)."""
+    return {"text": f"Copy {money(OWN_USD if usd is None else usd)}", "callback_data": f"cv:{alert_id}"}
 
 
 def amount_button(alert_id: str) -> dict[str, str]:
-    return {"text": "Other amount", "callback_data": f"ca:{alert_id}"}
+    return {"text": "Change amount", "callback_data": f"ca:{alert_id}"}
 
 
 def offer(con: sqlite3.Connection, alert_id: str, uid: str, code: str, market: str, side: str, price: float, *,
           usd: float | None = None, label: str | None = None, title: str | None = None, trader: str | None = None,
           url: str | None = None) -> None:  # fmt: skip
-    """What a Copy button under this alert buys: the market, the price the alert showed and the amount the button
-    says, with the names the replies use (the outcome, the market, who bought it, the exchange's page)."""
+    """One exchange the alert's Copy button may buy on: the market there, the price the alert showed and the amount
+    the button says, with the names the replies use (the outcome, the market, who bought it, the exchange's page)."""
     con.execute("INSERT OR REPLACE INTO own_offers (alert_id, code, uid, market, side, price, at, usd, label, title, trader, url)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (alert_id, code, uid, market, side, price, time.time(), OWN_USD if usd is None else usd, label, title, trader, url))  # fmt: skip
 
 
 def amount_of(con: sqlite3.Connection, alert_id: str, uid: str) -> float | None:
-    """The amount this alert's Copy buttons show; None when it has none for this account."""
+    """The amount this alert's Copy button shows; None when it has none for this account."""
     row = con.execute("SELECT COALESCE(usd, ?) FROM own_offers WHERE alert_id = ? AND uid = ?", (OWN_USD, alert_id, uid)).fetchone()
     return float(row[0]) if row else None
 
 
 def set_amount(con: sqlite3.Connection, alert_id: str, uid: str, usd: float) -> None:
-    """"Other amount": this one trade's amount. CopyError when it can't be changed any more."""
+    """"Change amount": this one trade's amount. CopyError when it can't be changed any more."""
     if not on_for(uid) or amount_of(con, alert_id, uid) is None:
         raise copying.CopyError("This alert can't be copied.")
     if con.execute("SELECT 1 FROM copy_orders WHERE alert_id = ?", (alert_id,)).fetchone():
@@ -225,34 +219,45 @@ def set_amount(con: sqlite3.Connection, alert_id: str, uid: str, usd: float) -> 
     con.execute("UPDATE own_offers SET usd = ? WHERE alert_id = ? AND uid = ?", (usd, alert_id, uid))
 
 
-AMOUNT_RANGE = f"Send a number from {MIN_USD:g} to {OWN_DAILY_USD:g}."
+def amount_text(now_usd: float) -> str:
+    return f"<b>How much?</b>\nNow {money(now_usd)}. Smallest is {money(MIN_USD)}."
 
 
-def trade_amount_text(usual: float) -> str:
-    return f"<b>How much for this trade?</b>\nOnly this one. Your usual stays {money(usual)}. Smallest is {money(MIN_USD)}."
-
-
-def trade_amount_markup(alert_id: str) -> dict[str, Any]:
+def amount_markup(alert_id: str) -> dict[str, Any]:
     row = [{"text": money(a), "callback_data": f"cu:{alert_id}:{a:g}"} for a in AMOUNTS if valid_usd(a)]
-    return {"inline_keyboard": [[*row, {"text": "Type it", "callback_data": f"ct:{alert_id}"}]]}
+    return {"inline_keyboard": [[*row, {"text": "Type my own", "callback_data": f"ct:{alert_id}"}]]}
+
+
+def which_text(usd: float) -> str:
+    return f"<b>{money(usd)} for which trades?</b>"
+
+
+def which_markup(alert_id: str, usd: float) -> dict[str, Any]:
+    return {"inline_keyboard": [[{"text": "Just this trade", "callback_data": f"cj:{alert_id}:{usd:g}"},
+                                 {"text": "Every trade", "callback_data": f"ce:{alert_id}:{usd:g}"}]]}  # fmt: skip
+
+
+def _is_copy(b: dict[str, Any], alert_id: str) -> bool:
+    data = str(b.get("callback_data") or "")
+    return data == f"cv:{alert_id}" or data.startswith(f"cv:{alert_id}:")  # the second: an alert from when each exchange had a button
 
 
 def with_amount(markup: dict[str, Any], alert_id: str, usd: float) -> dict[str, Any]:
-    """An alert's buttons with its Copy buttons saying ``usd``."""
+    """An alert's buttons with its Copy button saying ``usd``."""
     def new(b: dict[str, Any]) -> dict[str, Any]:
-        data = str(b.get("callback_data") or "")
-        return button(alert_id, data.rsplit(":", 1)[1], usd) if data.startswith(f"cv:{alert_id}:") and data[-1] in VENUES else b
+        return b | {"text": str(b["text"]).replace(str(b["text"]).split()[1], money(usd), 1)} if _is_copy(b, alert_id) else b
 
     return {"inline_keyboard": [[new(b) for b in row] for row in markup.get("inline_keyboard") or []]}
 
 
 def copied(markup: dict[str, Any], alert_id: str, answer: dict[str, Any]) -> dict[str, Any]:
-    """An alert's buttons once it was copied: the Copy buttons and "Other amount" give way to what was bought."""
-    mine = (f"cv:{alert_id}:", f"ca:{alert_id}")
-    rows = [row for row in markup.get("inline_keyboard") or []
-            if not any(str(b.get("callback_data") or "").startswith(mine) for b in row)]  # fmt: skip
+    """An alert's buttons once it was copied: Copy and "Change amount" give way to what was bought."""
+    def mine(b: dict[str, Any]) -> bool:
+        return _is_copy(b, alert_id) or b.get("callback_data") == f"ca:{alert_id}"
+
+    rows = [[b for b in row if not mine(b)] for row in markup.get("inline_keyboard") or []]
     done = {"text": f"Copied · ${float(answer.get('spent') or 0):,.2f} at {cents(answer.get('avg') or 0)}¢", "callback_data": "noop"}
-    return {"inline_keyboard": [[done], *rows]}
+    return {"inline_keyboard": [[done], *(r for r in rows if r)]}
 
 
 # ---- a tap on Copy ----
@@ -276,29 +281,45 @@ def _names(con: sqlite3.Connection, alert_id: str, code: str) -> dict[str, Any]:
     return {"alert_price": row[0], "label": row[1] or "it", "title": row[2], "trader": row[3], "url": row[4]}
 
 
-def claim(con: sqlite3.Connection, alert_id: str, uid: str, code: str, now: float | None = None) -> dict[str, Any]:
-    """A tap: the order to send, kept as "placing" first (one copy per alert, whichever venue: never twice).
-    CopyError when there's no such offer, it was copied already, or today's limit is reached."""
+def _venue(code: str, market: str, side: str, url: str | None) -> dict[str, Any]:
+    return {"code": code, "venue": VENUES[code][0], "name": VENUES[code][1], "market": market, "side": side, "url": url}
+
+
+def claim(con: sqlite3.Connection, alert_id: str, uid: str, code: str | None = None, now: float | None = None) -> dict[str, Any]:
+    """A tap: the order to send, kept as "placing" first (one copy per alert, whichever exchange: never twice).
+    ``choices``: the exchanges it may go to (``code``: only that one, a button from when each had its own); the
+    order starts as the first and ``choose`` settles it. CopyError when there's no such offer, it was copied
+    already, or today's limit is reached."""
     now = time.time() if now is None else now
-    if not on_for(uid) or code not in VENUES or not has(code):
+    if not on_for(uid) or (code is not None and code not in VENUES):
         raise copying.CopyError("Copying isn't on for your account.")
-    o = con.execute("SELECT market, side, price, COALESCE(usd, ?) FROM own_offers WHERE alert_id = ? AND code = ? AND uid = ?",
-                    (OWN_USD, alert_id, code, uid)).fetchone()  # fmt: skip
-    if not o:
+    rows = con.execute("SELECT code, market, side, price, COALESCE(usd, ?), url FROM own_offers WHERE alert_id = ? AND uid = ?"
+                       " ORDER BY code DESC", (OWN_USD, alert_id, uid)).fetchall()  # fmt: skip
+    rows = [r for r in rows if has(r[0]) and code in (None, r[0])]
+    if not rows:
         raise copying.CopyError("This alert can't be copied.")
     done = con.execute("SELECT state FROM copy_orders WHERE alert_id = ?", (alert_id,)).fetchone()
     if done:
         raise copying.CopyError("Already copied." if done[0] == "filled" else "You already tapped Copy on this one.")
-    usd = float(o[3])
+    usd = float(rows[0][4])
     if _spent_today(con, uid, now) + usd > OWN_DAILY_USD:
         raise copying.CopyError(f"Not bought: that would pass today's copy limit of ${OWN_DAILY_USD:,.0f}.")
-    cap = copying.max_price(float(o[2]))
+    cap = copying.max_price(float(rows[0][3]))
+    choices = [_venue(r[0], r[1], r[2], r[5]) for r in rows]
     con.execute("INSERT INTO copy_orders (alert_id, uid, token, usd, max_price, state, at) VALUES (?, ?, ?, ?, ?, 'placing', ?)",
-                (alert_id, uid, f"{VENUES[code][0]}:{o[0]}:{o[1]}", usd, cap, now))  # fmt: skip
-    s = settings(con, uid)
-    return {"alert_id": alert_id, "uid": uid, "code": code, "venue": VENUES[code][0], "name": VENUES[code][1],
-            "market": o[0], "side": o[1], "usd": usd, "max_price": cap, "size": math.floor(usd / cap),
-            "miss": s["miss"], "minutes": s["wait"]} | _names(con, alert_id, code)  # fmt: skip
+                (alert_id, uid, _token(choices[0]), usd, cap, now))  # fmt: skip
+    return {"alert_id": alert_id, "uid": uid, "usd": usd, "max_price": cap, "size": math.floor(usd / cap),
+            "miss": settings(con, uid)["miss"], "minutes": LIMIT_MIN, "choices": choices, "others": [],
+            } | _names(con, alert_id, choices[0]["code"]) | choices[0]  # fmt: skip
+
+
+def _token(v: dict[str, Any]) -> str:
+    return f"{v['venue']}:{v['market']}:{v['side']}"
+
+
+def set_venue(con: sqlite3.Connection, order: dict[str, Any]) -> None:
+    """The exchange ``choose`` settled on, kept with the order."""
+    con.execute("UPDATE copy_orders SET token = ? WHERE alert_id = ?", (_token(order), order["alert_id"]))
 
 
 def _client(code: str, store_dir: Path) -> Any:
@@ -311,6 +332,49 @@ def _client(code: str, store_dir: Path) -> Any:
     venue = {"kalshi": Kalshi(key_id=key_id, private_key_pem=secret)} if code == "k" else {
         "polymarket_us": PolymarketUS(key_id=key_id, secret_key=secret)}  # fmt: skip
     return Client(mode="live", store=store_dir / "own-trading", **venue)  # type: ignore[arg-type]
+
+
+def cheapest(order: dict[str, Any], store_dir: Path) -> float | None:
+    """The cheapest price anyone is selling this outcome at on its exchange right now (a read: no order). None when
+    no one is selling, or the book couldn't be read."""
+    try:
+        with _lock, _client(order["code"], store_dir) as client:
+            best = client.book(order["market"], venue=order["venue"]).outcome(order["side"]).best_ask
+    except Exception:  # noqa: BLE001  (a price for the reply: never in the way of saying what happened)
+        return None
+    return float(best.price) if best is not None else None
+
+
+def balance(code: str, store_dir: Path) -> float | None:
+    """The cash in the owner's account on this exchange (a read). None when it couldn't be read."""
+    try:
+        with _lock, _client(code, store_dir) as client:
+            return float(client.balances()[VENUES[code][0]].cash)
+    except Exception:  # noqa: BLE001  (not known: the exchange itself says so if it's short)
+        return None
+
+
+def choose(order: dict[str, Any], store_dir: Path) -> dict[str, Any]:
+    """Which exchange a tap buys on, when the outcome is on both: the one with the cheaper seller right now, leaving
+    out one whose balance can't cover the amount. With one exchange there's nothing to read: it's that one."""
+    if len(order["choices"]) < 2:
+        return order
+    seen = []
+    for c in order["choices"]:
+        cash = balance(c["code"], store_dir)
+        short = cash is not None and cash < order["usd"]
+        seen.append(c | {"short": short, "ask": None if short else cheapest(order | c, store_dir)})
+    return pick(order, seen)
+
+
+def pick(order: dict[str, Any], seen: list[dict[str, Any]]) -> dict[str, Any]:
+    """``choose``'s decision from what was read (each choice with ``ask`` and ``short``): the cheapest seller among
+    the exchanges with the money; ``others``: the rest, for the reply. ``none``: no balance covers it."""
+    able = [s for s in seen if not s["short"]]
+    if not able:
+        return order | {"none": True, "others": seen}
+    best = min(able, key=lambda s: (s["ask"] is None, s["ask"] or 0.0))
+    return order | best | {"others": [s for s in seen if s is not best]}
 
 
 def _bought(o: Any, top: float) -> dict[str, Any]:
@@ -338,35 +402,24 @@ def place(order: dict[str, Any], store_dir: Path) -> dict[str, Any]:
     return {"ok": True} | _bought(o, order["max_price"])
 
 
-def cheapest(order: dict[str, Any], store_dir: Path) -> float | None:
-    """The cheapest price anyone is selling this outcome at on its exchange right now (a read: no order). None when
-    no one is selling, or the book couldn't be read."""
-    try:
-        with _lock, _client(order["code"], store_dir) as client:
-            best = client.book(order["market"], venue=order["venue"]).outcome(order["side"]).best_ask
-    except Exception:  # noqa: BLE001  (a price for the reply: never in the way of saying what happened)
-        return None
-    return float(best.price) if best is not None else None
-
-
 # ---- a limit order after a miss ----
 
-_LIMIT_COLS = "alert_id, uid, code, market, side, price, size, usd, minutes, ask, state, order_id, chat, message_id, expires_at"
+_LIMIT_COLS = "alert_id, uid, code, market, side, price, size, usd, minutes, state, order_id, chat, message_id, expires_at"
 
 
 def _limit(con: sqlite3.Connection, row: tuple[Any, ...]) -> dict[str, Any]:
-    d = dict(zip(("alert_id", "uid", "code", "market", "side", "max_price", "size", "usd", "minutes", "ask", "state",
+    d = dict(zip(("alert_id", "uid", "code", "market", "side", "max_price", "size", "usd", "minutes", "state",
                   "order_id", "chat", "message_id", "expires_at"), row, strict=True))  # fmt: skip
     return d | {"venue": VENUES[d["code"]][0], "name": VENUES[d["code"]][1]} | _names(con, d["alert_id"], d["code"])
 
 
-def offer_limit(con: sqlite3.Connection, order: dict[str, Any], ask: float | None, chat: str, message_id: int | None) -> None:
-    """Nobody was selling at the top price: the same buy is kept, with the cheapest seller the reply shows and
-    where that reply is, to rest as a limit order (or buy from that seller) on a tap."""
-    con.execute("INSERT OR REPLACE INTO own_limits (alert_id, uid, code, market, side, price, size, usd, minutes, ask, state,"
-                " chat, message_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?, ?, ?)",
+def offer_limit(con: sqlite3.Connection, order: dict[str, Any], chat: str, message_id: int | None) -> None:
+    """Nobody was selling at the top price: the same buy is kept, with where its reply is, to rest as a limit
+    order on a tap (or at once, by the setting)."""
+    con.execute("INSERT OR REPLACE INTO own_limits (alert_id, uid, code, market, side, price, size, usd, minutes, state,"
+                " chat, message_id, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offered', ?, ?, ?)",
                 (order["alert_id"], order["uid"], order["code"], order["market"], order["side"], order["max_price"],
-                 order["size"], order["usd"], order["minutes"], ask, chat, message_id, time.time()))  # fmt: skip
+                 order["size"], order["usd"], order["minutes"], chat, message_id, time.time()))  # fmt: skip
 
 
 def limit_of(con: sqlite3.Connection, alert_id: str, uid: str) -> dict[str, Any] | None:
@@ -388,8 +441,7 @@ def claim_limit(con: sqlite3.Connection, alert_id: str, uid: str, now: float | N
             l["state"], "You already tapped this one."))  # fmt: skip
     if _spent_today(con, uid, now) + l["usd"] > OWN_DAILY_USD:
         raise copying.CopyError(f"Not placed: that would pass today's copy limit of ${OWN_DAILY_USD:,.0f}.")
-    l["minutes"] = settings(con, uid)["wait"]
-    con.execute("UPDATE own_limits SET state = 'placing', minutes = ? WHERE alert_id = ?", (l["minutes"], alert_id))
+    con.execute("UPDATE own_limits SET state = 'placing' WHERE alert_id = ?", (alert_id,))
     con.execute("UPDATE copy_orders SET state = 'placing', error = NULL, at = ? WHERE alert_id = ?", (now, alert_id))
     return l
 
@@ -444,8 +496,8 @@ def resting(con: sqlite3.Connection, uid: str | None = None) -> list[dict[str, A
 
 
 def settle(con: sqlite3.Connection, alert_id: str, answer: dict[str, Any], *, was: str = "resting") -> bool:
-    """A limit order (or what stood in for it) is over: what it bought is kept (nothing: the day's limit gets its
-    dollars back). False when someone else (the loop, a cancel tap) settled it first, so it's said once."""
+    """A limit order is over: what it bought is kept (nothing: the day's limit gets its dollars back). False when
+    someone else (the loop, a cancel tap) settled it first, so it's said once."""
     if con.execute("UPDATE own_limits SET state = 'done' WHERE alert_id = ? AND state = ?", (alert_id, was)).rowcount != 1:
         return False
     if answer.get("code") == "outcome_unknown":  # may have gone through: counted, never re-sent
@@ -459,58 +511,25 @@ def settle(con: sqlite3.Connection, alert_id: str, answer: dict[str, Any], *, wa
     return True
 
 
-def skip(con: sqlite3.Connection, alert_id: str, uid: str) -> dict[str, Any] | None:
-    """A tap on "Skip": the offer of a limit order is over. None when there was none to skip."""
-    l = limit_of(con, alert_id, uid)
-    if not l or con.execute("UPDATE own_limits SET state = 'done' WHERE alert_id = ? AND state = 'offered'", (alert_id,)).rowcount != 1:
-        return None
-    return l
-
-
-def claim_now(con: sqlite3.Connection, alert_id: str, uid: str, at_cents: int, now: float | None = None) -> dict[str, Any]:
-    """A tap on "Buy now at 46¢": an IOC buy from the cheapest seller the reply showed, at most that price, kept as
-    "buying" first (``now_price``, ``now_size``). From an offered limit order, or a resting one (``was``: the caller
-    cancels that one first).
-    CopyError when the button is stale, it was tapped already, or today's limit is reached."""
-    now = time.time() if now is None else now
-    if not on_for(uid):
-        raise copying.CopyError("Copying isn't on for your account.")
-    l = limit_of(con, alert_id, uid)
-    if not l or not has(l["code"]) or l["state"] not in ("offered", "resting"):
-        raise copying.CopyError("This one is over." if l and l["state"] == "done" else "You already tapped this one.")
-    if l["ask"] is None or cents(l["ask"]) != at_cents or not 0 < at_cents < 100:
-        raise copying.CopyError("That price is out of date.")
-    if l["state"] == "offered" and _spent_today(con, uid, now) + l["usd"] > OWN_DAILY_USD:
-        raise copying.CopyError(f"Not bought: that would pass today's copy limit of ${OWN_DAILY_USD:,.0f}.")
-    con.execute("UPDATE own_limits SET state = 'buying' WHERE alert_id = ?", (alert_id,))
-    con.execute("UPDATE copy_orders SET state = 'placing', error = NULL, at = ? WHERE alert_id = ?", (now, alert_id))
-    return l | {"was": l["state"], "now_price": at_cents / 100, "now_size": math.floor(l["usd"] / (at_cents / 100))}
-
-
-def unclaim_now(con: sqlite3.Connection, alert_id: str, was: str) -> None:
-    """"Buy now" couldn't start (the resting order couldn't be cancelled): everything as it was."""
-    con.execute("UPDATE own_limits SET state = ? WHERE alert_id = ? AND state = 'buying'", (was, alert_id))
-    con.execute("UPDATE copy_orders SET state = ? WHERE alert_id = ?", ("resting" if was == "resting" else "missed", alert_id))
-
-
-def reoffer(con: sqlite3.Connection, alert_id: str, ask: float | None, message_id: int | None) -> None:
-    """"Buy now" bought nothing (that seller was gone): the limit order is offered again, with the cheapest seller now."""
-    con.execute("UPDATE own_limits SET state = 'offered', ask = ?, order_id = NULL, expires_at = NULL,"
-                " message_id = COALESCE(?, message_id) WHERE alert_id = ? AND state = 'buying'", (ask, message_id, alert_id))  # fmt: skip
-    con.execute("UPDATE copy_orders SET state = 'missed', error = 'not_filled' WHERE alert_id = ?", (alert_id,))
-
-
 # ---- what the bot says ----
 
 
 def buying_text(order: dict[str, Any]) -> str:
-    return (f"Buying {money(order['usd'])} of <b>{_e(order['label'])}</b> on {order['name']} at {cents(order['max_price'])}¢"
-            " or less. One second…")  # fmt: skip
+    what, top = f"Buying {money(order['usd'])} of <b>{_e(order['label'])}</b>", cents(order["max_price"])
+    if len(order["choices"]) > 1:
+        names = " and ".join(c["name"] for c in order["choices"])
+        return f"{what} at {top}¢ or less, on whichever of {names} is cheaper. One second…"
+    return f"{what} on {order['name']} at {top}¢ or less. One second…"
 
 
 def _theirs(order: dict[str, Any], left: float | None) -> str:
-    """The second line of a buy: what the trader paid, and what's left of the day."""
+    """The second line of a buy: the other exchange's price, what the trader paid, and what's left of the day."""
     parts = []
+    for o in order.get("others") or []:
+        if o.get("short"):
+            parts.append(f"{o['name']} left out: your balance there is under {money(order['usd'])}.")
+        elif o.get("ask") is not None:
+            parts.append(f"{o['name']} was at {cents(o['ask'])}¢.")
     if order.get("trader") and order.get("alert_price"):
         parts.append(f"{_e(order['trader'])} paid {cents(order['alert_price'])}¢.")
     if left is not None:
@@ -519,51 +538,57 @@ def _theirs(order: dict[str, Any], left: float | None) -> str:
 
 
 def _what(order: dict[str, Any], a: dict[str, Any]) -> str:
-    return (f"${float(a.get('spent') or 0):,.2f} of {_e(order['label'])} at {cents(a.get('avg') or order['max_price'])}¢"
-            f" on {order['name']}")  # fmt: skip
+    return f"${float(a.get('spent') or 0):,.2f} of {_e(order['label'])} at {cents(a.get('avg') or order['max_price'])}¢"
 
 
 def bought_text(order: dict[str, Any], answer: dict[str, Any], left: float | None = None) -> str:
-    return f"<b>Bought.</b> {_what(order, answer)} ({float(answer['shares']):,.0f} contracts).{_theirs(order, left)}"
-
-
-def _sellers(order: dict[str, Any], ask: float | None, top: float) -> str:
-    """Why nothing was bought, from the cheapest seller there now."""
-    if ask is None:
-        return f"No one is selling {_e(order['label'])} on {order['name']} right now."
-    if cents(ask) > cents(top):
-        return f"The cheapest seller on {order['name']} is at {cents(ask)}¢, above your {cents(top)}¢ top price."
-    return f"No one sold {_e(order['label'])} at {cents(top)}¢ or less on {order['name']} just then."
+    return (f"<b>Bought on {order['name']}.</b> {_what(order, answer)} ({float(answer['shares']):,.0f} contracts)."
+            f"{_theirs(order, left)}")  # fmt: skip
 
 
 def missed_text(order: dict[str, Any], ask: float | None) -> str:
-    """A copy that didn't fill, with no limit order left: asked each time, or skipped."""
-    return f"<b>Not bought.</b> {_sellers(order, ask, order.get('top') or order['max_price'])} Nothing was spent."
-
-
-def _order_line(order: dict[str, Any]) -> str:
-    return f"<b>{order['size']:,.0f} contracts of {_e(order['label'])} at {cents(order['max_price'])}¢</b>"
-
-
-def resting_text(order: dict[str, Any], ask: float | None, *, asked: bool = False) -> str:
-    """A limit order now in the book: left by the setting right after a miss, or by a tap (``asked``)."""
+    """A copy that didn't fill: why, from the cheapest seller there now."""
     top = cents(order["max_price"])
-    foot = f"It buys only if a seller comes down to {top}¢. You'll hear here either way."
-    if asked:
-        return f"<b>Limit order left</b> on {order['name']}: {_order_line(order)}, waiting for {wait_text(order['minutes'])}.\n{foot}"
-    return (f"<b>Not bought yet.</b> {_sellers(order, ask, order['max_price'])}\n"
-            f"Your settings say to leave a limit order, so I did: {_order_line(order)}, waiting for {wait_text(order['minutes'])}.\n{foot}")  # fmt: skip
+    if ask is None:
+        why = f"No one is selling {_e(order['label'])} on {order['name']} right now."
+    elif cents(ask) > top:
+        why = f"The cheapest seller is at {cents(ask)}¢, on {order['name']}, above your {top}¢ top price."
+    else:
+        why = f"No one sold {_e(order['label'])} at {top}¢ or less on {order['name']} just then."
+    return f"<b>Not bought.</b> {why} Nothing was spent."
+
+
+def missed_markup(order: dict[str, Any]) -> dict[str, Any]:
+    """Under "Not bought.": the limit order, and the settings."""
+    return {"inline_keyboard": [[{"text": f"Leave a limit order at {cents(order['max_price'])}¢", "callback_data": f"cl:{order['alert_id']}"}],
+                                [SETTINGS_BUTTON]]}  # fmt: skip
+
+
+def resting_text(order: dict[str, Any], *, by_setting: bool = False) -> str:
+    """A limit order now in the book: left by a tap, or (``by_setting``) at once after a miss."""
+    top = cents(order["max_price"])
+    line = (f"{order['size']:,.0f} contracts of {_e(order['label'])} at {top}¢ on {order['name']},"
+            f" waiting {wait_text(order['minutes'])}.")  # fmt: skip
+    foot = f"It buys only if a seller comes down to {top}¢. I'll message you when it fills or ends."
+    if by_setting:
+        return f"<b>Not bought yet</b>: no one is selling at {top}¢ or less. <b>Limit order placed</b>, as you set: {line}\n{foot}"
+    return f"<b>Limit order placed.</b> {line}\n{foot}"
+
+
+def resting_markup(order: dict[str, Any]) -> dict[str, Any]:
+    return {"inline_keyboard": [[{"text": "Cancel order", "callback_data": f"cx:{order['alert_id']}"}]]}
 
 
 def ended_text(order: dict[str, Any], answer: dict[str, Any], left: float | None = None, *, cancelled: bool = False) -> str:
     """How a limit order ended: filled, bought part, or bought nothing (the time ran out, or it was cancelled)."""
     got, size, top = float(answer.get("shares") or 0), float(order["size"]), cents(order["max_price"])
     how = "cancelled" if cancelled else "ended"
+    on = f" on {order['name']}"
     if got >= size - 1e-6:
-        return f"<b>Limit order filled.</b> Bought {_what(order, answer)} ({got:,.0f} contracts).{_theirs(order, left)}"
+        return f"<b>Limit order filled.</b> Bought {_what(order, answer)}{on} ({got:,.0f} contracts).{_theirs(order, left)}"
     if got > 0:
         back = max(0.0, float(order["usd"]) - float(answer.get("spent") or 0))
-        return (f"<b>Limit order {how}.</b> Bought {_what(order, answer)} ({got:,.0f} of {size:,.0f} contracts)."
+        return (f"<b>Limit order {how}.</b> Bought {_what(order, answer)}{on} ({got:,.0f} of {size:,.0f} contracts)."
                 f" The other ${back:,.2f} is back in today's limit.")  # fmt: skip
     back_all = f"Your {money(order['usd'])} is back in today's limit."
     if cancelled:
@@ -572,42 +597,10 @@ def ended_text(order: dict[str, Any], answer: dict[str, Any], left: float | None
             f" so nothing was bought. {back_all}")  # fmt: skip
 
 
-def waiting_text(order: dict[str, Any], ask: float | None, now: float | None = None) -> str:
-    """One resting limit order in /orders."""
-    left = max(1, round(((order.get("expires_at") or 0) - (time.time() if now is None else now)) / 60))
-    head = f"<b>{_e(order['label'])}</b>" + (f" · {_e(order['title'])}" if order.get("title") else "")
-    lines = [head, f"{order['size']:,.0f} contracts at {cents(order['max_price'])}¢ on {order['name']} · {left} min left"]
-    tail = [f"Copied from {_e(order['trader'])}." if order.get("trader") else "",
-            f"Cheapest seller now: {cents(ask)}¢." if ask is not None else ""]  # fmt: skip
-    return "\n".join([*lines, " ".join(t for t in tail if t)]).strip()
-
-
-def view_button(order: dict[str, Any], what: str) -> list[dict[str, str]]:
-    """"View position on Polymarket US ↗": the market's page there, when the match has one."""
-    return [{"text": f"View {what} on {order['name']} ↗", "url": order["url"]}] if order.get("url") else []
-
-
-def _now_button(order: dict[str, Any], ask: float | None, top: float) -> list[dict[str, str]]:
-    if ask is None or cents(ask) <= cents(top) or math.floor(order["usd"] / ask) < 1:
-        return []
-    return [{"text": f"Buy now at {cents(ask)}¢", "callback_data": f"cb:{order['alert_id']}:{cents(ask)}"}]
-
-
-def ask_markup(order: dict[str, Any], ask: float | None) -> dict[str, Any]:
-    """Under "Not bought." when the setting is to ask each time."""
-    aid, top = order["alert_id"], order.get("top") or order["max_price"]
-    rows = [[{"text": f"Leave a limit order at {cents(top)}¢ for {wait_text(order['minutes'])}", "callback_data": f"cl:{aid}"}],
-            _now_button(order, ask, top),
-            [{"text": "Skip", "callback_data": f"ck:{aid}"}],
-            [{"text": "Always leave a limit order", "callback_data": f"cw:{aid}"}]]  # fmt: skip
-    return {"inline_keyboard": [r for r in rows if r]}
-
-
-def resting_markup(order: dict[str, Any], ask: float | None) -> dict[str, Any]:
-    """Under a limit order in the book."""
-    rows = [[{"text": "Cancel order", "callback_data": f"cx:{order['alert_id']}"}],
-            _now_button(order, ask, order["max_price"]), view_button(order, "order")]  # fmt: skip
-    return {"inline_keyboard": [r for r in rows if r]}
+def result_markup(order: dict[str, Any]) -> dict[str, Any]:
+    """Under what was bought: the market's page on that exchange (when the match has one), and the settings."""
+    view = [{"text": "View position ↗", "url": order["url"]}] if order.get("url") else []
+    return {"inline_keyboard": [[*view, SETTINGS_BUTTON]]}
 
 
 def result_text(order: dict[str, Any], answer: dict[str, Any] | None, error: str | None = None) -> str:
@@ -620,6 +613,9 @@ def result_text(order: dict[str, Any], answer: dict[str, Any] | None, error: str
     code = a.get("code")
     if code in NOBODY_SELLING:
         return f"Not bought: no one is selling at {round(order['max_price'] * 100)}¢ or less on {where} right now."
+    if code == "no_balance":
+        names = " and ".join(o["name"] for o in order.get("others") or []) or where
+        return f"Not bought: your {names} balance{'s are' if ' and ' in names else ' is'} under {money(order['usd'])}."
     if code in ("insufficient_balance", "insufficient_funds", "not_enough_balance"):
         return f"Not bought: your {where} balance is under {money(order['usd'])}."
     if code == "too_small":
