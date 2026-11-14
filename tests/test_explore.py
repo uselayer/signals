@@ -567,7 +567,7 @@ def test_the_api_lists_makers_filters_by_style_and_a_trader_page_carries_its_boa
     assert [(b["place"], b["rank"]) for b in page["boards"]] == [("VOL ALL OVERALL", 40)]
 
 
-STYLE_ROW = ("usd", "pl", "esc", "centsSigned", "ago", "exCount", "exProfit", "exFigures", "exStats", "STYLE", "isBot", "isHuman", "WHO_SVG", "HUMAN_ICON", "BOT_ICON", "whoBadge", "tier", "TIER", "SEG_ORDER", "exLabel", "exBadges")
+STYLE_ROW = ("usd", "pl", "esc", "centsSigned", "ago", "exCount", "exProfit", "exFigures", "exStats", "STYLE", "isBot", "isHuman", "WHO_SVG", "HUMAN_ICON", "BOT_ICON", "UNKNOWN_ICON", "whoBadge", "tier", "TIER", "SEG_ORDER", "exLabel", "exBadges")
 
 
 def test_a_market_makers_row_says_what_they_are_and_what_trading_and_rewards_made_them(run_js: Any) -> None:
@@ -583,7 +583,9 @@ def test_a_market_makers_row_says_what_they_are_and_what_trading_and_rewards_mad
       .map((r) => [exBadges(r), whoBadge(r)])''')
     assert [b.count(">Bot</span>") for b, _ in tagged[:3]] == [1, 1, 0] and tagged[3][1] == bot
     assert tagged[2][1] == human and human in tagged[2][0]  # under 100 trades a day: Human
-    assert run_js(STYLE_ROW, "[whoBadge({record: true, bot: null}), whoBadge({tags: []})]") == ["", human]  # nothing says: none
+    unknown = run_js(STYLE_ROW, "whoBadge({record: true, bot: null})")  # a record that hasn't said yet: Unknown
+    assert 'class="who-tag unknown"' in unknown and unknown.endswith("Unknown</span>")
+    assert run_js(STYLE_ROW, "[whoBadge({tags: []}), whoBadge(null), whoBadge(undefined)]") == [human, "", ""]  # no record: none
     q = run_js(("ex", "exSearching", "exQuery"), """(() => { Object.assign(ex, { group: "checked", price: "fav", pace: 10, bots: "hide" });
       return exQuery(); })()""")
     assert "price=fav" in q and "pace=10" in q and "bots=hide" in q
