@@ -116,7 +116,7 @@
     background: color-mix(in srgb, var(--fg) 8%, var(--card)); border: 1px solid color-mix(in srgb, var(--c) 40%, var(--line));
     color: var(--fg); font-size: 13px; font-weight: 500; line-height: 1.35; white-space: nowrap; }
   .who-tag svg { width: 15px; height: 15px; color: var(--c); flex: none; }
-  .who-tag.bot { --c: var(--amber); } .who-tag.human { --c: var(--blue); }
+  .who-tag.bot { --c: var(--amber); } .who-tag.human { --c: var(--blue); } .who-tag.unknown { --c: var(--muted); color: var(--muted); background: transparent; border: 1px dashed color-mix(in srgb, var(--muted) 55%, var(--line)); }
   button.tier { border: 0; font: inherit; font-size: 12px; font-weight: 500; line-height: 1.35; cursor: pointer; }
   button.tier:hover { background: color-mix(in srgb, var(--c) 20%, var(--card)); }
   .badge { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
@@ -2480,8 +2480,11 @@ const isHuman = (r) => !isBot(r) && (r?.bot === 0 || r?.bot === false || (r?.bot
 const WHO_SVG = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const HUMAN_ICON = WHO_SVG(`<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>`);
 const BOT_ICON = WHO_SVG(`<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><path d="M9 13v2"/><path d="M15 13v2"/><path d="M2 14h2"/><path d="M20 14h2"/>`);
-const whoBadge = (r) => isBot(r) ? `<span class="who-tag bot" title="100 or more trades a day">${BOT_ICON}Bot</span>`
-  : isHuman(r) ? `<span class="who-tag human" title="Fewer than 100 trades a day">${HUMAN_ICON}Human</span>` : "";
+const UNKNOWN_ICON = WHO_SVG(`<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7"/><path d="M12 17h.01"/>`);
+// Unknown: a wallet whose record hasn't said yet (read before the label existed); none at all without a record
+const whoBadge = (r) => !r || typeof r !== "object" ? "" : isBot(r) ? `<span class="who-tag bot" title="100 or more trades a day">${BOT_ICON}Bot</span>`
+  : isHuman(r) ? `<span class="who-tag human" title="Fewer than 100 trades a day">${HUMAN_ICON}Human</span>`
+  : `<span class="who-tag unknown" title="Not read since this label was added: Human or Bot once their trades are read again">${UNKNOWN_ICON}Unknown</span>`;
 const exBadges = (r) => `${exLabel(r)}${r.segment === "no_view" || r.group === "unchecked" ? "" : whoBadge(r)}`;
 function exLabel(r) {
   if (r.segment === "no_view" && r.group !== "unchecked") return `<span class="tier t3">${STYLE[r.style] || "Market maker or arbitrage"}</span>${whoBadge(r)}`;

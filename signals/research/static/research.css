@@ -61,7 +61,7 @@ p { margin: 0; }
   background: color-mix(in srgb, var(--fg) 8%, var(--card)); border: 1px solid color-mix(in srgb, var(--c) 40%, var(--line));
   color: var(--fg); font-size: 13px; font-weight: 500; white-space: nowrap; }
 .who-tag svg { width: 15px; height: 15px; color: var(--c); flex: none; }
-.who-tag.bot { --c: var(--amber); } .who-tag.human { --c: var(--blue); }
+.who-tag.bot { --c: var(--amber); } .who-tag.human { --c: var(--blue); } .who-tag.unknown { --c: var(--muted); color: var(--muted); background: transparent; border: 1px dashed color-mix(in srgb, var(--muted) 55%, var(--line)); }
 .tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; line-height: 1.35; }
 .tag.observed { background: var(--soft); color: var(--fg); }
 .tag.observed::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--fg); }

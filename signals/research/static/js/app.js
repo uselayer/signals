@@ -321,7 +321,8 @@ function Investigation({ api, id }) {
               <span class="qt">${shortWallets(runTitle(inv, r, i))}</span><span class=${'st' + (stt === 'working' ? ' live' : '')}>${stt}</span></button>`; })}</div>`}
         ${past && html`<div class="banner"><span>You're looking at an earlier question. It's finished and won't change.</span><button class="link" onClick=${() => act.viewRun(rs.length - 1, rs.length)}>Back to the new question →</button></div>`}
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}${isBot(rec) ? html`<span class="who-tag bot" title="100 or more trades a day, from its Signals record">${BOT_ICON}Bot</span>`
-          : isHuman(rec) ? html`<span class="who-tag human" title="Fewer than 100 trades a day, from its Signals record">${HUMAN_ICON}Human</span>` : null}<span>BTC Up or Down 15m</span>
+          : isHuman(rec) ? html`<span class="who-tag human" title="Fewer than 100 trades a day, from its Signals record">${HUMAN_ICON}Human</span>`
+          : rec ? html`<span class="who-tag unknown" title="Not read since this label was added: Human or Bot once their trades are read again">${UNKNOWN_ICON}Unknown</span>` : null}<span>BTC Up or Down 15m</span>
           ${vsum.length > 0 && html`<span>· ${plural(vsum.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills${!past && inv.running ? ' so far' : ''}</span>`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
         ${rec && html`<${RecordLine} r=${rec} wallet=${wallet} />`}
@@ -347,6 +348,7 @@ const WIN_MIN = 10;
 const isBot = r => !!r && (r.bot === 1 || r.bot === true || (Array.isArray(r.tags) && r.tags.includes('bot')));
 const isHuman = r => !!r && !isBot(r) && (r.bot === 0 || r.bot === false || (r.bot == null && Array.isArray(r.tags)));
 const HUMAN_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>`;
+const UNKNOWN_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7"/><path d="M12 17h.01"/></svg>`;
 const BOT_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4"/><path d="M9 13v2"/><path d="M15 13v2"/><path d="M2 14h2"/><path d="M20 14h2"/></svg>`;
 function RecordLine({ r, wallet }) {
   const w = r.win && (r.win['90d'] || r.win['30d'] || r.win['7d']);

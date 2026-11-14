@@ -25,7 +25,8 @@ behind Vercel (see README, "Hosting").
   mostly finds a record under 6 hours old instead of reading one on the spot. Facts only: no tier, no "recommended", nothing about whether they'll make money next.
   One tag, never a verdict: a "Bot" pill (amber robot; `bot` 1: 100+ trades a day, the SDK score's rule, worked out by
   `records._bot` from the trades a record already reads; a record read before it falls back to the wallet's last score
-  tag, `directory.bot_tag`), else a "Human" pill (blue person; `bot` 0), and none when nothing says (`whoBadge`): the
+  tag, `directory.bot_tag`), else a "Human" pill (blue person; `bot` 0), and a grey dashed "Unknown" (question mark) when a record hasn't said yet
+  (read before the label; none without a record) (`whoBadge`): the
   Leaderboard's Human/Bot column (beside the name on a phone), a trader's page and Watchlist header, Explore's rows and
   the Breakdowns header (from `/api/worth`). The
   background reads a record for each wallet instead of the skill test; `SIGNALS_SKILL_TEST=1` brings back the skill
