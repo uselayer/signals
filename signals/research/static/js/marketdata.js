@@ -101,9 +101,11 @@ export function prepMarket(r, summary) {
 
 export function marketBursts(trades) {
   const out = [], open = {};
+  // a busy market (hundreds of fills over months) draws a mark per day or per six hours, not per hour
+  const gap = trades.length > 400 ? 86400 : trades.length > 150 ? 6 * 3600 : BURST_GAP;
   for (const x of trades) {
     const k = x.side + x.action, b = open[k];
-    if (b && x.t - b.t1 <= BURST_GAP) { b.fills.push(x); b.t1 = x.t; continue; }
+    if (b && x.t - b.t1 <= gap) { b.fills.push(x); b.t1 = x.t; continue; }
     open[k] = { side: x.side, action: x.action, t0: x.t, t1: x.t, fills: [x] };
     out.push(open[k]);
   }

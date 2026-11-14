@@ -155,10 +155,10 @@ function MarketChart({ w, width, compact, ph, sel, onBurst, onHover }) {
   for (const t of dateTicks(w, compact ? 4 : 8)) ax.push(html`<text class="ax" x=${G.X(t)} y=${G.yQ0 + G.hQ + 18} text-anchor="middle">${shortDate(t)}</text>`);
   if (w.marketEnd && w.marketEnd <= w.to) ax.push(html`<line x1=${G.X(w.marketEnd)} x2=${G.X(w.marketEnd)} y1=${G.yB0} y2=${G.yQ0 + G.hQ} stroke="var(--faint)" stroke-dasharray="3 3" /><text class="axs" x=${G.X(w.marketEnd) - 4} y=${G.yB0 + 10} text-anchor="end">${w.result ? `resolved ${w.result}` : 'ended'}</text>`);
   const marks = w.bursts.map(b => {
-    const x = G.X(b.t0), y = G.YP(b.avg), col = sideColor(w, b.side), s = Math.min(9, 3.5 + Math.sqrt(b.shares) / 12), on = sel === b.id;
+    const x = G.X(b.t0), y = G.YP(b.avg), col = sideColor(w, b.side), s = Math.min(compact ? 4.5 : 6.5, 3 + Math.sqrt(b.shares) / 15), on = sel === b.id;
     return html`<g class="burst" key=${b.id} tabindex=${compact ? -1 : 0} role="button" aria-label=${`${b.action === 'buy' ? 'Bought' : 'Sold'} ${shares(b.shares)} ${b.side} on ${dateTime(b.t0)}`}
       onClick=${e => { e.stopPropagation(); onBurst(b); }} onKeyDown=${e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onBurst(b); } }}>
-      <line x1=${x} x2=${x} y1=${G.yB0} y2=${G.yQ0 + G.hQ} stroke=${col} stroke-opacity=${on ? .7 : .12} />
+      ${on && html`<line x1=${x} x2=${x} y1=${G.yB0} y2=${G.yQ0 + G.hQ} stroke=${col} stroke-opacity=".7" />`}
       <circle cx=${x} cy=${y} r=${s + 6} fill="transparent" />
       ${b.action === 'sell' ? html`<rect x=${x - s} y=${y - s} width=${2 * s} height=${2 * s} fill="var(--card)" stroke=${col} stroke-width="2" />` : html`<path d=${`M${x} ${y - s}L${x - s} ${y + s * .8}H${x + s}Z`} fill=${col} stroke="var(--card)" stroke-width="1.2" />`}</g>`;
   });
@@ -197,7 +197,7 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
       ${w.out && html`<span><i class="sw" style="border-color:var(--binance)"></i>${w.out.name} (${w.out.unit || 'USDT'}): what these markets resolve on</span>`}
       ${w.rule && w.rule.strike && html`<span><i class="sw" style="border-color:var(--fg);border-top-style:dashed"></i>${usdt(w.rule.strike)}, the price in the question</span>`}
       ${w.outcomes.map(o => html`<span><i class="sw" style=${`border-color:${sideColor(w, o)}`}></i>${o}</span>`)}
-      <span><svg width="12" height="10"><path d="M6 1 L1 9 H11Z" fill="var(--up)" /></svg>Buys <svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="var(--up)" stroke-width="1.6" /></svg>Sells (fills within an hour drawn as one)</span></div>
+      <span><svg width="12" height="10"><path d="M6 1 L1 9 H11Z" fill="var(--up)" /></svg>Buys <svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="var(--up)" stroke-width="1.6" /></svg>Sells, at the price paid (${w.trades.length > 400 ? 'fills within a day' : w.trades.length > 150 ? 'fills within six hours' : 'fills within an hour'} drawn as one)</span></div>
     <div class="readout" aria-live="off"><b>${dateTime(ro)}</b>
       ${w.out && html`<span><span class="k">${w.out.name}</span> ${ob == null ? 'not read' : usdt(ob)}</span>`}
       ${w.outcomes.map(o => html`<span><span class="k">${o}</span> ${w.priceAt(o, ro) == null ? '–' : cents(w.priceAt(o, ro))}</span>`)}
