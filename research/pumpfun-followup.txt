@@ -1,0 +1,24 @@
+=== daily board (24h)
+  under 5 coins/day: 53 traders, $1,462,427 of board profit (92% unsold), median position $1,390
+     before the window (≥ 20 closed): positive without best coin 6/39 (15%), median -$41,058, median win rate 29%
+  5–20 coins/day: 24 traders, $629,613 of board profit (69% unsold), median position $910
+     before the window (≥ 20 closed): positive without best coin 5/23 (22%), median -$27,046, median win rate 29%
+  20+ coins/day: 23 traders, $419,664 of board profit (39% unsold), median position $313
+     before the window (≥ 20 closed): positive without best coin 20/23 (87%), median $889,672, median win rate 86%
+
+=== weekly board (7d)
+  under 5 coins/day: 59 traders, $4,779,216 of board profit (90% unsold), median position $821
+     before the window (≥ 20 closed): positive without best coin 7/41 (17%), median -$32,232, median win rate 29%
+  5–20 coins/day: 11 traders, $635,327 of board profit (63% unsold), median position $808
+     before the window (≥ 20 closed): positive without best coin 4/11 (36%), median -$16,182, median win rate 32%
+  20+ coins/day: 30 traders, $1,248,545 of board profit (26% unsold), median position $248
+     before the window (≥ 20 closed): positive without best coin 29/30 (97%), median $643,121, median win rate 98%
+
+=== monthly board (30d)
+  under 5 coins/day: 26 traders, $3,436,988 of board profit (72% unsold), median position $1,689
+     before the window (≥ 20 closed): positive without best coin 5/14 (36%), median -$6,964, median win rate 33%
+  5–20 coins/day: 7 traders, $709,377 of board profit (1% unsold), median position $746
+     before the window (≥ 20 closed): positive without best coin 3/6 (50%), median $10,560, median win rate 35%
+  20+ coins/day: 67 traders, $7,689,691 of board profit (2% unsold), median position $236
+     before the window (≥ 20 closed): positive without best coin 63/65 (97%), median $311,022, median win rate 100%
+

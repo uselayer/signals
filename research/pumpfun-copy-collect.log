@@ -1,0 +1,115 @@
+92 bots, 82 people; sampling 60, 60 to go
+1/60 bot 6HJetM 0 trades, 0 coins
+2/60 bot ASVzak 124 trades, 22 coins
+Traceback (most recent call last):
+  File "/Users/preciousemakenemi/dev/signals/.claude/worktrees/pumpfun-leaderboard-study/research/pumpfun_copy_collect.py", line 160, in <module>
+    for _ in pool.map(pull, todo):
+             ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/preciousemakenemi/.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py", line 619, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/preciousemakenemi/.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/Users/preciousemakenemi/.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/Users/preciousemakenemi/.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/Users/preciousemakenemi/.local/share/uv/python/cpython-3.12.14-macos-aarch64-none/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/preciousemakenemi/dev/signals/.claude/worktrees/pumpfun-leaderboard-study/research/pumpfun_copy_collect.py", line 149, in pull
+    rows.append({"mint": mint, "legs": legs, "last": float(last[0]["priceUsd"]) if last else None,
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: float() argument must be a string or a real number, not 'NoneType'
+92 bots, 82 people; sampling 60, 58 to go
+FAILED bot HB3Geb: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/BGPeCEiJaQxZyT9fgU37XyhBEvQqoFsTPsCwfiFTpump')
+FAILED bot catK9v: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/Bqy3UhSfm1ZBMd9p4NCUMVdVcNvX5oivrq5AS8jkudso')
+FAILED bot H2KAvW: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/4XsqdzMb69kwDarFoXfxXuB19aG5vfPLzSVhEYDjpump')
+3/60 bot 7NnaXg 110 trades, 14 coins
+FAILED bot 2ZRuto: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/AKotzk1dhcNangAJBtvNKtT9bhbSVZc2mMhRFgkFpump')
+FAILED bot 4w7HzF: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/CNMwq2xjAJk71z1PneE68ENPB8XfaPHbJ9P2BwPipump')
+FAILED bot 5Y5nsb: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/7vroZUHnZax2xvSmHFQE26iL2Dn1jPjVJKDvxHy2pump')
+FAILED bot CKB1XY: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/3amSRf5RxCutceuzEKpcgLgCifmr2RwrhfJTdzaVpump')
+FAILED bot 7djZvJ: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/4hJUvD8HrMZcFKHvoWWrVxUhrZWRLuEj5mpY9fkdqboE')
+FAILED bot BLw4fX: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/3cPUFB9yTXiHEebTdTmfXRRZupy96s3XNau9JNu96Gzb')
+FAILED bot EeXvxk: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/CSCMv42J64mWfFWyMFvho24vQxyVRTkK37B9k5Yopump')
+FAILED bot 649ot1: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/FssvM2UTv7uPtjVr83h2m1n24kbsYwivtpiF7Woupump')
+FAILED bot 4vw54B: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/AHRDAD3LiHHst5s6GbFYFgABZWeNHCCyJcnoLcGkpump')
+FAILED bot EgYa22: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/EE9jA13nuqdkqUud1qdLvZB2aKi4C9oH55xLxSMypump')
+FAILED bot 8NVkyt: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/2worEts6Vybh35y8nK2an9fgZDz1vokTPE3JJKrCDnTP')
+FAILED bot BHTp82: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/E9RUKEjBAeFqGWGzeM9q2PdNMk6xjGFjTiJScoUcquz4')
+FAILED bot 9LXWa7: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/FKED8dD6MhiTKJh8yKp94zJUk3LRv7kt2GT7g7HQpump')
+FAILED bot 3qFD7t: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/3wzpc6Cd5X4E11mnY4GqQzWXrZEYYWQ8zoD5eFz3Cksp')
+FAILED bot AusMtC: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/E18FgxhgC9A8JJem6ERMmiqntfJZPpsADvU41nzB4a8p')
+FAILED bot 49fAsU: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/BdSjSvnAd3AZC5MwonGRh7LoAL9nCUrQeAA2srkBpump')
+FAILED bot J23qr9: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/5UpDzni5hxDgCPsQDqP5DePERudxTCVro4XQSTLdUNzn')
+FAILED bot DAEdBm: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/2u9gENQpHLSHGaB7VvSxCshMCjD9C6HpPmvD214Fpump')
+FAILED bot D9Uite: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/Ak4cZZkr4AdcHBorJvggMziofQe4wzskys3BmSxMpump')
+4/60 person 8748Dc 0 trades, 0 coins
+5/60 person 4bfteW 21 trades, 4 coins
+FAILED bot 4Bc4Ue: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/So11111111111111111111111111111111111111112')
+6/60 person 4UrFSC 18 trades, 1 coins
+7/60 person EFdEVb 15 trades, 7 coins
+8/60 person 36YdEp 0 trades, 0 coins
+9/60 person GvkpJ3 8 trades, 1 coins
+10/60 person AVLv9X 0 trades, 0 coins
+11/60 bot FaNaUy 2064 trades, 40 coins
+12/60 person BGSecf 8 trades, 4 coins
+13/60 person WPwTsb 20 trades, 1 coins
+FAILED bot EqiFgy: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/EiJda8Qd2Nu69v1QBG6KCDQHLSJuGveJuHYzBVzppump')
+FAILED bot BAk7jy: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/3cZSRcC5kB2Jg6EvwUW1H1VZei91qjDaq2LZSWG4pump')
+14/60 person BReeST 19 trades, 5 coins
+15/60 person F6mEJf 0 trades, 0 coins
+16/60 person EwJYY4 19 trades, 2 coins
+FAILED bot Cb4fr2: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/DSKKmi8dCEkRHzMjbKUrC1tvXTdGo1GB6wQj4gMupump')
+17/60 person 8qtXHi 644 trades, 40 coins
+FAILED person HaWhpx: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/CSocnzcRpgSCr1naKcNTieWZUxb6rABe45j844m7pump')
+18/60 person DoKEEj 0 trades, 0 coins
+19/60 person 3WGFmU 2 trades, 1 coins
+FAILED person 9oqcX4: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/3cgXRLinbNqXmqQNdzMoSvKgisP7tgWFYDkmVDenVozq')
+20/60 person FtDwzA 0 trades, 0 coins
+21/60 person 6i2aHt 1 trades, 1 coins
+22/60 person FvfMvF 0 trades, 0 coins
+23/60 person 4F1XUg 20 trades, 6 coins
+24/60 person 6WMtzn 104 trades, 7 coins
+25/60 person A5mQ2q 21 trades, 12 coins
+26/60 person FaCDoR 4 trades, 1 coins
+27/60 person CGKFBR 13 trades, 5 coins
+28/60 person 2FUqai 77 trades, 4 coins
+FAILED person 3bzaJd: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/So11111111111111111111111111111111111111112')
+FAILED person BSWzqn: RuntimeError('gave up on /trades/solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp/Dd8tTQGbQbiciSpvCNApotEx6eA4ojPnGchnAJnqDgfj')
+29/60 person FX5Zuh 73 trades, 17 coins
+30/60 person HVaeUP 206 trades, 40 coins
+92 bots, 82 people; sampling 60, 30 to go
+31/60 bot catK9v 256 trades, 40 coins
+32/60 bot H2KAvW 1561 trades, 40 coins
+33/60 bot 4w7HzF 1151 trades, 40 coins
+34/60 bot HB3Geb 1278 trades, 39 coins
+35/60 bot CKB1XY 1078 trades, 40 coins
+36/60 bot 2ZRuto 70 trades, 13 coins
+37/60 bot BLw4fX 717 trades, 40 coins
+38/60 bot EeXvxk 1694 trades, 40 coins
+39/60 bot 5Y5nsb 1357 trades, 40 coins
+40/60 bot 7djZvJ 1681 trades, 40 coins
+41/60 bot 649ot1 892 trades, 40 coins
+42/60 bot 9LXWa7 606 trades, 40 coins
+43/60 bot 4vw54B 1900 trades, 40 coins
+44/60 bot EgYa22 1243 trades, 40 coins
+45/60 bot AusMtC 95 trades, 31 coins
+46/60 bot BHTp82 2168 trades, 40 coins
+47/60 bot 8NVkyt 731 trades, 40 coins
+48/60 bot J23qr9 141 trades, 40 coins
+49/60 bot 49fAsU 3000 trades, 40 coins
+50/60 bot 3qFD7t 270 trades, 40 coins
+51/60 bot DAEdBm 145 trades, 19 coins
+52/60 bot Cb4fr2 655 trades, 40 coins
+53/60 bot D9Uite 481 trades, 40 coins
+54/60 bot 4Bc4Ue 189 trades, 39 coins
+55/60 bot EqiFgy 3000 trades, 40 coins
+56/60 person 9oqcX4 158 trades, 38 coins
+57/60 person HaWhpx 39 trades, 6 coins
+58/60 person 3bzaJd 178 trades, 22 coins
+59/60 person BSWzqn 93 trades, 12 coins
+60/60 bot BAk7jy 2427 trades, 39 coins

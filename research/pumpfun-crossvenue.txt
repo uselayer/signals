@@ -1,0 +1,24 @@
+pump.fun leaderboard wallets: 206; with an X username: 114; with an Ethereum-style wallet on their pump.fun account: 155
+Hyperliquid, that wallet: any fills or balance 13; 10+ recent fills 10
+Polymarket, that wallet: any activity or holdings 0
+  ogantd: HL value $29,329, spot USDC $29,329, fills 2000; PM activity 0, PM value $0
+  Thokani: HL value $0, spot USDC $0, fills 1451; PM activity 0, PM value $0
+  mitch: HL value $0, spot USDC $0, fills 130; PM activity 0, PM value $0
+  justdeeds26: HL value $0, spot USDC $0, fills 2; PM activity 0, PM value $0
+  vein: HL value $8,130, spot USDC $8,130, fills 20; PM activity 0, PM value $0
+  Overdose_ai: HL value $0, spot USDC $0, fills 7; PM activity 0, PM value $0
+  cousin: HL value $8,248, spot USDC $8,248, fills 131; PM activity 0, PM value $0
+  0xkitty69: HL value $0, spot USDC $0, fills 1670; PM activity 0, PM value $0
+  panic: HL value $0, spot USDC $0, fills 4; PM activity 0, PM value $0
+  soby0x: HL value $167,236, spot USDC $167,236, fills 381; PM activity 0, PM value $0
+  G4RX: HL value $0, spot USDC $0, fills 40; PM activity 0, PM value $0
+  Mannerssx: HL value $0, spot USDC $0, fills 161; PM activity 0, PM value $0
+  gr3gor14n: HL value $0, spot USDC $0, fills 86; PM activity 0, PM value $0
+fomo:pointfarmcap: HL value $0, fills 0; PM activity 0
+fomo:unipcs: HL value $0, fills 0; PM activity 0
+fomo:kv4rl: HL value $1,350,361, fills 2000; PM activity 0
+fomo:tvmx: HL value $0, fills 207; PM activity 0
+fomo:DumbCrayonEater: HL value $0, fills 0; PM activity 0
+fomo:motiyawerey: HL value $0, fills 0; PM activity 0
+fomo:SolSwizzle: HL value $413,393, fills 859; PM activity 0
+fomo:leo: HL value $782,515, fills 2000; PM activity 0

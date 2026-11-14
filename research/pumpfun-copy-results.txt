@@ -1,0 +1,47 @@
+60 wallets replayed; trades from the 72 hours before each wallet was read
+
+=== bots: 30 wallets, 1056 coins, 4461 trades (median 812 trades per wallet in 72 h)
+  Leader on these coins, own prices: money in $481,446, return +6.1% before costs
+  Copier at ≈0.4 s: 14% of its end value is still unsold (valued at the coin's latest price)
+  Copier, 0% cost per side:
+    same block: pooled return   -9.4%, wallets whose copy made money 11/29, median wallet   -8.6%, trades with no later price 290
+        ≈0.4 s: pooled return   -9.7%, wallets whose copy made money 10/29, median wallet   -8.0%, trades with no later price 293
+        ≈1.2 s: pooled return  -10.0%, wallets whose copy made money 9/29, median wallet   -7.6%, trades with no later price 294
+          ≈2 s: pooled return   -7.2%, wallets whose copy made money 9/29, median wallet   -4.6%, trades with no later price 296
+          ≈4 s: pooled return   -3.8%, wallets whose copy made money 9/29, median wallet   -7.7%, trades with no later price 296
+  Copier, 1% cost per side:
+    same block: pooled return  -11.3%, wallets whose copy made money 8/29, median wallet  -10.6%
+        ≈0.4 s: pooled return  -11.6%, wallets whose copy made money 6/29, median wallet   -9.9%
+        ≈1.2 s: pooled return  -11.9%, wallets whose copy made money 7/29, median wallet   -9.5%
+          ≈2 s: pooled return   -9.2%, wallets whose copy made money 7/29, median wallet   -6.5%
+          ≈4 s: pooled return   -5.8%, wallets whose copy made money 7/29, median wallet   -9.7%
+  Copier, 2% cost per side:
+    same block: pooled return  -13.2%, wallets whose copy made money 7/29, median wallet  -12.5%
+        ≈0.4 s: pooled return  -13.5%, wallets whose copy made money 5/29, median wallet  -11.8%
+        ≈1.2 s: pooled return  -13.8%, wallets whose copy made money 6/29, median wallet  -11.4%
+          ≈2 s: pooled return  -11.1%, wallets whose copy made money 7/29, median wallet   -8.5%
+          ≈4 s: pooled return   -7.7%, wallets whose copy made money 6/29, median wallet  -11.6%
+  Verdict (pre-registered: bots, 1 block, 1% per side): COPYING DOES NOT WORK
+
+=== persons: 30 wallets, 232 coins, 758 trades (median 18 trades per wallet in 72 h)
+  Leader on these coins, own prices: money in $287,498, return +18.1% before costs
+  Copier at ≈0.4 s: 46% of its end value is still unsold (valued at the coin's latest price)
+  Copier, 0% cost per side:
+    same block: pooled return  +20.9%, wallets whose copy made money 15/22, median wallet  +22.2%, trades with no later price 295
+        ≈0.4 s: pooled return  +21.2%, wallets whose copy made money 15/22, median wallet  +22.2%, trades with no later price 295
+        ≈1.2 s: pooled return  +22.0%, wallets whose copy made money 15/22, median wallet  +22.0%, trades with no later price 295
+          ≈2 s: pooled return  +21.8%, wallets whose copy made money 15/22, median wallet  +22.0%, trades with no later price 295
+          ≈4 s: pooled return  +22.0%, wallets whose copy made money 15/22, median wallet  +22.0%, trades with no later price 295
+  Copier, 1% cost per side:
+    same block: pooled return  +18.7%, wallets whose copy made money 15/22, median wallet  +20.0%
+        ≈0.4 s: pooled return  +19.0%, wallets whose copy made money 15/22, median wallet  +20.0%
+        ≈1.2 s: pooled return  +19.7%, wallets whose copy made money 15/22, median wallet  +19.8%
+          ≈2 s: pooled return  +19.6%, wallets whose copy made money 15/22, median wallet  +19.8%
+          ≈4 s: pooled return  +19.8%, wallets whose copy made money 15/22, median wallet  +19.7%
+  Copier, 2% cost per side:
+    same block: pooled return  +16.5%, wallets whose copy made money 12/22, median wallet  +17.8%
+        ≈0.4 s: pooled return  +16.8%, wallets whose copy made money 13/22, median wallet  +17.8%
+        ≈1.2 s: pooled return  +17.5%, wallets whose copy made money 12/22, median wallet  +17.6%
+          ≈2 s: pooled return  +17.4%, wallets whose copy made money 13/22, median wallet  +17.6%
+          ≈4 s: pooled return  +17.6%, wallets whose copy made money 12/22, median wallet  +17.5%
+
