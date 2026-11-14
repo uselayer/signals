@@ -9,6 +9,8 @@ import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText,
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
+import { isMarket, marketTypeOf, prepMarket, marketAutoSteps, marketAgentSteps, marketTally, shortDate, dateTime } from './marketdata.js';
+import { MarketsStage, MarketReplay, MarketTrades } from './marketview.js';
 import { Hatch } from './chart.js';
 import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets, count } from './format.js';
 
@@ -150,6 +152,8 @@ function Home({ api }) {
 }
 
 const PAGE_TITLE = document.title;
+// a market's question, short enough for a tab ("Will Bitcoin reach $100,000 by December 31, 2026?" → "Bitcoin reach $100,000 by Dec 31")
+const shortTitle = t => { const s = String(t || 'Market').replace(/^Will (the price of )?/i, '').replace(/\?$/, '').replace(/, \d{4}$/, '').replace(/December/, 'Dec').replace(/November/, 'Nov').replace(/September/, 'Sep').replace(/October/, 'Oct'); return s.length > 36 ? s.slice(0, 35) + '…' : s; };
 
 function Investigation({ api, id }) {
   const st = useRef(null); if (!st.current) st.current = { inv: emptyInv(id), ui: emptyUi(), wins: new Map(), scope: new Set() };
@@ -202,11 +206,12 @@ function Investigation({ api, id }) {
   const loadWin = slug => {
     if (wins.has(slug)) return;
     wins.set(slug, 'loading'); redraw();
-    api.window(id, slug).then(r => { wins.set(slug, prep(r, inv.summaries.find(s => s.window_id === slug))); redraw(); },
+    api.window(id, slug).then(r => { const sm = inv.summaries.find(s => s.window_id === slug); wins.set(slug, isMarket(r) ? prepMarket(r, sm) : prep(r, sm)); redraw(); },
       e => { wins.set(slug, { error: e.message }); redraw(); });
   };
   const winOf = slug => wins.get(slug);
-  const stepsOf = w => (w && w.id && inv.walkthroughs[w.id] ? agentSteps(w, inv.walkthroughs[w.id]) : w && w.id ? (w._auto || (w._auto = autoSteps(w))) : []);
+  const stepsOf = w => (w && w.kind === 'market' ? (inv.walkthroughs[w.id] ? marketAgentSteps(w, inv.walkthroughs[w.id]) : (w._auto || (w._auto = marketAutoSteps(w))))
+    : w && w.id && inv.walkthroughs[w.id] ? agentSteps(w, inv.walkthroughs[w.id]) : w && w.id ? (w._auto || (w._auto = autoSteps(w))) : []);
   if (!ui.win && inv.summaries.length) ui.win = inv.summaries[0].window_id;
   const cur = ui.win ? winOf(ui.win) : null;
   if (ui.win && !cur) loadWin(ui.win);
@@ -256,6 +261,8 @@ function Investigation({ api, id }) {
     },
     askBurst: (w, b) => { ui.pop = null; ui.ctx = { kind: 'burst', label: `${shares(b.shares)} ${b.side} at ${mmss(b.t0)}, ${clock(w.start).slice(0, 5)} window`, w, b, context: { trade_ids: b.fills.slice(0, 50).map(x => x.trade_id) } };
       ui.extraAnn = [{ window_id: w.id, kind: 'point', t0: b.t0, label: 'this fill' }]; act.ask('Why here?'); },
+    // a burst of fills in a market's replay (fills within an hour): its date, not a time in a window
+    askMarketBurst: (w, b) => { ui.pop = null; ui.ctx = { kind: 'burst', label: `${shares(b.shares)} ${b.side} on ${dateTime(b.t0)}`, w, b, context: { trade_ids: b.fills.slice(0, 50).map(x => x.trade_id) } }; act.ask('Why here?'); },
     askFix: f => runCall(api.ask(id, 'Fix the number that didn\'t match the data in this finding.', { finding_id: f.finding_id })),
     pinMoment: (w, t) => { ui.pin = { window_id: w.id, t }; ui.pop = null; ui.ctx = { kind: 'moment', label: `${mmss(t)} in the ${clock(w.start).slice(0, 5)} window`, w, t, context: { window_id: w.id, t: w.start + t } }; ui.composeFocus = true; redraw(); },
     clearCtx: () => { ui.ctx = null; ui.pin = null; redraw(); },
@@ -305,10 +312,13 @@ function Investigation({ api, id }) {
   const vinv = many ? { ...inv, summaries: vsum } : inv;
   const vplan = past ? planOfRun(inv, rs[idx], idx) : currentPlan(inv);
   const totalProfit = vsum.reduce((s, x) => s + (x.profit || 0), 0);
+  // what this breakdown studies (the plan's market type): BTC 15-minute windows, or one tile per market
+  const mk = marketTypeOf(inv, vplan), byMarket = mk.unit === 'market' || (vsum.length > 0 && vsum.every(isMarket));
+  const mt = byMarket ? marketTally(vsum) : null;
   const cp = currentPlan(inv), runWaits = cp && (cp.status === 'proposed' || cp.status === 'queued') ? cp.status : null;
-  const tabs = [['plan', 'Plan and data'], ['windows', `Windows${vsum.length ? ' · ' + vsum.length : ''}`]];
-  // the Window and Fills tabs only for a window of the question shown
-  if (cur && cur.id && (!many || vsum.some(s => s.window_id === cur.id))) tabs.push(['window', `Window: ${windowLabel(cur.start, cur.start + cur.end).replace(' UTC', '')}`], ['trades', `Fills · ${cur.trades.length}`]);
+  const tabs = [['plan', 'Plan and data'], ['windows', `${byMarket ? 'Markets' : 'Windows'}${vsum.length ? ' · ' + vsum.length : ''}`]];
+  // the Window (or Market) and Fills tabs only for one of the question shown
+  if (cur && cur.id && (!many || vsum.some(s => s.window_id === cur.id))) tabs.push(['window', cur.kind === 'market' ? `Market: ${shortTitle(cur.title)}` : `Window: ${windowLabel(cur.start, cur.start + cur.end).replace(' UTC', '')}`], ['trades', `Fills · ${cur.trades.length}`]);
   return html`<div class="inv">
     <section class="main" aria-label="Workspace">
       <div class="head">
@@ -322,8 +332,9 @@ function Investigation({ api, id }) {
         ${past && html`<div class="banner"><span>You're looking at an earlier question. It's finished and won't change.</span><button class="link" onClick=${() => act.viewRun(rs.length - 1, rs.length)}>Back to the new question →</button></div>`}
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}${isBot(rec) ? html`<span class="who-tag bot" title="100 or more trades a day, from its Signals record">${BOT_ICON}Bot</span>`
           : isHuman(rec) ? html`<span class="who-tag human" title="Fewer than 100 trades a day, from its Signals record">${HUMAN_ICON}Human</span>`
-          : rec ? html`<span class="who-tag unknown" title="Not read since this label was added: Human or Bot once their trades are read again">${UNKNOWN_ICON}Unknown</span>` : null}<span>BTC Up or Down 15m</span>
-          ${vsum.length > 0 && html`<span>· ${plural(vsum.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills${!past && inv.running ? ' so far' : ''}</span>`}
+          : rec ? html`<span class="who-tag unknown" title="Not read since this label was added: Human or Bot once their trades are read again">${UNKNOWN_ICON}Unknown</span>` : null}<span>${mk.label}</span>
+          ${vsum.length > 0 && !byMarket && html`<span>· ${plural(vsum.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills${!past && inv.running ? ' so far' : ''}</span>`}
+          ${vsum.length > 0 && byMarket && html`<span>· ${plural(vsum.length, 'market')}</span>${mt.decided > 0 && html`<span>· <b class=${mt.profitMade + mt.profitLost >= 0 ? 'gain' : 'loss'}>${signedMoney(mt.profitMade + mt.profitLost)}</b> on ${plural(mt.decided, 'market')} ended or sold out</span>`}${mt.open > 0 && html`<span>· ${signedMoney(mt.profitOpen)} open, at today's prices</span>`}`}
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
         ${rec && html`<${RecordLine} r=${rec} wallet=${wallet} />`}
       </div>
@@ -332,9 +343,10 @@ function Investigation({ api, id }) {
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
       <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}</div>
       ${ui.stage === 'plan' && html`<${PlanStage} inv=${vinv} act=${act} plan=${vplan} past=${past} />`}
-      ${ui.stage === 'windows' && html`<${WindowsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} borrowed=${borrowed} />`}
-      ${ui.stage === 'window' && html`<${ReplayStage} inv=${vinv} ui=${ui} act=${act} w=${cur} steps=${steps} />`}
-      ${ui.stage === 'trades' && html`<${TradesStage} w=${cur} act=${act} />`}
+      ${ui.stage === 'windows' && (byMarket ? html`<${MarketsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} borrowed=${borrowed} />`
+        : html`<${WindowsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} borrowed=${borrowed} />`)}
+      ${ui.stage === 'window' && (cur && cur.kind === 'market' ? html`<${MarketReplay} inv=${vinv} ui=${ui} act=${act} w=${cur} steps=${steps} />` : html`<${ReplayStage} inv=${vinv} ui=${ui} act=${act} w=${cur} steps=${steps} />`)}
+      ${ui.stage === 'trades' && (cur && cur.kind === 'market' ? html`<${MarketTrades} w=${cur} act=${act} />` : html`<${TradesStage} w=${cur} act=${act} />`)}
     </section>
     <${AgentColumn} inv=${inv} ui=${ui} act=${act} fixtures=${!!api.fixtures} />
   </div>`;

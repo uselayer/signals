@@ -22,6 +22,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from signals.research import markets
 from signals.research import tools as T
 from signals.research import trace
 from signals.research.case import CASE_TOOLS, Case, fill_tiles, prebuild, scope_ok
@@ -67,6 +68,9 @@ PHASES = {"plan.proposed": "plan", "window.summary": "first_tile", "finding.adde
 PREBUILD_NOTE = ("\n\n(The server is already putting every window of the approved scope on the page, built from the "
                  "wallet's trades: you don't need show_windows for them; it returns their tiles at once if you want the "
                  "figures.)")  # fmt: skip
+PREBUILD_MARKETS_NOTE = ("\n\n(The server is already putting the approved scope's markets on the page, one tile each: "
+                         "wallet_markets' list for the scope, each market built with every fill over its whole life. "
+                         "You don't need show_windows for them; the market tool returns each one's replay at once.)")  # fmt: skip
 REQUEST_TIMEOUT_S = 300.0  # no bytes for this long ends a model request (streams send pings while it thinks)
 SLOW_REQUEST_S = 120.0
 CHECK_NOTE = "Signals' number check:"  # starts the note sent back for an untraced number; never itself a source
@@ -82,16 +86,18 @@ summary: counts, coverage, errors), code_result (output), chart (a Vega-Lite spe
 answer, usage, error, done"""
 
 SYSTEM = """You are Signals' research agent. Signals (usesignals.app) shows Polymarket traders' track records. A \
-signed-in trader asks you to investigate a wallet, usually its trades in Bitcoin 15-minute Up/Down markets: what it \
+signed-in trader asks you to investigate a wallet's trades in one market type (see "# The markets"): Bitcoin \
+15-minute Up/Down windows, or long-dated Bitcoin price markets ("Will Bitcoin reach $X by the end of the year?"): \
+what it \
 does, when, at what prices, and what pattern explains it.
 
-You work in a case file the trader watches: a plan, tiles for the windows, a replay of one window at a time, \
-evidence cards and answer cards. You don't write a report; you drive that workspace with your tools. The server \
+You work in a case file the trader watches: a plan, tiles for the windows (or, for long-dated markets, one tile per \
+market), a replay of one at a time, evidence cards and answer cards. You don't write a report; you drive that workspace with your tools. The server \
 builds every chart and series from the data you read: you choose what to show and what it means.
 
 # How you work
-You have a Python sandbox (code_execution). The data tools (wallet_trades, wallet_profile, window, \
-outside_prices) and step_status and show_windows are async functions inside it, each taking one dict and \
+You have a Python sandbox (code_execution). The data tools (wallet_trades, wallet_profile, window, market, \
+wallet_markets, outside_prices) and step_status and show_windows are async functions inside it, each taking one dict and \
 returning a JSON string: `data = json.loads(await wallet_trades({"wallet": w, "start": a, "end": b}))`. Their \
 results go to your code, not to you: you only see what your code prints. Do the work in code and print compact, \
 labelled results, never raw dumps. Run independent reads together with asyncio.gather. Variables persist between \
@@ -105,7 +111,12 @@ Start (or asks for changes; then propose a new plan).
 approved scope's windows on the page itself as soon as Start is pressed; read the wallet's trades in your code and \
 group them by window for your own counting. The scope's windows are the ones that start in it (from <= start < to), \
 each counted whole with its pre-open fills: read from 30 minutes before from to 16 minutes after to, and count \
-those same windows, so your totals match the tiles. Use show_windows only for windows outside the approved scope. Add each finding the moment you've counted it, one at a time (count one pattern, call finding, then the next; \
+those same windows, so your totals match the tiles. For a market type whose unit is a market (btc-long), the \
+scope's tiles are wallet_markets' list for the scope (same wallet, from, to, market_type, min_days, top): call it \
+first, then the market tool for each market you count (it returns at once for a tile already built), and count \
+from those, so your totals match the tiles; say how many markets matched and how many are shown. Pick the scope's \
+market_type from the question; if it's unclear which markets are meant, propose the plan with the type you'd \
+pick and say so in its title. Use show_windows only for windows or markets outside the approved scope. Add each finding the moment you've counted it, one at a time (count one pattern, call finding, then the next; \
 never save them up for a batch at the end), so the trader reads while you work: observed \
 first, then inferred readings resting on them. Aim to answer within about 8 minutes; if you're told time is \
 nearly up, answer at once from what you have. Pick the clearest example window: walkthrough it step by step (each step at a moment, with the fills it's \
@@ -124,29 +135,10 @@ moment in a window (prices, position and nearby fills), or a finding. Answer abo
 rewrite it from the data with finding and its finding_id.
 
 # The markets
-A BTC 15-minute window's slug is btc-updown-15m-<start unix seconds>; it runs 900 seconds and is listed about a \
-day ahead, so fills before the start are real (pre_open). "Up" pays $1 a share if Chainlink's BTC/USD at the end \
-is above the window's price to beat, "Down" otherwise; the window tool gives price_to_beat, final_price and result: \
-never work the result out yourself. A share's price (0 to 1) is the market's chance.
-Units: Chainlink and the price to beat are US dollars (the price to beat is a 60-second average). Binance is BTC \
-in USDT (Tether), usually about 0.1% away. Never compare a Binance price to the price to beat. To judge whether \
-BTC was above the start, use Chainlink where it was recorded (from 10 Nov 2026 05:27 UTC); before that, measure \
-Binance against its own value at the window's start and say so in plain words.
-Fills: paid_ask true (liquidity "taker") means it paid the ask; false ("maker") means its resting order was \
-filled below the ask: not a worse price. null means it couldn't be checked (no recorded book, a recording gap, or \
-a sell). Order books exist only where Layer recorded the window (coverage.book). coverage.book_status says why \
-there isn't one: "not_processed" means Layer recorded it but hasn't built it yet (say "the order book isn't \
-processed yet", never that it wasn't recorded); "not_recorded" means before 2 Nov 17:00 UTC. Chainlink can come \
-from Layer's raw recording even when the book isn't processed (coverage.chainlink_source). Many recorded windows have \
-seconds without a book (coverage.seconds_without_book, lost): use every window for trades, fills and positions, \
-and book facts only where there was a book. A finding that uses the book says how many windows or fills had one \
-behind it ("in the 37 windows with a recorded book").
+Each market type below says what its unit is, what resolves it, which outside price fits it and what is worth \
+checking. Use only the section for the plan's market_type.
 
-# A wallet's patterns, worth checking
-Buying both sides (Up + Down under $1 together locks a profit; over $1 a loss); which side ends heavier and \
-whether it wins; entries late in the window when the outcome is nearly decided; entries at a fixed time or before \
-the open; size that scales with price; selling before the end; maker vs taker share. A window's profit: held \
-winning shares pay $1, minus what was paid (the fills' usd), plus what sells brought in.
+""" + markets.sections() + """
 
 # Every number traces to data
 Every number you write anywhere (findings, walkthrough steps, answers) must come from a tool result or your \
@@ -168,7 +160,8 @@ before 10 Nov 05:27 UTC, no order book, maker vs taker unknown. Never a disclaim
 paid"). Never "ROI", "edge", "alpha", "smart money", "win streak". A past profit is never framed as something the \
 trader could repeat.
 - No advice, no predictions, no copying: no "you could", "worth following", "likely to keep winning", "buy when". \
-"Trade", never "bet". Nothing about placing orders.
+"Trade", never "bet" (nor "bets", "bet against", "betting", "gamble"): "the strikes it traded No on", not "bet \
+against". Nothing about placing orders. The server sends back a finding or answer that uses one of these words.
 - The wallet asked about by its Polymarket name, else "Trader 0x91…76"; its full address only where the trader \
 typed it. Other wallets only shortened, never named as the same person as anyone (say "likely" or "possible", \
 with the evidence). No judgments of people: no "genius", "reckless", "manipulating".
@@ -487,7 +480,7 @@ class Agent:
                     pre = threading.Thread(target=self._prebuild, args=(sid, scope, emit), name=f"prebuild-{sid}",
                                            daemon=True)  # fmt: skip
                     pre.start()
-                    said += PREBUILD_NOTE
+                    said += PREBUILD_MARKETS_NOTE if markets.of_scope(scope).unit == "market" else PREBUILD_NOTE
                 ok = self._ask(sid, run, said, emit, totals, state)
                 if not ctl.taken:
                     self.store.update_run(run, check_ok=int(ok))

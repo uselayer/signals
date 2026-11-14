@@ -10,12 +10,15 @@ the same run; a second miss is accepted and shown flagged (``number_check``).
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
+from signals.research import markets as M
 from signals.research import trace, workspace
 from signals.research.data import (
+    MARKETS_TOP,
     PRE_OPEN_READ_S,
     ReadError,
     complete_slugs,
@@ -41,7 +44,12 @@ CASE_TOOLS: list[dict[str, Any]] = [
             "do, each with a short id, a title in plain words, its source in plain words ('Polymarket trades', "
             "'Layer's recorded order books', 'Binance') and estimate_s. scope: {wallet, family "
             "('btc-updown-15m'), from, to}, from and to as ISO times in UTC (2026-11-10T05:30:00Z), or to: 'now'. "
-            "scope_options: choices the user can tick, e.g. "
+            "For another market type, give market_type instead of family ("
+            + ", ".join(f"'{t['id']}': {t['label']}" for t in M.described() if t["unit"] == "market")
+            + "; one tile per market), with min_days (only markets that run at least this many days; default "
+            + ", ".join(f"{t['min_days']:g} for {t['id']}" for t in M.described() if t["unit"] == "market")
+            + ") and top (how many markets to tile, the most money traded first; default 20); for these, from is 90 "
+            "days back unless asked otherwise. scope_options: choices the user can tick, e.g. "
             "{id: 'october', text: 'Also look at October with 1-minute prices'}."
         ),
         "input_schema": {
@@ -70,7 +78,8 @@ CASE_TOOLS: list[dict[str, Any]] = [
     {
         "name": "show_windows",
         "description": (
-            "Puts windows on the page as overview tiles. The server builds each window's replay from what you read "
+            "Puts windows (or markets: a long-dated market's slug) on the page as overview tiles. The server builds "
+            "each one's replay from what you read "
             "(prices, the wallet's fills, its position, coverage), so pass only window ids (slugs) and, if you "
             "like, tags per window ({slug: {...}}: e.g. the moment BTC cleared the price to beat). Returns JSON "
             "{windows: [{window_id, result, fills, first_entry_s, cost, profit, coverage}], coverage totals}. "
@@ -213,6 +222,18 @@ def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | 
         slug = str(context["window_id"])
         ready = store.window(slug=slug, sid=sid)["ready"] or workspace.build(store, reads, sid, slug)
         t = context.get("t")
+        if ready.get("kind") == "market":  # a moment in a market's life: its prices, the outside line, the position
+            mo: dict[str, Any] = {"kind": "moment" if t is not None else "market", "window_id": slug,
+                                  "title": ready.get("title"), "rule": ready.get("rule"), "result": ready.get("result"),
+                                  "market_end": ready.get("market_end"), "value": ready.get("value")}  # fmt: skip
+            if t is not None:
+                t = int(t)
+                out_line = (ready.get("outside") or {}).get("points") or []
+                mo |= {"t": t, "prices": {o: _at(ready["prices"].get(o) or [], t) for o in ready.get("outcomes") or []},
+                       "outside": _at(out_line, t), "outside_name": (ready.get("outside") or {}).get("name"),
+                       "position": _at(ready["position"], t),
+                       "fills_within_a_day": [f for f in ready["trades"] if abs(f["t"] - t) <= 86_400]}  # fmt: skip
+            return mo
         out: dict[str, Any] = {"kind": "moment" if t is not None else "window", "window_id": slug,
                                "start": ready["start"], "end": ready["end"], "price_to_beat": ready["price_to_beat"],
                                "result": ready["result"]}  # fmt: skip
@@ -239,6 +260,9 @@ def prebuild(store: Any, reads: Any, sid: str, scope: dict[str, Any], emit: Call
     wallet, a, b = scope.get("wallet"), scope.get("from"), scope.get("to")
     if not (wallet and a and b):
         return 0
+    mt = M.of_scope(scope)
+    if mt.unit == "market":
+        return prebuild_markets(store, reads, sid, scope, mt, emit)
     family = str(scope.get("family") or "btc-updown-15m").rstrip("-") + "-"
     # The scope's windows are the ones that start in it, each with all its fills: read from PRE_OPEN_READ_S before
     # the range (a first window's pre-open buys) to just after its last window closes. A read of the range alone
@@ -264,6 +288,40 @@ def prebuild(store: Any, reads: Any, sid: str, scope: dict[str, Any], emit: Call
             covs.append(r["coverage"])
     covs.sort(key=lambda c: c["window_id"] or "")
     emit({"type": "coverage", "per_source": workspace.totals(covs), "windows": covs})
+    return len(covs)
+
+
+def prebuild_markets(store: Any, reads: Any, sid: str, scope: dict[str, Any], mt: M.MarketType,
+                     emit: Callable[[dict[str, Any]], None]) -> int:  # fmt: skip
+    """Start's tiles for a market type: the wallet's ``top`` markets of the type traded in the range, the most money
+    first (``Reads.wallet_markets``, the agent's wallet_markets gets the same list), each built with every fill over
+    its whole life (``workspace.build_market``), SHOW_AT_ONCE at a time, then the coverage with what was left out."""
+    a_s, b_s = scope_time(scope["from"]), scope_time(scope["to"])
+    days = scope.get("min_days")
+    got = reads.wallet_markets(scope["wallet"], a_s, b_s, mt.id, float(days) if days is not None else None,
+                               int(scope.get("top") or MARKETS_TOP))  # fmt: skip
+    store.set_wallet(sid, got["wallet"])
+    slugs = [m["slug"] for m in got["markets"]]
+    covs = []
+    with ThreadPoolExecutor(max_workers=SHOW_AT_ONCE) as pool:
+        futures = {pool.submit(workspace.build, store, reads, sid, s): s for s in slugs}
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception as e:  # noqa: BLE001 - a market that can't be read is left for the agent to retry
+                print(f"research: prebuild {futures[fut]} failed: {type(e).__name__}: {e}", flush=True)
+                continue
+            emit({"type": "window.summary", **workspace.summary(r)})
+            covs.append(r["coverage"])
+    covs.sort(key=lambda c: c["window_id"] or "")
+    per = workspace.totals(covs)
+    per["selection"] = {"market_type": mt.id, "label": mt.label, "min_days": got["min_days"], "top": got["top"],
+                        "matched": got["matched"], "shown": len(covs), "markets_traded": got["markets_traded"],
+                        "markets_looked_at": got["markets_looked_at"], "from": got["start"], "asked_from": got["asked_from"],
+                        "to": got["end"],
+                        "trades_read": got["trades_read"], "trades_complete": got["trades_complete"],
+                        "read_to": got["read_to"]}  # fmt: skip
+    emit({"type": "coverage", "per_source": per, "windows": covs})
     return len(covs)
 
 
@@ -322,6 +380,11 @@ class Case:
 
     def check(self, key: str, texts: dict[str, str | None]) -> tuple[str | None, dict[str, Any]]:
         """Number-checks a card's texts: (an error for the agent on a first miss, else None; the number_check)."""
+        words = {k: w for k, v in texts.items() if v and (w := trace.banned_words(v))}
+        if words and f"words:{key}" not in self.failed_checks:
+            self.failed_checks.add(f"words:{key}")
+            said = "; ".join(f"{k}: " + ", ".join(f"'{w}' ({why})" for w, why in ws) for k, ws in words.items())
+            return (f"Error: these words break the wording rules: {said}. Reword them, then call this tool again."), {}
         src = self.sources()
         flagged = {k: trace.flagged(v, src) for k, v in texts.items() if v}
         flagged = {k: v for k, v in flagged.items() if v}
@@ -359,8 +422,21 @@ class Case:
         if scope.get("wallet"):
             self.store.set_wallet(self.sid, str(scope["wallet"]).lower())
         self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild)
+        fam = str(scope.get("family") or "")
+        if fam and M.by_id(fam) is None and not re.fullmatch(r"[a-z0-9]+-updown-\d+m-?", fam):
+            raise ReadError(f"scope.family {fam!r} isn't a market type: give market_type, one of "
+                            f"{', '.join(t.id for t in M.TYPES)}.")  # fmt: skip
+        mt = M.of_scope(scope)
+        if scope.get("market_type") and M.by_id(scope["market_type"]) is None:
+            raise ReadError(f"scope.market_type {scope['market_type']!r} isn't a market type: use one of "
+                            f"{', '.join(t.id for t in M.TYPES)}.")  # fmt: skip
+        if mt.unit == "market":
+            scope["market_type"] = mt.id
+            scope.setdefault("min_days", mt.min_days)
+            scope.setdefault("top", MARKETS_TOP)
         plan = {"type": "plan.proposed", "plan_id": f"plan-{self.ask_id}", "ask_id": self.ask_id,
                 "title": inp.get("title"), "scope": scope, "steps": steps,
+                "market": {"id": mt.id, "label": mt.label, "unit": mt.unit},
                 # the server's figure, never the model's guess: what recent Starts cost (None until there are enough)
                 "scope_options": inp.get("scope_options") or [], "estimate_usd": self.store.start_cost(),
                 "estimate_s": self.store.typical_seconds(start=True),  # likewise how long recent Starts took

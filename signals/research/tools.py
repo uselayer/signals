@@ -1,4 +1,5 @@
-"""The agent's five tools. Each is called from the agent's code in Anthropic's code-execution sandbox
+"""The agent's data tools (wallet_trades, wallet_profile, window, market, wallet_markets, outside_prices, and
+make_chart). Each is called from the agent's code in Anthropic's code-execution sandbox
 (programmatic tool calling: ``allowed_callers``), so thousands of trades go to its code, never into the chat. In
 the sandbox each tool is an async function taking one dict and returning a JSON string.
 """
@@ -11,6 +12,7 @@ from collections.abc import Callable
 from typing import Any
 
 from signals.research.data import ReadError, Reads, complete_slugs, unix
+from signals.research.markets import is_window
 
 CALLER = "code_execution_20260120"
 CODE_EXECUTION = {"type": CALLER, "name": "code_execution"}
@@ -28,8 +30,10 @@ TOOLS: list[dict[str, Any]] = [
             "ts (unix s, block time), slug (e.g. btc-updown-15m-1794285000, "
             "whose last part is the window's start in unix s), condition_id, outcome ('Up'/'Down'), outcome_index, "
             "token, action ('buy'/'sell'), price (0-1, dollars per contract), size (contracts), usd, tx}]}. "
-            "slug_prefix keeps only matching markets (default 'btc-updown-15m-'; null for every market). A busy "
-            "wallet can have thousands of trades a day: read a day or a few days at a time."
+            "slug_prefix keeps only matching markets (default 'btc-updown-15m-'; null for every market, e.g. "
+            "long-dated markets, whose outcomes are 'Yes'/'No'). A busy wallet can have thousands of trades a day: "
+            "read a day or a few days at a time. For a market type's markets ranked by money, use wallet_markets; "
+            "for one market's every fill over its whole life, use market."
         ),
         "input_schema": {
             "type": "object",
@@ -75,10 +79,60 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "wallet_markets",
+        "description": (
+            "A wallet's markets of one market type (e.g. 'btc-long': long-dated BTC price markets) traded between "
+            "start and end, the most money traded first: the same list Start's tiles are built from. JSON: {wallet, "
+            "start, end, market_type, label, min_days (only markets that run at least this long, listing to end "
+            "date), top, trades_read, trades_complete (false: read newest first, it stopped at 30,000 trades, so only "
+            "start onward was read, later than you asked: say so), start (how far back it read), asked_from, read_to, markets_traded, markets_looked_at, matched, markets: [{slug, condition_id, question, "
+            "event_slug, event_title (strikes of one event share it), start_iso, end_iso, runs_days, closed, result, "
+            "rule {kind, strike, source, says}, usd_in_range, fills_in_range, first_fill_in_range, "
+            "last_fill_in_range}], note}."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wallet": {"type": "string"}, "start": TIME, "end": TIME,
+                "market_type": {"type": "string", "description": "A market type id, e.g. 'btc-long'."},
+                "min_days": {"type": "number"}, "top": {"type": "integer"},
+            },  # fmt: skip
+            "required": ["wallet", "start", "end", "market_type"],
+        },
+    },
+    {
+        "name": "market",
+        "description": (
+            "One market that isn't a 15-minute window (e.g. 'Will Bitcoin reach $100,000 by December 31, 2026?'), "
+            "for the breakdown's wallet, by slug: the replay the page draws, built from the data. JSON: {kind "
+            "'market', window_id (the slug), market_type, title (the question), event_slug, event_title, "
+            "market_start, market_end, closed, closed_at, result ('Yes'/'No', null while open), rule {kind "
+            "(touch_high | touch_low | close_above | close_below | all_time_high | other), strike, source, says}, "
+            "rules (the market's own resolution text: quote it rather than assume), outcomes, prices {Yes: [{t, p}], "
+            "No: [...]} (p 0-1, one point per coverage.price_step_s), outside {name 'Binance BTCUSDT', unit, step, "
+            "points [{t, p}] (closes), ranges [{t, h, l}] (each candle's high and low), highest {t, high}, lowest "
+            "{t, low}} or null, trades [{trade_id, t, side (the outcome), action, shares, price, usd, outside (the "
+            "outside line's close at or before the fill)}] (every fill over the market's whole life), position "
+            "[{t, held: {Yes, No}}], hold {from, to, days, still_held}, value {cost, sold_for, held, payout, "
+            "value_now, last_prices, profit, profit_kind: resolved | closed (sold out before the end) | open (valued "
+            "at the latest price, not a result)}, coverage {price_step_s, fills_complete, shares_not_from_fills "
+            "(true: it sold shares no fill shows it buying, e.g. from splitting dollars into both outcomes, so "
+            "profit is null; not missing fills), "
+            "outside, outside_step, notes}}. Times are unix seconds."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"slug": {"type": "string"}},
+            "required": ["slug"],
+        },
+    },
+    {
         "name": "outside_prices",
         "description": (
             "Prices outside Polymarket between start and end. source 'binance': BTC priced in USDT (Tether) on "
-            "Binance spot, candle close, 1-second steps for up to an hour, 1-minute steps up to 2 days. source "
+            "Binance spot, candle close, 1-second steps for up to an hour, 1-minute steps up to 2 days, hourly candles up to "
+            "120 days and daily beyond, those with ranges [[ts, high, low]] and the span's highest and lowest (exact "
+            "for 'did BTC touch $X': a candle's high covers every minute in it). source "
             "'chainlink': Chainlink BTC/USD (US dollars: what windows settle on, and the price to beat is its "
             "60-second average) where Layer recorded it, from 10 Nov 2026 05:27 UTC. JSON: {source, symbol, unit, "
             "start, end, available, why (when not available), step, points: [[ts unix s, price]]}. Different units: "
@@ -182,6 +236,27 @@ def run(name: str, inp: dict[str, Any], reads: Reads,
             summary = {"slug": out.get("slug"), "result": out.get("result"), "coverage": out.get("coverage")}
             if keep and out.get("slug"):
                 store.put_window(sid, out["slug"], read=out)
+        elif name == "wallet_markets":
+            out = reads.wallet_markets(inp.get("wallet", ""), inp.get("start"), inp.get("end"),
+                                       inp.get("market_type", ""), inp.get("min_days"), inp.get("top"))  # fmt: skip
+            if keep:
+                store.set_wallet(sid, out["wallet"])
+            summary = {"rows": len(out["markets"]), "matched": out["matched"], "complete": out["trades_complete"],
+                       "limit_hit": not out["trades_complete"]}  # fmt: skip
+        elif name == "market":
+            slug = str(inp.get("slug") or "").strip()
+            if not slug:
+                raise ReadError("Give the market's slug.")
+            if is_window(slug):
+                raise ReadError("That's a 15-minute window: use the window tool for it.")
+            if not keep or not (store.session_any(sid) or {}).get("wallet"):
+                raise ReadError("Read the wallet's trades first (wallet_trades or wallet_markets), so the market's "
+                                "replay has a wallet.")  # fmt: skip
+            from signals.research import workspace
+
+            out = workspace.build(store, reads, sid, slug)
+            summary = {"slug": slug, "result": out.get("result"), "fills": len(out["trades"]),
+                       "profit_kind": out["value"]["profit_kind"]}  # fmt: skip
         elif name == "outside_prices":
             out = reads.outside_prices(inp.get("source", ""), inp.get("start"), inp.get("end"), inp.get("symbol") or "BTC")
             summary = {"source": out.get("source"), "available": out.get("available"), "points": len(out.get("points") or [])}

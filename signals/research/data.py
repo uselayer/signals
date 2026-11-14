@@ -40,7 +40,19 @@ MARKET_TRADES = 3_000  # a window's trades by everyone read for one call
 # day ahead; pre-open fills are mostly seconds early). Same span as the replay's axis (workspace.PRE_OPEN_MAX_S).
 PRE_OPEN_READ_S = 1_800
 BINANCE = "https://data-api.binance.vision/api/v3/klines"  # market data only; api.binance.com refuses the US (451)
-BINANCE_MAX_S = 2 * 86_400
+BINANCE_MAX_S = 2 * 86_400  # 1-minute candles up to here; longer spans step up (BINANCE_STEPS)
+# Longer spans: hourly candles to 120 days, daily beyond, each with its high and low (a candle's high and low cover
+# every minute in it, so "the highest 1-minute high" over a span is exact at any step).
+BINANCE_STEPS = [(120 * 86_400, "1h", 3_600), (None, "1d", 86_400)]
+# Polymarket's price history (clob prices-history, 1-minute) refuses a span over about 15 days ("interval is too
+# long", measured 13 Nov): read in 14-day pieces and keep one point per step, the step growing with the span.
+PRICE_CHUNK_S = 14 * 86_400
+PRICE_STEPS = [(2 * 86_400, 60), (15 * 86_400, 900), (120 * 86_400, 3_600), (None, 14_400)]
+MARKET_FILLS = 5_000  # a wallet's fills in one market read over its whole life (Polymarket lists 5,000 by offset)
+FACTS_AT_ONCE = 20  # Gamma's markets by condition id, per read
+MARKETS_TOP = 20  # a market-type scope's tiles: its markets with the most money traded in the range
+MARKETS_LOOKED_AT = 60  # markets whose facts are read to find them (the most money traded first)
+NEWEST_CHUNK_S = 7 * 86_400  # a market-type scope reads the wallet's trades a week at a time, newest first
 ENGINE = os.environ.get("SIGNALS_ENGINE_URL", "https://usesignals.app").rstrip("/")
 # Layer's recordings, for the notes a recorded window carries (supervisor brief, 10 Nov; docs/tick-recorder.md in Layer).
 BOOKS_FROM = 1_793_638_800  # 2026-11-02 17:00 UTC: up/down windows recorded by default from here
@@ -164,6 +176,42 @@ def trade_id(tx: Any, asset: Any, action: Any, price: Any, size: Any, ts: Any) -
     return hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
+def _when(x: Any) -> int | None:
+    """Unix seconds from Gamma's dates ("2026-12-31T12:00:00Z", "2026-09-12 14:03:22+00"), None when missing."""
+    if not x:
+        return None
+    s = str(x).strip().replace(" ", "T", 1)
+    if re.search(r"[+-]\d\d$", s):
+        s += ":00"
+    try:
+        return unix(s)
+    except ReadError:
+        return None
+
+
+def market_facts(m: dict[str, Any]) -> dict[str, Any]:
+    """A Gamma market as the agent and the replay read it: the question, its event (several strikes of one event
+    share it), its own rules (what resolves it), when it was listed, ends and closed, its outcomes and tokens, and
+    the outcome that won (None while open)."""
+    event = (m.get("events") or [{}])[0]
+    outcomes = json.loads(m.get("outcomes") or "[]")
+    tokens = json.loads(m.get("clobTokenIds") or "[]")
+    paid = json.loads(m.get("outcomePrices") or "[]")
+    result = None
+    if m.get("closed") and len(paid) == len(outcomes):
+        result = next((o for o, p in zip(outcomes, paid, strict=True) if float(p) == 1.0), None)
+    start = _when(m.get("startDate") or m.get("createdAt") or event.get("startDate"))
+    end = _when(m.get("endDate") or event.get("endDate"))
+    closed_at = _when(m.get("closedTime")) if m.get("closed") else None
+    return {"slug": m.get("slug"), "condition_id": m.get("conditionId"), "question": m.get("question"),
+            "event_slug": event.get("slug"), "event_title": event.get("title"),
+            "start": start, "end": end, "closed_at": closed_at, "start_iso": iso(start) if start else None,
+            "end_iso": iso(end) if end else None, "closed_at_iso": iso(closed_at) if closed_at else None,
+            "closed": bool(m.get("closed")), "result": result, "outcomes": outcomes,
+            "tokens": dict(zip(outcomes, tokens, strict=False)), "description": m.get("description"),
+            "resolution_source": m.get("resolutionSource") or event.get("resolutionSource")}  # fmt: skip
+
+
 def _row(t: Any) -> dict[str, Any]:
     """One trade (a uselayer ``WhaleTrade``) as the agent sees it."""
     cid, _, idx = (t.market or "").partition(":")
@@ -187,6 +235,24 @@ class Reads:
         # Layer's window reader and Chainlink recordings, once readable (the recorder session's PRs): None = not yet.
         self.recorded_window = recorded_window or (lambda slug: None)
         self.chainlink = chainlink or (lambda symbol, start, end: None)
+        # reads two callers may ask for at once (Start's tiles and the agent's code): the second waits for the first
+        self._memo: dict[Any, tuple[float, Any]] = {}
+        self._memo_lock = threading.Lock()
+        self._key_locks: dict[Any, threading.Lock] = {}
+
+    def _once(self, key: Any, fn: Callable[[], Any], ttl: float) -> Any:
+        with self._memo_lock:
+            lock = self._key_locks.setdefault(key, threading.Lock())
+        with lock:
+            hit = self._memo.get(key)
+            if hit is not None and time.time() - hit[0] < ttl:
+                return hit[1]
+            v = fn()
+            with self._memo_lock:
+                for k in [k for k, (at, _) in self._memo.items() if time.time() - at > 3_600]:
+                    self._memo.pop(k, None)
+                self._memo[key] = (time.time(), v)
+            return v
 
     # ---- a wallet ----
 
@@ -344,6 +410,180 @@ class Reads:
             out["coverage"]["note"] = f"Only the latest {MARKET_TRADES} trades in this market were read."
         return out
 
+    # ---- a market that isn't a 15-minute window (long-dated BTC; later politics, sports) ----
+
+    def markets_facts(self, condition_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Gamma's facts for many markets by condition id, FACTS_AT_ONCE a read (open and closed asked apart), as
+        ``market_facts`` shapes them, by condition id. Markets Gamma doesn't list are left out."""
+        poly, out = self.whales._poly, {}
+        ids = list(dict.fromkeys(c for c in condition_ids if c))
+        for i in range(0, len(ids), FACTS_AT_ONCE):
+            part = ids[i : i + FACTS_AT_ONCE]
+            for closed in (True, False):
+                for m in poly.markets(part, closed=closed) or []:
+                    if m.get("conditionId") and m["conditionId"] not in out:
+                        out[m["conditionId"]] = market_facts(m)
+        return out
+
+    def market_fills(self, wallet: str, condition_id: str) -> dict[str, Any]:
+        """A wallet's fills in one market over the market's whole life (the SDK reader's ``trades_in``: until uselayer
+        has a public read for it), as ``wallet_trades`` rows with the same ids. ``complete`` false: it stopped at
+        MARKET_FILLS and the oldest fills weren't read."""
+        w = str(wallet).strip().lower()
+        if not WALLET.fullmatch(w):
+            raise ReadError("That isn't a Polymarket wallet address (0x and 40 hex characters).")
+        raw = self.whales._poly.trades_in(w, [condition_id], limit=MARKET_FILLS)
+        rows = []
+        for r in raw:
+            action = "sell" if str(r.get("side")).upper() == "SELL" else "buy"
+            row = {"ts": int(r.get("timestamp") or 0), "slug": r.get("slug"), "condition_id": r.get("conditionId"),
+                   "outcome": r.get("outcome"), "outcome_index": r.get("outcomeIndex"), "token": r.get("asset"),
+                   "action": action, "price": float(r.get("price") or 0), "size": round(float(r.get("size") or 0), 6),
+                   "usd": float(r["usdcSize"]) if r.get("usdcSize") is not None else None, "tx": r.get("transactionHash")}  # fmt: skip
+            row["id"] = trade_id(row["tx"], row["token"], action, row["price"], row["size"], row["ts"])
+            rows.append(row)
+        rows = list({r["id"]: r for r in rows}.values())
+        rows.sort(key=lambda r: (r["ts"], r["tx"] or ""))
+        return {"wallet": w, "condition_id": condition_id, "count": len(rows), "complete": len(raw) < MARKET_FILLS,
+                "source": "Polymarket activity for this market (uselayer)", "trades": rows}  # fmt: skip
+
+    def price_series(self, token: str, start: int, end: int) -> tuple[list[list[float]], int]:
+        """An outcome's price from ``start`` to ``end`` at one step for the span (PRICE_STEPS: 1 minute to 2 days,
+        15 minutes to 15 days, an hour to 120 days, 4 hours beyond), read in PRICE_CHUNK_S pieces: the last price in
+        each step, at the second Polymarket took it. Returns (points, step in seconds)."""
+        a, b = int(start), int(min(end, now()))
+        step = next(s for lim, s in PRICE_STEPS if lim is None or b - a <= lim)
+        seen: dict[int, float] = {}
+        at = a
+        while at <= b:
+            hi = min(b, at + PRICE_CHUNK_S)
+            for t, p in self.whales.price_history(token, at, hi):
+                seen[int(t)] = float(p)
+            at = hi + 1
+        pts = sorted(seen.items())
+        if step > 60:
+            last: dict[int, tuple[int, float]] = {}
+            for t, p in pts:
+                last[t // step] = (t, p)
+            pts = [last[k] for k in sorted(last)]
+        return [[t, p] for t, p in pts], step
+
+    def market_facts(self, slug: str | None = None, condition_id: str | None = None) -> dict[str, Any]:
+        """One market's facts (``market_facts``), by slug or condition id."""
+        return market_facts(self._market(slug, condition_id))
+
+    def market(self, slug: str | None = None, condition_id: str | None = None, start: Any = None,
+               end: Any = None, *, facts: dict[str, Any] | None = None) -> dict[str, Any]:  # fmt: skip
+        """One market's facts (``market_facts``: question, its rules and what resolves it, dates, outcomes, result)
+        and its outcomes' prices from ``start`` to ``end`` (default: its listing, at most 120 days back, to its end
+        or now) at a step for the span (``price_series``). Only the first outcome's history is read; the other's is
+        1 minus it (a binary market's two prices add to about $1), and coverage says so."""
+        if not slug and not condition_id:
+            raise ReadError("Give the market's slug or its condition_id.")
+        f = facts or market_facts(self._market(slug, condition_id))
+        hi = int(min(unix(end) if end is not None else (f["closed_at"] or f["end"] or now()), now()))
+        lo = unix(start) if start is not None else max(f["start"] or hi - 120 * 86_400, hi - 120 * 86_400)
+        lo = min(lo, hi)
+        names = list(f["tokens"])
+        prices: dict[str, list[list[float]]] = {}
+        step = None
+        if names:
+            pts, step = self.price_series(f["tokens"][names[0]], lo, hi)
+            prices[names[0]] = pts
+            if len(names) == 2:
+                prices[names[1]] = [[t, round(1 - p, 6)] for t, p in pts]
+        first = prices.get(names[0], []) if names else []
+        gaps = [q[0] - p[0] for p, q in zip(first, first[1:], strict=False)]
+        return f | {"prices": prices, "price_from": lo, "price_to": hi, "coverage": {
+            "source": "Polymarket price history (uselayer), read in 14-day pieces",
+            "price_step_s": step, "price_points": len(first),
+            "largest_price_gap_s": max(gaps) if gaps else None,
+            "price_note": (f"{names[1]}'s price is 1 minus {names[0]}'s: only {names[0]}'s history is read."
+                           if len(names) == 2 else None)}}  # fmt: skip
+
+    def wallet_markets(self, wallet: str, start: Any, end: Any, market_type: str, min_days: float | None = None,
+                       top: int | None = None) -> dict[str, Any]:  # fmt: skip
+        """The wallet's markets of one type (``markets.TYPES``) traded from ``start`` to ``end``, the most money
+        traded first: every trade in the range read (``wallet_trades``, every market), the MARKETS_LOOKED_AT busiest
+        candidates' facts read, kept when the type matches and the market runs ``min_days`` or more, ``top`` of
+        them returned. Start's tiles and the agent's code get the same answer (read once, kept 10 minutes)."""
+        from signals.research import markets as M
+
+        mt = M.by_id(market_type)
+        if mt is None or mt.unit != "market":
+            names = ", ".join(t.id for t in M.TYPES if t.unit == "market")
+            raise ReadError(f"market_type must be one of: {names}.")
+        w = str(wallet).strip().lower()
+        a, b = unix(start), unix(end)
+        days = float(mt.min_days if min_days is None else min_days)
+        n = int(top or MARKETS_TOP)
+        return self._once(("wallet_markets", w, a // 60, b // 60, mt.id, days, n),
+                          lambda: self._wallet_markets(w, a, b, mt, days, n), ttl=600)  # fmt: skip
+
+    def _newest_trades(self, w: str, a: int, b: int) -> dict[str, Any]:
+        """Every trade from ``a`` to ``b``, read newest week first (a long-dated scope wants the latest markets: read
+        oldest first, a busy wallet's 30,000 trades ran out in its first 15 of 90 days, 13 Nov), until MAX_TRADES.
+        A week that can't be read whole ends the read there. ``start``: how far back it got; ``complete`` false
+        when that's later than ``a``."""
+        rows: list[dict[str, Any]] = []
+        hi, start, complete, note = b, b, True, ""
+        while hi > a:
+            lo = max(a, hi - NEWEST_CHUNK_S)
+            got = self.wallet_trades(w, lo, hi, None)
+            if not got["complete"]:
+                complete = False
+                break
+            rows = got["trades"] + rows
+            start, hi = lo, lo - 1
+            if len(rows) >= MAX_TRADES and hi > a:
+                complete = False
+                break
+        if not complete:
+            note = (f"Partial: read back from {iso(b)} to {iso(start)} only, newest first; it stopped at "
+                    f"{MAX_TRADES:,} trades (of every market), so trades before {iso(start)} weren't read.")  # fmt: skip
+        return {"trades": rows, "count": len(rows), "start": start, "complete": complete,
+                "read_to": b if complete else start, "source": "Polymarket activity via uselayer whales.trades_between",
+                "note": note or "Fills as Polymarket records them. Maker or taker isn't known from this read."}  # fmt: skip
+
+    def _wallet_markets(self, w: str, a: int, b: int, mt: Any, days: float, n: int) -> dict[str, Any]:
+        from signals.research import markets as M
+
+        got = self._newest_trades(w, a, b)
+        by: dict[str, dict[str, Any]] = {}
+        for t in got["trades"]:
+            if M.is_window(t.get("slug")) or not mt.matches(t.get("slug"), {}):
+                continue  # the slug alone rules it out (an Up/Down window, another subject)
+            m = by.setdefault(t["condition_id"], {"usd": 0.0, "fills": 0, "first": t["ts"], "last": t["ts"],
+                                                  "slug": t.get("slug")})  # fmt: skip
+            m["usd"] += float(t.get("usd") or 0)
+            m["fills"] += 1
+            m["first"], m["last"] = min(m["first"], t["ts"]), max(m["last"], t["ts"])
+        ranked = sorted(by, key=lambda c: -by[c]["usd"])
+        looked = ranked[:MARKETS_LOOKED_AT]
+        facts = self.markets_facts(looked)
+        kept = []
+        for c in looked:
+            f = facts.get(c)
+            if not f or not mt.matches(f["slug"], f):
+                continue
+            runs = (f["end"] - f["start"]) / 86_400 if f["end"] and f["start"] else None
+            if runs is not None and runs < days:
+                continue
+            m = by[c]
+            kept.append({"slug": f["slug"], "condition_id": c, "question": f["question"], "event_slug": f["event_slug"],
+                         "event_title": f["event_title"], "start_iso": f["start_iso"], "end_iso": f["end_iso"],
+                         "runs_days": None if runs is None else round(runs, 1), "closed": f["closed"],
+                         "result": f["result"], "rule": mt.rule(f), "usd_in_range": round(m["usd"], 2),
+                         "fills_in_range": m["fills"], "first_fill_in_range": m["first"],
+                         "last_fill_in_range": m["last"]})  # fmt: skip
+        return {"wallet": w, "start": got["start"], "asked_from": a, "end": b, "market_type": mt.id, "label": mt.label,
+                "min_days": days,
+                "top": n, "trades_read": got["count"], "trades_complete": got["complete"], "read_to": got["read_to"],
+                "markets_traded": len(by), "markets_looked_at": len(looked), "matched": len(kept),
+                "markets": kept[:n], "source": got["source"],
+                "note": (f"The {len(looked)} markets with the most money traded were checked; "
+                         f"{max(0, len(ranked) - len(looked))} smaller ones weren't. " + got["note"])}  # fmt: skip
+
     # ---- prices outside Polymarket ----
 
     def outside_prices(self, source: str, start: Any, end: Any, symbol: str = "BTC") -> dict[str, Any]:
@@ -365,7 +605,7 @@ class Reads:
         if source != "binance":
             raise ReadError('source must be "binance" or "chainlink".')
         if b - a > BINANCE_MAX_S:
-            raise ReadError("Ask Binance for at most 2 days at a time.")
+            return self._binance_long(sym, a, b)
         interval, step_s = ("1s", 1) if b - a <= 3_600 else ("1m", 60)
         pts: list[list[float]] = []
         at = a * 1000
@@ -389,6 +629,55 @@ class Reads:
         return {"source": "binance spot (data-api.binance.vision)", "symbol": f"{sym}USDT", "unit": "USDT (Tether), not USD", "start": a, "end": b,
                 "available": True, "step": f"{step_s} second{'s' if step_s > 1 else ''}", "price": "candle close",
                 "points": pts}  # fmt: skip
+
+
+    def _binance_long(self, sym: str, a: int, b: int) -> dict[str, Any]:
+        """Binance over more than 2 days: hourly candles to 120 days, daily beyond (BINANCE_STEPS), each with its
+        close (``points``) and its high and low (``ranges``), plus the span's highest high and lowest low. Read in
+        whole 1,000-candle blocks; a block that has ended is kept, so markets over the same weeks read it once."""
+        interval, step_s = next((iv, st) for lim, iv, st in BINANCE_STEPS if lim is None or b - a <= lim)
+        block = 1_000 * step_s
+        rows: list[list[Any]] = []
+        at = a // block * block
+        while at <= b:
+            hi = at + block - 1
+
+            def read(at: int = at, hi: int = hi) -> Any:
+                try:
+                    r = self.web.get(BINANCE, params={"symbol": f"{sym}USDT", "interval": interval, "startTime": at * 1000,
+                                                      "endTime": hi * 1000, "limit": 1000})  # fmt: skip
+                except httpx.HTTPError as e:
+                    return {"why": f"Binance couldn't be reached: {type(e).__name__}."}
+                if r.status_code in (403, 451):
+                    return {"why": f"Binance refuses reads from this server's location (HTTP {r.status_code})."}
+                if r.status_code == 400:
+                    raise ReadError(f"Binance doesn't list {sym}USDT.")
+                r.raise_for_status()
+                return r.json()
+
+            got = self._once(("binance", sym, interval, at), read, ttl=10 * 365 * 86_400) if hi < now() - step_s \
+                else read()  # fmt: skip
+            if isinstance(got, dict):
+                with self._memo_lock:
+                    self._memo.pop(("binance", sym, interval, at), None)  # a failure is never kept
+                return {"source": "binance", "available": False, "why": got["why"]}
+            rows += [k for k in got if a < k[0] // 1000 + step_s and k[0] // 1000 <= b]  # the candle holding a too
+            at += block
+        # a close is the price when its candle ended: stamped at the end, so "the close at or before a fill" is
+        # never a price from after it
+        pts = [[int(min(k[0] // 1000 + step_s, now())), float(k[4])] for k in rows]
+        ranges = [[k[0] // 1000, float(k[2]), float(k[3])] for k in rows]
+        top = max(ranges, key=lambda r: r[1], default=None)
+        bottom = min(ranges, key=lambda r: r[2], default=None)
+        word = {3_600: "1 hour", 86_400: "1 day"}[step_s]
+        return {"source": "binance spot (data-api.binance.vision)", "symbol": f"{sym}USDT",
+                "unit": "USDT (Tether), not USD", "start": a, "end": b, "available": True, "step": word,
+                "price": "candle close", "points": pts, "ranges": ranges,
+                "highest": {"t": top[0], "high": top[1]} if top else None,
+                "lowest": {"t": bottom[0], "low": bottom[2]} if bottom else None,
+                "note": f"{word} candles (the span is over 2 days): points are closes, stamped when each candle ended; "
+                        "ranges [t (the candle's start), high, low] hold every minute's high and low inside each "
+                        "candle, so the highest high is exact."}  # fmt: skip
 
 
 def reads() -> Reads:
