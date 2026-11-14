@@ -307,7 +307,11 @@ in the same investigation.
 It's `signals/research/`, its own service (`Dockerfile.research`, `railway.research.json`), never inside the engine:
 investigations are long and read a lot, and the engine keeps alerts first.
 
-- **The loop** (`agent.py`): `claude-opus-5-5`, adaptive thinking, code execution. Its five tools are called from its
+- **Market types** (`markets.py`): a breakdown studies one, named in its plan's scope: BTC 15-minute windows (a tile
+  per window), or long-dated BTC price markets ("Will Bitcoin reach $X by December 31?", a tile per market: its
+  whole life for the wallet, the market's price over weeks, Binance BTCUSDT with highs and lows, open positions
+  valued at today's price). Politics and sports join as one entry each in `TYPES`.
+- **The loop** (`agent.py`): `claude-opus-5-5`, adaptive thinking, code execution. Its data tools are called from its
   code (programmatic tool calling), so a wallet's thousands of trades go to the code, never into the chat:
   `wallet_trades` (uselayer 0.19 `whales.trades_between`, filtered to `btc-updown-15m-` slugs, paged past full
   reads), `wallet_profile` (the engine's public `/api/record` and `/api/account`), `window` (a window's start price,

@@ -427,6 +427,14 @@ behind Vercel (see README, "Hosting").
 - Wording: "Research wording" below (confirmed by the owner, 10 Nov).
 - Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
   Layer's recordings.
+- Market types (`markets.py` `TYPES`): BTC 15-minute windows and long-dated BTC (one tile per market). A new kind
+  (politics, a sports league) is one entry there: what matches, what resolves one market (read from its own rules,
+  never assumed for the type), its outside line, its default `min_days` and its prompt section. The 15-minute
+  path stays as it is. A long-dated breakdown reads back 90 days and tiles the 20 markets with the most money
+  traded, markets running 7+ days (owner's defaults until changed); an open position is valued at today's price
+  and called open.
+- The wording check sends back a finding, step or answer that says "bet", "edge", "ROI", "it's a bot"… once to
+  reword it (`trace.banned_words`), as the number check does.
 - Signed in only, and an investigation, its events and charts are only ever its owner's. Costs are capped per
   question, per person and per day (`RESEARCH_*_USD`); raising them is the owner's call.
 - Signed out, `/research` is a teaser (owner, 10 Nov: tease visitors into signing up): what a breakdown is, "Sign in

@@ -571,7 +571,8 @@ def test_charts_must_hold_their_own_data() -> None:
 
 def test_every_data_tool_is_called_from_code_only() -> None:
     assert all(t["allowed_callers"] == [T.CALLER] for t in T.TOOLS)
-    assert {t["name"] for t in T.TOOLS} == {"wallet_trades", "wallet_profile", "window", "outside_prices", "make_chart"}
+    assert {t["name"] for t in T.TOOLS} == {"wallet_trades", "wallet_profile", "window", "market", "wallet_markets",
+                                         "outside_prices", "make_chart"}
 
 
 # ---- the loop, with a scripted model ----

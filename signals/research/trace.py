@@ -118,3 +118,27 @@ def check(text: str, sources: Sources) -> dict[str, Any]:
     found = numbers(text)
     unmatched = [raw for raw, value, tol in found if not sources.has(value, tol, _scaled(raw))]
     return {"ok": not unmatched, "checked": len(found), "unmatched": list(dict.fromkeys(unmatched))}
+
+
+# Words the research wording rules never use (AGENTS.md "Research wording", 6 and 5; SYSTEM "# Wording"), with what
+# to say instead. A finding, step or answer using one gets one chance to reword it (``case.Case.check``).
+BANNED = [
+    (re.compile(r"\bbet(?:s|ting|tor|tors)?\b", re.IGNORECASE), "say trade, never bet"),
+    (re.compile(r"\bgambl(?:e|es|ed|ing)\b", re.IGNORECASE), "say trade"),
+    (re.compile(r"\bROI\b"), "say the profit worked out from fills"),
+    (re.compile(r"\b(?:edge|alpha)\b", re.IGNORECASE), "say what the data shows, never edge or alpha"),
+    (re.compile(r"\bsmart money\b", re.IGNORECASE), "describe what the data shows"),
+    (re.compile(r"\bwin streak\b", re.IGNORECASE), "count the markets or windows"),
+    (re.compile(r"\b(?:its|it's|it is) a bot\b", re.IGNORECASE), "intent is never fact"),
+    (re.compile(r"\bfront[- ]?runs?\b|\bfront[- ]?running\b", re.IGNORECASE), "intent is never fact"),
+    (re.compile(r"\b(?:worth following|you could|buy when)\b", re.IGNORECASE), "no advice"),
+]
+
+
+def banned_words(text: str) -> list[tuple[str, str]]:
+    """The banned words ``text`` uses, as written, each with what to do instead."""
+    out = []
+    for rx, why in BANNED:
+        for m in rx.finditer(text or ""):
+            out.append((m.group(0), why))
+    return out

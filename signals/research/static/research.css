@@ -390,3 +390,9 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .list .r.queued { color: var(--ink); }
 .waitnote { display: flex; gap: 10px; align-items: flex-start; border-radius: 12px; padding: 10px 12px; background: var(--ink-soft); font-size: 14px; }
 .waitnote .dot { margin-top: 6px; }
+
+/* markets (a market type whose unit is a market: long-dated BTC): tiles with the question, the replay's rule line */
+.mtiles { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.mtile .mt { font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.6em; }
+.mtile .tt .open { color: var(--ink); font-weight: 600; } .mtile .tt .res { color: var(--fg); font-weight: 600; }
+.wv .sum .rule { flex-basis: 100%; }
