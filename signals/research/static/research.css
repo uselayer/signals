@@ -7,7 +7,7 @@
   color-scheme: dark;
   --bg: #0e0e0f; --card: #161617; --fg: #ececec; --muted: #8f8f95; --faint: #838389; --line: #26262a; --soft: #1b1b1e;
   --accent: #ff4d1f; --accent-soft: #2a1610; --on-accent: #0e0e0f;
-  --gain: #3ecf8e; --loss: #f0506e;
+  --gain: #3ecf8e; --loss: #f0506e; --amber: #f5a524; --blue: #7aa2ff;
   --up: #3cc6cf; --down: #c792ea; --binance: #8b8f99; --ink: #f5a524; --ink-soft: #2b2110; --hatch: #838389;
   --shadow: none;
   --font: "Host Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -17,7 +17,7 @@
   color-scheme: light;
   --bg: #fafaf9; --card: #ffffff; --fg: #111112; --muted: #6c6c72; --faint: #6e6e73; --line: #ececea; --soft: #f3f3f1;
   --accent: #4b3fe0; --accent-soft: #eeedfc; --on-accent: #ffffff;
-  --gain: #087f3d; --loss: #cf3426;
+  --gain: #087f3d; --loss: #cf3426; --amber: #a86200; --blue: #2557d6;
   --up: #0b7a83; --down: #8e44ad; --binance: #8b8f99; --ink: #a86200; --ink-soft: #fbf1df; --hatch: #a1a1a6;
   --shadow: 0 1px 2px rgba(17, 17, 18, .04), 0 2px 8px rgba(17, 17, 18, .03);
 }
@@ -56,7 +56,12 @@ p { margin: 0; }
 .btn.later { border-style: dashed; color: var(--muted); background: transparent; }
 .link { border: 0; background: none; padding: 0; color: var(--accent); font-size: 13.5px; font-weight: 500; text-align: left; }
 .chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 10px; font-size: 13px; background: var(--soft); white-space: nowrap; }
-.chip.bot { background: transparent; border: 1px solid var(--line); padding: 2px 9px; color: var(--fg); } /* "Bot-like", as the Leaderboard's tag */
+/* Human or Bot, as the Leaderboard's: a pill with a coloured icon (blue person, amber robot) */
+.who-tag { --c: var(--muted); display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px 3px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 8%, var(--card)); border: 1px solid color-mix(in srgb, var(--c) 40%, var(--line));
+  color: var(--fg); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.who-tag svg { width: 15px; height: 15px; color: var(--c); flex: none; }
+.who-tag.bot { --c: var(--amber); } .who-tag.human { --c: var(--blue); }
 .tag { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; line-height: 1.35; }
 .tag.observed { background: var(--soft); color: var(--fg); }
 .tag.observed::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--fg); }
