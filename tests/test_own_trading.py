@@ -92,7 +92,7 @@ def ex(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> Exchange:
 
 
 def alert(uid: str = OWNER) -> dict[str, Any]:
-    assert engine._deliver(uid, "555", new_buy(SAM, datetime.now(UTC), now=0.42), "Politics") == 1
+    assert engine._deliver(uid, "555", new_buy(SAM, datetime.now(UTC), now=0.42), "Weather") == 1  # Kalshi takes it
     return engine.tg.sent[-1]
 
 
@@ -155,6 +155,21 @@ def test_the_owner_gets_one_copy_button_and_no_one_else_does(api: TestClient, mo
     assert "Copy $25" in buttons(alert())  # on Kalshi alone: still the one button
     monkeypatch.setattr(engine, "kalshi_of", lambda *a, **k: {"found": False})  # no verified match: no button
     assert not any(t.startswith("Copy") or t == "Change amount" for t in buttons(alert()))
+
+
+def test_sports_copy_on_polymarket_us_only_since_kalshi_refuses_washington(ex: Exchange, monkeypatch: pytest.MonkeyPatch) -> None:
+    def sports_alert() -> str:
+        assert engine._deliver(OWNER, "555", new_buy(SAM, datetime.now(UTC), now=0.42), "Sports") == 1
+        return buttons(engine.tg.sent[-1])["Copy $25"][3:]
+
+    ex.asks["k"] = 0.40  # Kalshi cheaper: still not used for a sports alert
+    tap(f"cv:{sports_alert()}")
+    assert ex.orders[-1]["venue"] == "polymarket_us"
+    assert "whichever" not in engine.tg.sent[-1]["text"]  # one exchange: nothing to compare
+    monkeypatch.setattr(engine, "us_of", lambda *a, **k: {"found": False})  # sports on Kalshi alone: no button
+    assert engine._deliver(OWNER, "555", new_buy(SAM, datetime.now(UTC), now=0.42), "Sports") == 1
+    assert not any(t.startswith("Copy") for t in buttons(engine.tg.sent[-1]))
+    assert "Copy $25" in buttons(alert())  # Weather on Kalshi alone: Washington still allows it
 
 
 # ---- a tap ----

@@ -45,6 +45,11 @@ LIMIT_MIN = float(os.environ.get("SIGNALS_OWN_LIMIT_MIN", "30"))  # how long a l
 MIN_USD = 1.0  # one contract never costs more than 99¢
 AMOUNTS = (5.0, 10.0, 50.0)  # the amounts offered as buttons; "Type my own" takes any other
 VENUES = {"k": ("kalshi", "Kalshi"), "u": ("polymarket_us", "Polymarket US")}
+# Categories Kalshi refuses the owner's account: a Washington court order (Aug 2026) bars Washington residents from
+# Sports, Elections, Politics, Culture, Tech and Science, and Mentions there. The owner (15 Nov 2026): "let's use
+# poly us for sports then". So in these an alert offers Polymarket US only (no Copy button when it isn't there).
+KALSHI_SKIP = frozenset(c.strip() for c in os.environ.get(
+    "SIGNALS_OWN_KALSHI_SKIP", "Sports,Esports,Politics,Culture,Tech,Mentions").split(",") if c.strip())
 NOBODY_SELLING = ("not_filled", "no_liquidity")  # the misses a limit order answers
 TAPS = ("cv", "ca", "cu", "ct", "cj", "ce", "cl", "cx", "os", "oa", "om", "oy", "noop")  # this module's buttons
 INTRO = "New: tap Copy to buy this yourself. Tap Change amount first for a different amount."  # once, on the first alert
