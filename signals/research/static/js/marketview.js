@@ -83,10 +83,14 @@ function EveryBuyChart({ tiles, act }) {
   if (!pts.length) return null;
   const H = 240, L = 44, R = 12, T = 12, B = 30;
   const maxD = Math.max(7, ...pts.map(p => p.daysLeft));
-  const X = d => L + (1 - d / maxD) * (width - L - R), Y = c => T + (1 - c / 100) * (H - T - B);
+  // one market listed years ahead (a 2028 nomination) would squeeze every other buy into the right edge: then the
+  // days are drawn on a square-root scale, and the axis says so
+  const sorted = pts.map(p => p.daysLeft).sort((a, b) => a - b), p90 = sorted[Math.floor(0.9 * (sorted.length - 1))];
+  const root = maxD > 4 * Math.max(7, p90), f = d => (root ? Math.sqrt(d) : d);
+  const X = d => L + (1 - f(d) / f(maxD)) * (width - L - R), Y = c => T + (1 - c / 100) * (H - T - B);
   const fill = p => (p.open ? 'none' : p.made ? 'var(--gain)' : p.lostMoney ? 'var(--loss)' : 'var(--faint)');
   const stroke = p => (p.open ? 'var(--fg)' : 'none');
-  const ticksD = [maxD, maxD * 0.75, maxD / 2, maxD / 4, 0].map(d => Math.round(d));
+  const ticksD = (root ? [maxD, maxD * 0.5625, maxD / 4, maxD / 16, 0] : [maxD, maxD * 0.75, maxD / 2, maxD / 4, 0]).map(d => Math.round(d));
   const n = new Set(pts.map(p => p.window_id)).size, high = pts.filter(p => p.price >= 90).length;
   return html`<figure class="allwin">
     <div class="allwin-head"><b>Every buy, across ${plural(n, 'market')}: how long before the end, at what price</b></div>
@@ -98,7 +102,7 @@ function EveryBuyChart({ tiles, act }) {
     </svg></div>
     <figcaption class="muted small">
       <span class="keys"><span class="key"><i style="background:var(--gain)"></i>market made money</span><span class="key"><i style="background:var(--loss)"></i>market lost money</span><span class="key"><i style="border:1px solid var(--fg)"></i>still open</span></span>
-      <span>Each dot is one buy: how many days before its market's end (left: earlier), and the price paid (a price is the market's chance). Size: dollars paid. ${high ? `${high} of ${pts.length} buys were at 90¢ or more.` : ''}</span></figcaption>
+      <span>Each dot is one buy: how many days before its market's end (left: earlier${root ? '; days on a square-root scale, so the last weeks get more room' : ''}), and the price paid (a price is the market's chance). Size: dollars paid. ${high ? `${high} of ${pts.length} buys were at 90¢ or more.` : ''}</span></figcaption>
   </figure>`;
 }
 
@@ -199,7 +203,7 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
     w.out ? `${w.out.name} in ${w.out.step} candles (their highs and lows shaded)` : cov.outside_none ? null : 'no outside price for this market',
     ...(cov.notes || [])].filter(Boolean);
   return html`<div class="wv">
-    <div class="wv-head"><h3>${w.title}: ${w.out ? `${w.out.name}, ` : ''}${w.outcomes.join(' and ')} on Polymarket, its fills</h3>
+    <div class="wv-head"><h3>${w.title}${/[?!.]$/.test(w.title || '') ? '' : ':'} ${w.out ? `${w.out.name}, ` : ''}${w.outcomes.join(' and ')} on Polymarket, its fills</h3>
       <span class="tag observed">${statusText({ profit_kind: T.kind, result: w.result, exit: T.exit })}</span>
       <div class="nav"><button class="icon" aria-label="Previous market" disabled=${wi <= 0} onClick=${() => act.openWin(ws[wi - 1].window_id)}>‹</button>${wi >= 0 ? `Market ${wi + 1} of ${ws.length}` : ''}<button class="icon" aria-label="Next market" disabled=${wi < 0 || wi >= ws.length - 1} onClick=${() => act.openWin(ws[wi + 1].window_id)}>›</button></div></div>
     <div class="sum"><span><b>${plural(w.trades.length, 'fill')}</b> from ${w.hold.from ? dateOf(w.hold.from) : '–'}, held ${w.hold.days == null ? '–' : days(w.hold.days * 86400)}</span>

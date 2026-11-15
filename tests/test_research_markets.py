@@ -567,3 +567,4 @@ def test_a_market_plan_without_a_start_reads_back_90_days_so_start_can_tile_it(m
     p = events[-1]
     assert p["market"] == {"id": "politics", "label": "Politics", "unit": "market"}
     assert p["scope"]["from"] == D.iso(T0 - 90 * DAY) and C.scope_ok(p["scope"])
+    assert store.scope(sid) == p["scope"]  # what Start tiles: the scope with its defaults

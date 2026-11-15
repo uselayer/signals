@@ -427,7 +427,6 @@ class Case:
                                     "2026-11-10T05:30:00Z (or 'now' for to).") from e  # fmt: skip
         if scope.get("wallet"):
             self.store.set_wallet(self.sid, str(scope["wallet"]).lower())
-        self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild)
         fam = str(scope.get("family") or "")
         if fam and M.by_id(fam) is None and not re.fullmatch(r"[a-z0-9]+-updown-\d+m-?", fam):
             raise ReadError(f"scope.family {fam!r} isn't a market type: give market_type, one of "
@@ -445,6 +444,7 @@ class Case:
                 end = now() if not to or str(to).strip().lower() == "now" else scope_time(to)
                 scope["from"] = iso(int(end) - MARKET_DAYS * 86_400)
                 scope.setdefault("to", "now")
+        self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild), defaults filled
         plan = {"type": "plan.proposed", "plan_id": f"plan-{self.ask_id}", "ask_id": self.ask_id,
                 "title": inp.get("title"), "scope": scope, "steps": steps,
                 "market": {"id": mt.id, "label": mt.label, "unit": mt.unit},
