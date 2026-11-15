@@ -84,6 +84,8 @@ const scopeTime = t => {
   return m && MON[m[2]] != null ? Date.UTC(+m[3], MON[m[2]], +m[1], +m[4], +m[5]) / 1000 : null;
 };
 export function scopeSlots(scope) {
+  // only 15-minute windows have slots: a market type whose unit is a market (long-dated BTC) has none
+  if (scope && scope.market_type && scope.market_type !== 'btc-updown-15m') return null;
   const a = scope && scopeTime(scope.from), b = scope && scopeTime(scope.to);
   if (a == null || b == null || b <= a || b - a > 4 * 86400) return null;
   const out = [];
@@ -116,7 +118,7 @@ export function thinking(s, g) {
 }
 
 const ctxLabel = c =>c.trade_id ? 'a trade' : c.window_id && c.t != null ? 'a moment' : c.finding_id ? 'a finding' : '';
-const toolName = n => ({ wallet_trades: 'Read its trades', wallet_profile: "Read its Signals record", window: 'Built a window', outside_prices: 'Read Binance and Chainlink prices', code: 'Ran a calculation', make_chart: 'Drew a chart',
+const toolName = n => ({ wallet_trades: 'Read its trades', wallet_profile: "Read its Signals record", window: 'Built a window', market: 'Built a market', wallet_markets: 'Listed its markets', outside_prices: 'Read Binance and Chainlink prices', code: 'Ran a calculation', make_chart: 'Drew a chart',
   propose_plan: 'Proposed a plan', step_status: 'Updated a step', show_windows: 'Showed windows', focus: 'Moved the view', walkthrough: 'Wrote a walkthrough', finding: 'Added a finding', answer: 'Wrote the answer', propose: 'Offered a next step' }[n] || n);
 const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const scalars = o => Object.entries(o).filter(([k, v]) => v != null && typeof v !== 'object' && k !== 'ms').map(([k, v]) => `${k} ${v}`).join(', ');
@@ -133,6 +135,8 @@ export function resultText(e) {
     case 'wallet_trades': if (s.rows != null) return `${count(s.rows, 'trade', 'trades')}${s.windows != null ? ` in ${count(s.windows, 'window', 'windows')}` : ''}`; break;
     case 'wallet_profile': return s.name ? `found ${s.name}` : 'no Polymarket name';
     case 'window': if (s.slug) return `${s.slug}${s.result ? `, ended ${s.result}` : ''}`; break;
+    case 'market': if (s.slug) return `${count(s.fills || 0, 'fill', 'fills')}${s.result ? `, resolved ${s.result}` : s.profit_kind === 'open' ? ', still open' : ''}`; break;
+    case 'wallet_markets': if (s.rows != null) return `${count(s.rows, 'market', 'markets')}${s.matched != null && s.matched > s.rows ? ` of ${s.matched}` : ''}${s.complete === false ? ', trades cut short' : ''}`; break;
     case 'outside_prices': if (s.points != null) return s.available === false ? `${s.source || 'prices'}: not available` : `${count(s.points, 'price', 'prices')}${s.source ? ` from ${s.source}` : ''}`; break;
     case 'make_chart': if (s.title) return s.title; break;
     case 'propose_plan': if (s.steps != null) return count(s.steps, 'step', 'steps'); break;

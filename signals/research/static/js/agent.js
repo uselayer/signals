@@ -178,7 +178,7 @@ function Answer({ a, inv, act }) {
     ${rows.map(r => r.kind ? html`<div class=${'line2 ' + (r.kind === 'Inferred' ? 'inf' : '')}><span class=${'tag ' + r.kind.toLowerCase()}>${r.kind}</span><p>${flagged(r.t, r.fl)}</p></div>` : html`<p>${flagged(r.t, r.fl)}</p>`)}
     ${isFlagged && html`<div class="flagnote">${allFlags.length} number${allFlags.length === 1 ? '' : 's'} didn't match the data: ${allFlags.map(x => x.value_text).join(', ')}.</div>`}
     ${(a.annotations || []).length > 0 && html`<p class="muted small">Marked on the chart.</p>`}
-    ${inv.summaries.length > 1 && html`<div class="acts2"><button class="link" onClick=${() => act.stage('windows')}>See all ${inv.summaries.length} windows on one chart</button></div>`}
+    ${inv.summaries.length > 1 && html`<div class="acts2"><button class="link" onClick=${() => act.stage('windows')}>See all ${inv.summaries.length} ${inv.summaries.every(x => x.kind === 'market') ? 'markets' : 'windows'} on one chart</button></div>`}
     ${a.truncated && html`<p class="muted small">The answer was cut short. Ask again for the rest.</p>`}
     ${a.computed_note && html`<span class="check">${a.computed_note}</span>`}</article>`;
 }
@@ -186,7 +186,13 @@ function Answer({ a, inv, act }) {
 function Activity({ inv }) {
   const pc = inv.coverage && inv.coverage.per_source;
   return html`<div class="act">
-    ${pc && html`<h5>Data used</h5><table><thead><tr><th>Source</th><th>Windows</th></tr></thead><tbody>
+    ${pc && pc.kind === 'market' && html`<h5>Data used</h5><table><thead><tr><th>Source</th><th>Markets</th></tr></thead><tbody>
+      <tr><td>Its trades in the range (Polymarket trade history)</td><td>${pc.selection && pc.selection.trades_complete === false ? 'Partial: stopped at the read limit' : 'All read'}</td></tr>
+      ${pc.selection && html`<tr><td>Markets of this type it traded, the most money first</td><td>${pc.selection.shown} shown of ${pc.selection.matched}</td></tr>`}
+      <tr><td>Every fill in each market, over its whole life</td><td>${pc.fills_complete.complete} of ${pc.fills_complete.total}</td></tr>
+      <tr><td>The market's price on Polymarket</td><td>every ${(pc.price_steps_s || []).map(s => (s >= 3600 ? `${s / 3600} h` : `${s / 60} min`)).join(' or ') || '–'}</td></tr>
+      <tr><td>${pc.outside.name ? `${pc.outside.name} (what they resolve on)` : 'Outside price'}</td><td>${pc.outside.markets} of ${pc.markets}</td></tr></tbody></table>`}
+    ${pc && pc.kind !== 'market' && html`<h5>Data used</h5><table><thead><tr><th>Source</th><th>Windows</th></tr></thead><tbody>
       <tr><td>Its trades (Polymarket trade history)</td><td>${inv.partial ? 'Partial: stopped at the read limit' : 'All read'}</td></tr>
       <tr><td>Binance BTCUSDT, each second</td><td>${pc.windows} of ${pc.windows}</td></tr>
       <tr><td>Chainlink BTC/USD (recorded from 10 Nov 05:27 UTC)</td><td>${pc.chainlink.complete} of ${pc.chainlink.total}; the rest start and result only</td></tr>
