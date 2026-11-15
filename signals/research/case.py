@@ -21,6 +21,7 @@ from signals.research.data import (
     MARKETS_TOP,
     PRE_OPEN_READ_S,
     ReadError,
+    clip,
     complete_slugs,
     in_scope,
     iso,
@@ -441,7 +442,7 @@ class Case:
                 "scope_options": inp.get("scope_options") or [], "estimate_usd": self.store.start_cost(),
                 "estimate_s": self.store.typical_seconds(start=True),  # likewise how long recent Starts took
                 "needs_approval": True}  # fmt: skip
-        self.store.set_title(self.sid, str(inp.get("title") or "")[:120])
+        self.store.set_title(self.sid, clip(str(inp.get("title") or "")))
         self.emit(plan)
         self.waiting = True
         return ("Plan shown. The user will press Start or change it: end your turn now, without more text.", False,

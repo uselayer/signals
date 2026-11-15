@@ -180,12 +180,20 @@ def test_binance_past_two_days_gives_hourly_highs_and_lows_and_keeps_ended_block
     monkeypatch.setattr(D, "now", lambda: T0 + 400 * DAY)
     r = _reads()
     got = r.outside_prices("binance", T0, T0 + 60 * DAY)
-    assert got["available"] and got["step"] == "1 hour" and len(got["points"]) in (60 * 24, 60 * 24 + 1)
+    assert got["available"] and got["step"] == "1 hour" and len(got["points"]) in (60 * 24 + 1, 60 * 24 + 2)
+    # the first candle's open at its start, then each close at its candle's end: a fill in the first hour has a price
+    assert got["points"][0][0] == got["ranges"][0][0] and got["points"][1][0] == got["ranges"][0][0] + 3_600
     assert got["highest"]["high"] == max(h for _, h, _ in got["ranges"]) and got["lowest"]["low"] == got["ranges"][0][2]
     calls = r.web.calls  # type: ignore[attr-defined]
     r.outside_prices("binance", T0 + DAY, T0 + 50 * DAY)
     assert r.web.calls == calls  # type: ignore[attr-defined]  # ended 1,000-hour blocks are read once
     assert r.outside_prices("binance", T0, T0 + 200 * DAY)["step"] == "1 day"
+
+
+def test_a_long_title_is_cut_at_a_whole_word_with_an_ellipsis() -> None:
+    q = "How does WilT (0xd6b6…af8b) make money on long-dated Bitcoin price markets like 'Will Bitcoin reach $85,000 in September?'"
+    t = D.clip(q)
+    assert len(t) <= 120 and t.endswith("in…") and D.clip("How does it trade?") == "How does it trade?"
 
 
 # ---- a market's replay and tile ----

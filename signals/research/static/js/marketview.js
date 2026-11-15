@@ -179,7 +179,9 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
   const ph = hover ?? (ui.full || !step ? null : step.t);
   const T = w.totals, cov = w.cov || {}, ws = inv.summaries, wi = ws.findIndex(s => s.window_id === w.id);
   const go = i => act.setStep(Math.max(0, Math.min(steps.length - 1, i)));
-  const ro = Math.round(hover ?? ph ?? w.to), ob = w.outAt(ro);
+  // a step reads where its own fills end, so "Holding" counts every fill the step describes
+  const stepEnd = s => { const ids = new Set(s.trade_ids || []); return w.trades.reduce((m, x) => (ids.has(x.trade_id) ? Math.max(m, x.t) : m), s.t); };
+  const ro = Math.round(hover ?? (ph != null && step ? stepEnd(step) : ph) ?? w.to), ob = w.outAt(ro);
   const pop = ui.pop && w.bursts.find(b => b.id === ui.pop);
   const covLine = [cov.price_step_s ? `the market's price every ${stepWord(cov.price_step_s)}` : null,
     w.out ? `${w.out.name} in ${w.out.step} candles (their highs and lows shaded)` : 'no outside price for this market',

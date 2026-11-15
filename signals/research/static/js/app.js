@@ -128,7 +128,7 @@ function Home({ api }) {
     if (!q.trim()) return; setBusy(true); setErr(null);
     try {
       const question = wallet.trim() && !q.includes(wallet.trim()) ? `${q.trim()}\n\nWallet: ${wallet.trim()}` : q.trim();
-      const id = await api.create(q.trim().slice(0, 120));
+      const t = q.trim(), id = await api.create(t.length <= 120 ? t : t.slice(0, 119).replace(/\s+\S*$/, '').replace(/[\s,;:(\-'"]+$/, '') + '…');
       await api.ask(id, question, null, 'pasted wallet');
       location.hash = `#/i/${id}`;
     } catch (e) { setErr(e.message); setBusy(false); }

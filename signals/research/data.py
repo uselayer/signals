@@ -120,6 +120,15 @@ def scope_time(x: Any, now: float | None = None) -> int:
     return unix(x)
 
 
+def clip(text: str, n: int = 120) -> str:
+    """``text`` in at most ``n`` characters: cut at the last whole word, with an ellipsis, when it is longer."""
+    text = str(text or "").strip()
+    if len(text) <= n:
+        return text
+    cut = text[: n - 1]
+    return (cut.rsplit(" ", 1)[0] if " " in cut else cut).rstrip(" ,;:-('\"") + "…"
+
+
 def iso(t: int | float) -> str:
     return datetime.fromtimestamp(t, UTC).isoformat().replace("+00:00", "Z")
 
@@ -666,6 +675,8 @@ class Reads:
         # a close is the price when its candle ended: stamped at the end, so "the close at or before a fill" is
         # never a price from after it
         pts = [[int(min(k[0] // 1000 + step_s, now())), float(k[4])] for k in rows]
+        if rows:  # the first candle's open, at its start: a fill before the first close still has a price then
+            pts.insert(0, [rows[0][0] // 1000, float(rows[0][1])])
         ranges = [[k[0] // 1000, float(k[2]), float(k[3])] for k in rows]
         top = max(ranges, key=lambda r: r[1], default=None)
         bottom = min(ranges, key=lambda r: r[2], default=None)

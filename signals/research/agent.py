@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from signals.research import markets
+from signals.research.data import clip
 from signals.research import tools as T
 from signals.research import trace
 from signals.research.case import CASE_TOOLS, Case, fill_tiles, prebuild, scope_ok
@@ -80,7 +81,7 @@ DATA_TOOLS = [t for t in T.TOOLS if t["name"] != "make_chart"]
 
 def short_title(text: str) -> str:
     """A title for the investigations list: wallets shortened (0xb945…db68), at most 120 characters."""
-    return WALLET_IN.sub(lambda m: f"{m.group(0)[:6]}…{m.group(0)[-4:]}", text)[:120]
+    return clip(WALLET_IN.sub(lambda m: f"{m.group(0)[:6]}…{m.group(0)[-4:]}", text))
 EVENTS = """start, progress (the agent's notes between steps), code (what it runs), tool_call, tool_result (a
 summary: counts, coverage, errors), code_result (output), chart (a Vega-Lite spec), check (the number check),
 answer, usage, error, done"""
