@@ -4,7 +4,7 @@
 import { html, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { money, signedMoney, cents, shares, plural } from './format.js';
 import { flagsFor, splitFlagged } from './store.js';
-import { MARKET_FILTERS, filterMarkets, marketTally, eventGroups, buyDots, ruleChip, statusText, profitWord, dateOf, shortDate, dateTime, days, heldText, usdt, marketFacts } from './marketdata.js';
+import { MARKET_FILTERS, filterMarkets, marketTally, eventGroups, eventLegs, legsText, buyDots, ruleChip, statusText, profitWord, exitWord, moveText, dateOf, shortDate, dateTime, days, heldText, usdt, marketFacts } from './marketdata.js';
 
 // a text with the numbers the check flagged struck where they stand (as views.js `flagged`)
 const flagged = (text, flags) => splitFlagged(text, flags).map(p => (p.flag ? html`<span class="flagnum" title="Didn't match the data">${p.text}</span>` : p.text));
@@ -53,7 +53,9 @@ export function MarketsStage({ inv, ui, act, plan, live, borrowed }) {
     <p class="tally">${n.decided > 0 ? html`Made money in <b>${n.made} of ${plural(n.decided, 'market')}</b> that ended or it sold out of (<span class="gain">${signedMoney(n.profitMade)}</span>) and lost money in <b>${n.lostMoney}</b> (<span class="loss">${signedMoney(n.profitLost)}</span>).` : 'No market here has ended or been sold out of yet.'}
       ${n.open > 0 && html` <b>${plural(n.open, 'market')}</b> still open: <b class=${n.profitOpen >= 0 ? 'gain' : 'loss'}>${signedMoney(n.profitOpen)}</b> at today's prices, not a result.`}
       ${n.uncounted > 0 && html` ${plural(n.uncounted, 'market')} not counted: it sold shares its fills don't show it buying.`}</p>
-    ${groups.length > 0 && html`<p class="muted small">Several strikes of one event: ${groups.slice(0, 3).map((g, i) => html`${i ? '; ' : ''}<b>${g.title}</b> (${plural(g.markets.length, 'market')})`)}.</p>`}
+    ${sel && (sel.skipped_near || []).length > 0 && html`<p class="muted small">Read and left out as not ${sel.label.toLowerCase()} by Polymarket's own tags: ${sel.skipped_near.slice(0, 3).map((x, i) => html`${i ? '; ' : ''}“${x.question}” (${x.category})`)}.</p>`}
+    ${groups.filter(g => g.strikes).length > 0 && html`<p class="muted small">Several strikes of one event: ${groups.filter(g => g.strikes).slice(0, 3).map((g, i) => html`${i ? '; ' : ''}<b>${g.title}</b> (${plural(g.markets.length, 'market')})`)}.</p>`}
+    ${groups.filter(g => !g.strikes).length > 0 && html`<div class="muted small evlegs">Several markets of one event: <ul>${groups.filter(g => !g.strikes).slice(0, 4).map(g => { const L = eventLegs(g, sel && sel.events); return html`<li><b>${g.title}</b>: ${legsText(L)}${L.markets > L.shown ? ` (${L.shown} of its ${L.markets} markets shown)` : ''}.</li>`; })}</ul></div>`}
     <div class="wfilter" role="group" aria-label="Show markets">
       <button class=${!ui.wf ? 'on' : ''} onClick=${() => act.filter(null)}>All · ${all.length}</button>
       ${MARKET_FILTERS.map(([k, label]) => html`<button class=${ui.wf === k ? 'on' : ''} disabled=${!cnt(k)} onClick=${() => act.filter(k)}>${label} · ${cnt(k)}</button>`)}</div>
@@ -68,7 +70,8 @@ export function MarketsStage({ inv, ui, act, plan, live, borrowed }) {
         <div class="tt"><span>${shortDate(s.start)} → ${s.open ? 'now' : shortDate(s.end)}</span><span class=${s.open ? 'open' : 'res'}>${statusText(s)}</span></div>
         <${MarketSpark} s=${s} />
         <div class="tf"><span>${plural((s.entries || []).length, 'fill')} · held ${s.held_days == null ? '–' : days(s.held_days * 86400)}</span><span class=${s.profit == null ? 'muted' : s.profit >= 0 ? 'gain' : 'loss'}>${s.profit == null ? 'not counted' : signedMoney(s.profit)}${s.open && s.profit != null ? ' open' : ''}</span></div>
-        <div class="badges">${rc && html`<span class="badge" title=${(s.rule || {}).says || ''}>${rc}</span>`}${Object.values(s.shares || {}).filter(v => v > 0).length > 1 && html`<span class="badge">both sides</span>`}
+        <div class="badges">${rc && html`<span class="badge" title=${(s.rule || {}).says || ''}>${rc}</span>`}${s.group_item && s.event_title && html`<span class="badge" title=${s.event_title}>${s.group_item}</span>`}
+          ${(s.moves || []).some(m => m.kind === 'merge') && html`<span class="badge">merged</span>`}${c.moves_read === false && html`<span class="badge warn" title="Its merges and splits couldn't be read, so whether it held to the end isn't known">merges unread</span>`}${Object.values(s.shares || {}).filter(v => v > 0).length > 1 && html`<span class="badge">both sides</span>`}
           ${c.fills_complete === false && html`<span class="badge warn" title=${c.shares_not_from_fills ? 'It sold more shares than its fills bought: the rest came some way fills don\'t show, such as splitting dollars into both outcomes' : 'Polymarket listed more fills than one read holds'}>${c.shares_not_from_fills ? 'shares not from fills' : 'fills cut short'}</span>`}</div></button>`;
     })}</div></div>`;
 }
@@ -102,8 +105,9 @@ function EveryBuyChart({ tiles, act }) {
 // ---------- one market's replay
 function chartGeom(w, W, compact) {
   const ml = compact ? 8 : 74, mr = compact ? 8 : 112, top = 10;
-  const hB = compact ? 120 : 180, hP = compact ? 90 : 120, hQ = compact ? 50 : 70, g = compact ? 10 : 18, ax = 26;
-  const yB0 = top, yP0 = yB0 + hB + g, yQ0 = yP0 + hP + g, H = yQ0 + hQ + ax;
+  // no outside line (politics): no empty panel for it, the market's own price comes first
+  const hB = !w.out ? 0 : compact ? 120 : 180, hP = compact ? 90 : 120, hQ = compact ? 50 : 70, g = compact ? 10 : 18, ax = 26;
+  const yB0 = top, yP0 = yB0 + hB + (w.out ? g : 6), yQ0 = yP0 + hP + g, H = yQ0 + hQ + ax;
   const X = t => ml + (t - w.from) / Math.max(1, w.to - w.from) * (W - ml - mr);
   const tOf = px => Math.max(w.from, Math.min(w.to, Math.round(w.from + (px - ml) / (W - ml - mr) * (w.to - w.from))));
   let lo = Infinity, hi = -Infinity;
@@ -143,9 +147,11 @@ function MarketChart({ w, width, compact, ph, sel, onBurst, onHover }) {
     f.push(html`<path d=${d} fill=${sideColor(w, o)} opacity=".22" />`);
   }
   const ax = [];
-  if (!compact) {
+  if (!compact && w.out) {
     const span = G.hi - G.lo, raw = span / 4, stepv = [100, 250, 500, 1000, 2500, 5000, 10000, 25000].find(s => s >= raw) || 50000;
     for (let v = Math.ceil(G.lo / stepv) * stepv; v <= G.hi; v += stepv) ax.push(html`<line class="gridl" x1=${G.ml} x2=${G.W - G.mr} y1=${G.YB(v)} y2=${G.YB(v)} /><text class="ax" x=${G.ml - 8} y=${G.YB(v) + 3.5} text-anchor="end">${usdt(v)}</text>`);
+  }
+  if (!compact) {
     for (const c of [0, 50, 100]) ax.push(html`<line class="gridl" x1=${G.ml} x2=${G.W - G.mr} y1=${G.YP(c)} y2=${G.YP(c)} /><text class="ax" x=${G.ml - 8} y=${G.YP(c) + 3.5} text-anchor="end">${c}¢</text>`);
     ax.push(html`<text class="axs" x=${G.ml + 4} y=${G.yP0 - 5}>${w.outcomes.join(' and ')} on Polymarket (¢ a share)</text><text class="axs" x=${G.ml + 4} y=${G.yQ0 - 5}>Position (shares held)</text>`);
     if (k) ax.push(html`<text class="axs" x=${G.ml + 6} y=${G.YB(k) - 5}>${usdt(k)}, the price in the question</text>`);
@@ -162,6 +168,12 @@ function MarketChart({ w, width, compact, ph, sel, onBurst, onHover }) {
       <circle cx=${x} cy=${y} r=${s + 6} fill="transparent" />
       ${b.action === 'sell' ? html`<rect x=${x - s} y=${y - s} width=${2 * s} height=${2 * s} fill="var(--card)" stroke=${col} stroke-width="2" />` : html`<path d=${`M${x} ${y - s}L${x - s} ${y + s * .8}H${x + s}Z`} fill=${col} stroke="var(--card)" stroke-width="1.2" />`}</g>`;
   });
+  // merges, splits and conversions: a diamond on the position panel, at the time, with what it did
+  for (const m of w.moves || []) {
+    const x = G.X(m.t), y = G.yQ0 + 6, s2 = compact ? 4 : 5;
+    marks.push(html`<g class="move" key=${'m' + m.i}><line x1=${x} x2=${x} y1=${G.yQ0} y2=${G.yQ0 + G.hQ} stroke="var(--fg)" stroke-dasharray="2 3" opacity=".5" />
+      <path d=${`M${x} ${y - s2}L${x + s2} ${y}L${x} ${y + s2}L${x - s2} ${y}Z`} fill="var(--card)" stroke="var(--fg)" stroke-width="1.4"><title>${`${dateTime(m.t)}: ${moveText(w, m)}`}</title></path></g>`);
+  }
   const move = e => { const r = e.currentTarget.getBoundingClientRect(); onHover(G.tOf((e.clientX - r.left) * (G.W / r.width))); };
   return html`<svg viewBox=${`0 0 ${G.W} ${G.H}`} width=${G.W} height=${G.H} role="img" aria-label=${`${w.title}: ${w.out ? w.out.name + ', ' : ''}the market's prices, its fills and its position`}
       onMouseMove=${move} onMouseLeave=${() => onHover(null)}>
@@ -184,14 +196,14 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
   const ro = Math.round(hover ?? (ph != null && step ? stepEnd(step) : ph) ?? w.to), ob = w.outAt(ro);
   const pop = ui.pop && w.bursts.find(b => b.id === ui.pop);
   const covLine = [cov.price_step_s ? `the market's price every ${stepWord(cov.price_step_s)}` : null,
-    w.out ? `${w.out.name} in ${w.out.step} candles (their highs and lows shaded)` : 'no outside price for this market',
+    w.out ? `${w.out.name} in ${w.out.step} candles (their highs and lows shaded)` : cov.outside_none ? null : 'no outside price for this market',
     ...(cov.notes || [])].filter(Boolean);
   return html`<div class="wv">
     <div class="wv-head"><h3>${w.title}: ${w.out ? `${w.out.name}, ` : ''}${w.outcomes.join(' and ')} on Polymarket, its fills</h3>
-      <span class="tag observed">${T.kind === 'open' ? 'Open' : w.result ? `Resolved ${w.result}` : 'Sold out'}</span>
+      <span class="tag observed">${statusText({ profit_kind: T.kind, result: w.result, exit: T.exit })}</span>
       <div class="nav"><button class="icon" aria-label="Previous market" disabled=${wi <= 0} onClick=${() => act.openWin(ws[wi - 1].window_id)}>‹</button>${wi >= 0 ? `Market ${wi + 1} of ${ws.length}` : ''}<button class="icon" aria-label="Next market" disabled=${wi < 0 || wi >= ws.length - 1} onClick=${() => act.openWin(ws[wi + 1].window_id)}>›</button></div></div>
     <div class="sum"><span><b>${plural(w.trades.length, 'fill')}</b> from ${w.hold.from ? dateOf(w.hold.from) : '–'}, held ${w.hold.days == null ? '–' : days(w.hold.days * 86400)}</span>
-      <span>Spent <b>${money(T.cost)}</b>${T.sold ? html`, sold for <b>${money(T.sold)}</b>` : ''}</span>
+      <span>Spent <b>${money(T.cost)}</b>${T.sold ? html`, ${(w.moves || []).some(m => m.kind === 'merge') ? 'got back' : 'sold for'} <b>${money(T.sold)}</b>` : ''}</span>
       <span>${T.profit == null ? html`<b class="muted">Profit not counted</b>` : html`<b class=${T.profit >= 0 ? 'gain' : 'loss'}>${signedMoney(T.profit)}</b>`} ${profitWord({ profit_kind: T.kind })}</span>
       ${w.rule && w.rule.says && html`<span class="rule"><b>What resolves it:</b> ${w.rule.says}.</span>`}
       <span class="cov">${covLine.join(' · ')}</span></div>
@@ -199,6 +211,7 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
       ${w.out && html`<span><i class="sw" style="border-color:var(--binance)"></i>${w.out.name} (${w.out.unit || 'USDT'}): what these markets resolve on</span>`}
       ${w.rule && w.rule.strike && html`<span><i class="sw" style="border-color:var(--fg);border-top-style:dashed"></i>${usdt(w.rule.strike)}, the price in the question</span>`}
       ${w.outcomes.map(o => html`<span><i class="sw" style=${`border-color:${sideColor(w, o)}`}></i>${o}</span>`)}
+      ${(w.moves || []).length > 0 && html`<span><svg width="12" height="12"><path d="M6 1L11 6L6 11L1 6Z" fill="none" stroke="var(--fg)" stroke-width="1.4" /></svg>Merges and splits (on the position)</span>`}
       <span><svg width="12" height="10"><path d="M6 1 L1 9 H11Z" fill="var(--up)" /></svg>Buys <svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="var(--up)" stroke-width="1.6" /></svg>Sells, at the price paid (${w.trades.length > 400 ? 'fills within a day' : w.trades.length > 150 ? 'fills within six hours' : 'fills within an hour'} drawn as one)</span></div>
     <div class="readout" aria-live="off"><b>${dateTime(ro)}</b>
       ${w.out && html`<span><span class="k">${w.out.name}</span> ${ob == null ? 'not read' : usdt(ob)}</span>`}

@@ -191,7 +191,9 @@ function Activity({ inv }) {
       ${pc.selection && html`<tr><td>Markets of this type it traded, the most money first</td><td>${pc.selection.shown} shown of ${pc.selection.matched}</td></tr>`}
       <tr><td>Every fill in each market, over its whole life</td><td>${pc.fills_complete.complete} of ${pc.fills_complete.total}</td></tr>
       <tr><td>The market's price on Polymarket</td><td>every ${(pc.price_steps_s || []).map(s => (s >= 3600 ? `${s / 3600} h` : `${s / 60} min`)).join(' or ') || '–'}</td></tr>
-      <tr><td>${pc.outside.name ? `${pc.outside.name} (what they resolve on)` : 'Outside price'}</td><td>${pc.outside.markets} of ${pc.markets}</td></tr></tbody></table>`}
+      ${pc.moves && html`<tr><td>Its merges, splits and conversions in each market</td><td>${pc.moves.read} of ${pc.moves.total} read${pc.moves.markets_with ? `; in ${pc.moves.markets_with}` : ''}</td></tr>`}
+      ${pc.outside.name || !pc.outside.none ? html`<tr><td>${pc.outside.name ? `${pc.outside.name} (what they resolve on)` : 'Outside price'}</td><td>${pc.outside.markets} of ${pc.markets}</td></tr>`
+        : html`<tr><td>Outside series</td><td>None: no news or polls feed</td></tr>`}</tbody></table>`}
     ${pc && pc.kind !== 'market' && html`<h5>Data used</h5><table><thead><tr><th>Source</th><th>Windows</th></tr></thead><tbody>
       <tr><td>Its trades (Polymarket trade history)</td><td>${inv.partial ? 'Partial: stopped at the read limit' : 'All read'}</td></tr>
       <tr><td>Binance BTCUSDT, each second</td><td>${pc.windows} of ${pc.windows}</td></tr>
