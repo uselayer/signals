@@ -4645,10 +4645,11 @@ def _chat_owner(chat: str) -> str | None:
     return next((uid for uid, x in _load_follows()["users"].items() if x.get("chat") == chat), None)
 
 
-def _own_offers(uid: str, t: WhaleTrade, wallet: str | None = None) -> list[dict[str, Any]]:
+def _own_offers(uid: str, t: WhaleTrade, wallet: str | None = None, category: str | None = None) -> list[dict[str, Any]]:
     """For the owner's own account (own_trading): the Kalshi and Polymarket US markets a buy alert's outcome is
     verified to match, where they have a key: the venue code, market and side, with the names the replies to a
-    tap use (the outcome, the market, the trader, the exchange's page)."""
+    tap use (the outcome, the market, the trader, the exchange's page). Not Kalshi in a category it refuses the
+    owner's account (own_trading.KALSHI_SKIP: Washington, so sports go to Polymarket US)."""
     if not own_trading.on_for(uid):
         return []
     out: list[dict[str, Any]] = []
@@ -4656,7 +4657,7 @@ def _own_offers(uid: str, t: WhaleTrade, wallet: str | None = None) -> list[dict
     names = {"label": t.outcome, "title": t.title, "trader": _who(wallet) if wallet else None}
     if us and us.get("found") and us.get("market_id") and own_trading.has("u"):
         out.append({"code": "u", "market": str(us["market_id"]), "side": str(us["side"]), "url": us.get("url")} | names)
-    if k and k.get("found") and k.get("market_id") and own_trading.has("k"):
+    if k and k.get("found") and k.get("market_id") and own_trading.has("k") and category not in own_trading.KALSHI_SKIP:
         out.append({"code": "k", "market": str(k["market_id"]), "side": str(k["side"]), "url": k.get("url")} | names)
     return out
 
@@ -6237,7 +6238,7 @@ def _deliver(uid: str, chat: str, b: NewBuy, category: str | None, tag: str = ""
         return 1 if aid else 0
     aid = _send(uid, chat, "buy", lambda aid: tag + b.text(aid), trader=b.wallet, outcome=b.outcome, trade_at=b.at,
                 stop=b.wallet, copy=(b.t.token, b.now) if b.t.token and b.now else None,
-                own=_own_offers(uid, b.t, b.wallet))  # fmt: skip
+                own=_own_offers(uid, b.t, b.wallet, category))  # fmt: skip
     return 1 if aid else 0
 
 
