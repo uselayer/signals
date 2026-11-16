@@ -770,8 +770,11 @@ def match_brief(m: dict[str, Any] | None) -> dict[str, Any] | None:
     """The match on a tile: the clubs, the final score, the goals' minutes and the counts."""
     if not m:
         return None
+    cov = m.get("coverage") or {}
+    # recorded with no update for this match (Polymarket didn't run it live): no clubs or score to show, so the tile
+    # says "No score recorded", as the replay does
     return {"home": m.get("home"), "away": m.get("away"), "side": m.get("side"), "kickoff": m.get("kickoff"),
-            "final": m.get("final"), "recorded": (m.get("coverage") or {}).get("recorded"),
+            "final": m.get("final"), "recorded": bool(cov.get("recorded") and cov.get("updates")),
             "goals": [{"t": g["t"], "minute": g["minute"], "score": g["score"], "by": g["by"], "kind": g["kind"],
                        "retracted": bool(g.get("retracted"))} for g in m.get("goals") or []],
             "counts": m.get("counts")}  # fmt: skip

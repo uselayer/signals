@@ -344,3 +344,10 @@ def test_a_soccer_match_replay_and_tile_name_the_league() -> None:
     r = workspace.build(store, reads, sid, UNL_SLUG)
     assert r["market_type"] == "soccer" and r["league"] == "UEFA Nations League" and r["rule"]["kind"] == "match"
     assert store.summaries(sid)[0]["league"] == "UEFA Nations League"
+
+
+def test_a_tile_for_a_match_the_feed_never_sent_says_no_score() -> None:
+    # recorded, but no update for this match (an AFCON qualifier on 12 Nov): no clubs to show, so not "recorded"
+    m = {"home": None, "away": None, "coverage": {"recorded": True, "updates": 0}, "goals": []}
+    assert workspace.match_brief(m)["recorded"] is False
+    assert workspace.match_brief(m | {"home": "A", "away": "B", "coverage": {"recorded": True, "updates": 90}})["recorded"]
