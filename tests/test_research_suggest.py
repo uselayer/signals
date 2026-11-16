@@ -70,7 +70,9 @@ def _web(boards: dict[str, list[dict[str, Any]]] | None = None, fail: bool = Fal
 
 def test_recent_markets_tell_15_minute_traders_from_long_dated_ones() -> None:
     assert S.kinds_of([WINDOW] * 3 + ["x"]) == {"btc-updown-15m"}
-    assert S.kinds_of([WINDOW] + ["x"] * 3) == set()  # a few windows among other markets isn't a 15-minute trader
+    assert S.kinds_of([WINDOW] + ["x"] * 9) == set()  # a few windows among other markets isn't a 15-minute trader
+    assert S.kinds_of([WINDOW] + ["x"] * 3) == {"btc-updown-15m"}  # a quarter is: its BTC windows are read alone
+    assert S.kinds_of(["bitcoin-above-66k-on-november-15-2026"]) == set()  # one day: under a long-dated scope's 7
     assert S.kinds_of(["x", LONG]) == {"btc-long"}  # one long-dated BTC market is enough to study
     assert S.kinds_of([WINDOW] * 6 + [LONG] * 4) == {"btc-updown-15m", "btc-long"}
     assert S.kinds_of([]) == set()

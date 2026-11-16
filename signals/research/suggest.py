@@ -8,14 +8,16 @@ Each market type a breakdown can study gets the top few that trade it:
 
 - Politics: the Politics category's first ``PER_TYPE`` (a wallet's category is where most of its trades are).
 - BTC 15-minute windows and long-dated BTC: the Crypto category's first ``CRYPTO_LOOKED_AT``, each one's latest
-  ``RECENT`` trades read once (one SDK read each, on the research budget) and sorted by what they are: mostly BTC
-  15-minute windows, or any long-dated BTC market (``markets.btc_long_matches``). A wallet can be in both.
+  ``RECENT`` trades read once (one SDK read each, on the research budget) and sorted by what they are: a fifth or
+  more BTC 15-minute windows, or any long-dated BTC market that isn't a one-day one (``markets.btc_long_matches``).
+  A wallet can be in both.
 
 Built in a background thread at most every ``TTL_S`` and kept in memory; a page asks while it builds and gets what
 was kept last (or nothing yet, ``ready`` false)."""
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -24,9 +26,13 @@ from typing import Any
 import httpx
 
 PER_TYPE = 3  # wallets shown per market type
-CRYPTO_LOOKED_AT = 15  # the Crypto category's first wallets whose recent trades are read
+CRYPTO_LOOKED_AT = 30  # the Crypto category's first wallets whose recent trades are read
 RECENT = 500  # recent trades read per Crypto wallet
-WINDOWS_SHARE = 0.5  # a BTC 15-minute trader: at least this share of its recent trades in those windows
+# a BTC 15-minute trader: at least this share of its recent trades in those windows (16 Nov, the top 30 read: the
+# busiest window traders spread over many coins, so half was too strict; a breakdown reads only its BTC windows)
+WINDOWS_SHARE = 0.2
+# a one-day BTC market ("Bitcoin above $66k on November 15") runs under the 7 days a long-dated breakdown keeps
+DAILY = re.compile(r"-on-(january|february|march|april|may|june|july|august|september|october|november|december)-\d")
 TTL_S = 6 * 3_600
 RETRY_S = 300  # after a failed build, the next one waits this long
 READS_AT_ONCE = 4
@@ -50,15 +56,15 @@ def _row(r: dict[str, Any], rank: int, category: str) -> dict[str, Any]:
 
 
 def kinds_of(slugs: list[str]) -> set[str]:
-    """What a wallet's recent markets say it trades: "btc-updown-15m" when most are BTC 15-minute windows,
-    "btc-long" when any is a long-dated BTC market."""
+    """What a wallet's recent markets say it trades: "btc-updown-15m" when a fifth or more are BTC 15-minute
+    windows, "btc-long" when any is a long-dated BTC market (not a one-day one)."""
     from signals.research import markets as M
     from signals.research.data import BTC_15M
 
     out: set[str] = set()
     if slugs and sum(s.startswith(BTC_15M) for s in slugs) / len(slugs) >= WINDOWS_SHARE:
         out.add(M.BTC_15M.id)
-    if any(not M.is_window(s) and M.btc_long_matches(s, {}) for s in slugs):
+    if any(not M.is_window(s) and M.btc_long_matches(s, {}) and not DAILY.search(s) for s in slugs):
         out.add(M.BTC_LONG.id)
     return out
 
