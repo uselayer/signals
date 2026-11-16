@@ -3,8 +3,8 @@ revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten'",
+    "python_full_version >= '3.12' and python_full_version < '3.15' and sys_platform == 'emscripten'",
     "(python_full_version < '3.15' and sys_platform != 'emscripten') or (python_full_version < '3.12' and sys_platform == 'emscripten')",
 ]
 
@@ -1576,7 +1576,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "polymarket-client", specifier = "==0.18.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.8" },
-    { name = "uselayer", specifier = ">=0.19.1" },
+    { name = "uselayer", specifier = ">=0.19.2" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 
@@ -1649,7 +1649,7 @@ wheels = [
 
 [[package]]
 name = "uselayer"
-version = "0.19.1"
+version = "0.19.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
@@ -1657,9 +1657,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/dd/5986752e13418e04379faa47498244104757821c222a75031d00fc28c0cd/uselayer-0.19.1.tar.gz", hash = "sha256:d36a04236b7d6e8c3a6951bd8f3a0cd1b6c040d405061b024fffeaf9adf04001", size = 455439, upload-time = "2026-11-10T05:45:18.167Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/d1/721a5931ae90270561a228ad943b0cff917921b63a7730fffd32481c9325/uselayer-0.19.2.tar.gz", hash = "sha256:e0af222e8e6ab30dc8b610fdbb4db26790a23f22a904b67c59ea35b59789911d", size = 456863, upload-time = "2026-11-16T06:32:43.355Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/51/7c263dcc93643edd28ef300b04d57977a1e9821fce4cce19b221d09b4b08/uselayer-0.19.1-py3-none-any.whl", hash = "sha256:aa9dc85a7780a9f7bd467aa773d6c5c224eb57c7a43e8ae9db968a6273e8b468", size = 287465, upload-time = "2026-11-10T05:45:16.467Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/ec/7969e27691233c4c8bf13c83e4c11921f14edfdc1e0594d00c9c92f4ffaf/uselayer-0.19.2-py3-none-any.whl", hash = "sha256:aad623a683ebd05687aa3a038e74377e2982ce2a0dac2636356fac4072c5f70d", size = 288352, upload-time = "2026-11-16T06:32:41.833Z" },
 ]
 
 [[package]]
