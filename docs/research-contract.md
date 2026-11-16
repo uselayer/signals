@@ -132,7 +132,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     show it buying (a split or conversion), so it isn't counted.
   - `window.ready` (a market replay) `{kind: "market", window_id, market_type, market_label, title, condition_id,
     event_slug, event_title, start, end, axis: {from, to}, market_start, market_end, closed, closed_at, result, rule:
-    {kind: touch_high|touch_low|close_above|close_below|all_time_high|other (BTC) or result|by_date|other (politics,
+    {kind: touch_high|touch_low|close_above|close_below|all_time_high|other (BTC) or result|one_of|by_date|other (politics,
     with quote: the rules' own resolving sentence, and deadline), strike, source, binance, says}, group_item,
     neg_risk, rules
     (the market's own text), outcomes, prices: {outcome: [{t, p}]}, outside: {name, unit, step, points: [{t, p}],

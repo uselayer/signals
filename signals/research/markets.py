@@ -215,6 +215,10 @@ _DATE_RULE = re.compile(r"by the (?:specified|listed) date|between market creati
                         r"December) \d", re.IGNORECASE)  # fmt: skip
 _DATE_Q = re.compile(r"\b(by|before|through|until|in) (?:the end of )?(?:January|February|March|April|May|June|July|"
                      r"August|September|October|November|December|\d{4})", re.IGNORECASE)  # fmt: skip
+# one leg of a "which / where / who" event (one market per country, place or person): one outcome of several
+_ONE_OF_EVENT = re.compile(r"^\s*(?:which|where|who)\b", re.IGNORECASE)
+_ONE_OF_RULE = re.compile(r"resolve according to the (?:country|location|city|place|venue|person|company)\b", re.IGNORECASE)
+_NONE_LEG = re.compile(r"^\s*(?:will\s+)?(?:no|none)\b", re.IGNORECASE)  # "Will no meeting occur by …": a date leg
 _SOURCE = re.compile(r"(?:primary )?resolution source (?:for this market )?(?:is|will be) ([^.]{3,160})", re.IGNORECASE)
 _NAMED = ("Associated Press", "Fox News", "NBC", "CNN", "official certification", "official results",
           "consensus of credible sources", "consensus of official")  # fmt: skip
@@ -228,8 +232,10 @@ def _clip_words(text: str, n: int = 240) -> str:
 def politics_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
     """What resolves one politics market, read from its own rules (Gamma's ``description``), never assumed for the
     type. ``quote``: the rules' own sentence that resolves it, short. ``kind``: ``result`` (who wins, is appointed
-    or controls: an election or an appointment), ``by_date`` (Yes, or No, if something happens by the market's
-    date), else ``other`` (the parser isn't sure: read the quote). A kind is given only when the question and the
+    or controls: an election or an appointment), ``one_of`` (one leg of a "which / where / who" event: Yes if
+    this outcome is the one, decided by the deadline; never "by a date"), ``by_date`` (Yes, or No, if something
+    happens by the market's date; also an event's "none by <date>" leg), else ``other`` (the parser isn't sure:
+    read the quote). A kind is given only when the question and the
     rules agree on it. ``source``: what the rules name to resolve it (the Associated Press, official results…),
     else the market's resolution source, else None. ``says``: one sentence for the page."""
     rules = " ".join(str(facts.get("description") or "").split())
@@ -237,8 +243,15 @@ def politics_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
     sentences = _SENTENCE.split(rules)
     quote = next((x for x in sentences if _RESOLVES.search(x)), sentences[0] if sentences and sentences[0] else "")
     quote = _clip_words(quote)
+    item = str(facts.get("group_item") or "")
+    # only one outcome of the event can be the one: its rules say so, or a which/where/who event Polymarket runs as
+    # negRisk ("Who will Trump insult by …?" isn't: several can be Yes, so each stays a date market)
+    one_of = bool(item) and bool(_ONE_OF_RULE.search(rules) or (
+        facts.get("neg_risk") and _ONE_OF_EVENT.match(str(facts.get("event_title") or ""))))
     if _RESULT_RULE.search(rules) and _RESULT_Q.search(q):
         kind = "result"
+    elif one_of and not (_NONE_LEG.match(q) or _NONE_LEG.match(item)):
+        kind = "one_of"
     elif _DATE_RULE.search(rules) and _DATE_Q.search(q):
         kind = "by_date"
     else:
@@ -250,6 +263,8 @@ def politics_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
         source = ", ".join(named) if named else (facts.get("resolution_source") or None)
     deadline = facts.get("end_iso")
     lead = {"result": "The result", "by_date": "Whether it happens by the date in its rules",
+            "one_of": f"Whether {item} is the one of its event's outcomes"
+                      + (f", decided by {deadline[:10]}" if deadline else ""),
             "other": "Its rules say"}[kind]  # what the page shows after "What resolves it:"
     says = f"{lead}: “{quote}”" if quote else f"{lead}."
     return {"kind": kind, "strike": None, "source": source, "deadline": deadline, "quote": quote or None,
@@ -268,7 +283,9 @@ splits and conversions (moves), its position after each, and the market's own pr
 What resolves it: read each market's rule (rule.kind, rule.quote, rule.source) and its rules text, and say which \
 applies; never assume one for all. rule.kind result: who wins, is appointed or controls (the source the rules \
 name: a news call, official results or certification); by_date: Yes (or No, in its own words) if the thing \
-happens by the market's date; other: the parser wasn't sure, so quote the rules instead of naming a kind.
+happens by the market's date; one_of: one leg of a "which / where / who" event (one market per country, place or \
+person): Yes if this outcome is the one, decided by rule.deadline, never "by a date"; other: the parser wasn't \
+sure, so quote the rules instead of naming a kind.
 There is no outside line: no news feed, no polls, no vote counts, no results data beyond the market's own result. \
 So never say a trade followed news, a poll, a debate or a result coming in, never that it "knew" or "expected" \
 anything, and never what the outcome "should" have been. Say a buy came after a move in the market's own price, \

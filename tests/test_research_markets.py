@@ -544,13 +544,13 @@ const r = {{ window_id: 'a', title: 'Q', axis: {{ from: 900000, to: 1000000 }}, 
 const st = marketAutoSteps(prepMarket(r, null));
 console.log(JSON.stringify({{ s: [statusText({{ profit_kind: 'resolved', result: 'No', exit: {{ how: 'merged' }} }}), statusText({{ profit_kind: 'resolved', result: 'No', exit: {{ how: 'held' }} }}),
   statusText({{ profit_kind: 'open', exit: {{ how: 'open' }} }}), statusText({{ profit_kind: 'closed', exit: {{ how: 'sold_and_merged' }} }})],
-  chips: [ruleChip({{ kind: 'result' }}), ruleChip({{ kind: 'by_date' }}), ruleChip({{ kind: 'other' }}), ruleChip({{ kind: 'touch_high' }})],
+  chips: [ruleChip({{ kind: 'result' }}), ruleChip({{ kind: 'by_date' }}), ruleChip({{ kind: 'other' }}), ruleChip({{ kind: 'touch_high' }}), ruleChip({{ kind: 'one_of', deadline: '2026-10-01T03:59:00Z' }})],
   strikes: g.strikes, tiles: legsText(eventLegs(g)), sel: eventLegs(g, events), selText: legsText(eventLegs(g, events)), steps: st.map(s => s.title) }}));
 """
     out = subprocess.run([node, "--input-type=module", "-e", code], capture_output=True, text=True, timeout=30, check=True)
     got = json.loads(out.stdout)
     assert got["s"] == ["Merged out, resolved No", "Resolved No", "Open", "Sold and merged out"]
-    assert got["chips"] == ["Who wins", "By a date", "See its rules", "Any-time high"] and got["strikes"] is False
+    assert got["chips"] == ["Who wins", "By a date", "See its rules", "Any-time high", "One of several outcomes · by 1 Oct"] and got["strikes"] is False
     assert got["tiles"] == "Yes on El-Sayed (D), No on Rogers (R)"
     assert got["sel"]["markets"] == 3 and got["sel"]["shown"] == 2
     assert got["selText"] == "Yes on El-Sayed (D), No on Rogers (R), both sides of Other"
@@ -568,3 +568,35 @@ def test_a_market_plan_without_a_start_reads_back_90_days_so_start_can_tile_it(m
     assert p["market"] == {"id": "politics", "label": "Politics", "unit": "market"}
     assert p["scope"]["from"] == D.iso(T0 - 90 * DAY) and C.scope_ok(p["scope"])
     assert store.scope(sid) == p["scope"]  # what Start tiles: the scope with its defaults
+
+
+TALKS_RULES = ("On June 22, the first round of U.S.-Iran diplomatic talks in Switzerland concluded, with mediators "
+               "reporting progress toward a roadmap for a final deal.\n\nThis market will resolve according to the country "
+               "in which the next formal senior-level round of peace talks between representatives of the United States "
+               "and Iran begins by September 30, 2026, 11:59 PM ET.")  # fmt: skip
+TALKS_EVENT = "Where will the next next round of US-Iran peace talks be...?"
+
+
+def test_a_leg_of_a_which_or_where_event_is_one_of_several_outcomes_never_by_a_date() -> None:
+    def rule(q: str, item: str, **kw: Any) -> dict[str, Any]:
+        return M.politics_rule({"question": q, "description": TALKS_RULES, "group_item": item, "event_title": TALKS_EVENT,
+                                "neg_risk": True, "end_iso": "2026-10-01T03:59:00Z", **kw})  # fmt: skip
+
+    oman = rule("Will the next diplomatic US-Iran meeting be in Oman by September 30, 2026?", "Oman")
+    assert oman["kind"] == "one_of" and oman["deadline"] == "2026-10-01T03:59:00Z"
+    assert oman["says"].startswith("Whether Oman is the one of its event's outcomes, decided by 2026-10-01: “This market")
+    # the event's "none by <date>" leg is a date market
+    none = rule("Will no qualifying diplomatic US-Iran meeting occur by September 30, 2026?", "No Meeting by September 30")
+    assert none["kind"] == "by_date"
+    # a "who" event where several can be Yes (not negRisk) stays a date market; an election stays "who wins"
+    insult = M.politics_rule({"question": "Will Donald Trump publicly insult Ken Paxton by October 31, 2026?",
+                              "description": 'This market will resolve to "Yes" if Donald Trump makes any public statement '
+                                             "in which he insults the listed individual between market creation and the "
+                                             'specified date (ET). Otherwise, this market will resolve to "No".',
+                              "group_item": "Ken Paxton", "event_title": "Who will Trump publicly insult by October 31?",
+                              "neg_risk": False})  # fmt: skip
+    assert insult["kind"] == "by_date"
+    race = M.politics_rule({"question": "Will the Democrats win the Michigan Senate race in 2026?", "description": SENATE_RULES,
+                            "group_item": "Abdul El-Sayed (D)", "event_title": "Who will win the Michigan Senate race?",
+                            "neg_risk": True})  # fmt: skip
+    assert race["kind"] == "result"

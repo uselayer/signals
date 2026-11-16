@@ -83,7 +83,9 @@ export function buyDots(tiles) {
 }
 
 // What resolves one market, in a few words for a chip (the rule's own sentence is in `says`).
-export const ruleChip = r => (!r || !r.kind ? null : { touch_high: 'Any-time high', touch_low: 'Any-time low', close_above: 'One close, on a date', close_below: 'One close, on a date', all_time_high: 'New all-time high', result: 'Who wins', by_date: 'By a date' }[r.kind] || 'See its rules');
+// one leg of a "which / where / who" event is one outcome of several, decided by its deadline (never "By a date")
+export const ruleChip = r => (!r || !r.kind ? null : r.kind === 'one_of' ? `One of several outcomes${r.deadline && !isNaN(Date.parse(r.deadline)) ? ` · by ${shortDate(Date.parse(r.deadline) / 1000)}` : ''}`
+  : { touch_high: 'Any-time high', touch_low: 'Any-time low', close_above: 'One close, on a date', close_below: 'One close, on a date', all_time_high: 'New all-time high', result: 'Who wins', by_date: 'By a date' }[r.kind] || 'See its rules');
 
 // How it got out (value.exit): sold, merged, both; held to the result; open; or not known (its merges weren't read).
 const OUT = { sold: 'Sold out', merged: 'Merged out', sold_and_merged: 'Sold and merged out' };

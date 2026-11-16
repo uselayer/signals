@@ -82,6 +82,27 @@ function Teaser() {
 
 // What you opened and when (the main page's pill reads it too: same origin), and since when "ready" counts.
 const OPENED = 'signals.breakdowns.opened', SINCE = 'signals.breakdowns.since';
+// On a phone, one quiet line near the top of a breakdown, once a session (owner, 15 Nov): the charts and the market
+// list are long there. Shown in the first breakdown opened on a phone; Dismiss hides it until the next session.
+const PHONE_NOTE = 'breakdowns.phoneNote';
+let phoneNoteOn = null; // decided once a page load
+function phoneNoteShown() {
+  if (phoneNoteOn === null) {
+    let seen = false;
+    try { seen = sessionStorage.getItem(PHONE_NOTE) === '1'; } catch {}
+    const phone = typeof matchMedia === 'function' && matchMedia('(max-width: 600px)').matches;
+    phoneNoteOn = phone && !seen;
+    if (phoneNoteOn) try { sessionStorage.setItem(PHONE_NOTE, '1'); } catch {}
+  }
+  return phoneNoteOn;
+}
+function PhoneNote() {
+  const [on, setOn] = useState(phoneNoteShown);
+  if (!on) return null;
+  return html`<p class="phonenote muted small" role="note"><span>Breakdowns read best on a computer: the charts and market list are long on a phone.</span>
+    <button class="link" onClick=${() => { phoneNoteOn = false; setOn(false); }}>Dismiss</button></p>`;
+}
+
 const readLs = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const writeLs = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 function since() {
@@ -338,6 +359,7 @@ function Investigation({ api, id }) {
           ${inv.partial && html`<span class="cov">· Partial history: it stopped at the read limit</span>`}</div>
         ${rec && html`<${RecordLine} r=${rec} wallet=${wallet} />`}
       </div>
+      <${PhoneNote} />
       ${SAMPLE && html`<div class="banner sample"><span>A sample breakdown, recorded from a real run: real windows, with the agent's steps played back. <a class="link" href="./?signin#/">Sign in to ask your own.</a></span></div>`}
       ${FIXTURES && !SAMPLE && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
