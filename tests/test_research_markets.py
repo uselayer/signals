@@ -600,3 +600,215 @@ def test_a_leg_of_a_which_or_where_event_is_one_of_several_outcomes_never_by_a_d
                             "group_item": "Abdul El-Sayed (D)", "event_title": "Who will win the Michigan Senate race?",
                             "neg_risk": True})  # fmt: skip
     assert race["kind"] == "result"
+
+
+# ---- the Premier League (session 3: season futures first; match markets only when listed 7+ days ahead) ----
+
+CHAMP_RULES = ("This market will resolve according to the team that wins the 2026-27 English Premier League (EPL) "
+               "Championship.\n\nIf at any point it becomes impossible for a listed team to win the 2026-27 English "
+               "Premier League (EPL) Championship per the rules of English Premier League (EPL), the corresponding "
+               "market will resolve to \"No\".\n\nThe primary resolution source for this market will be official "
+               "information from English Premier League (EPL); however, a consensus of credible reporting may also "
+               "be used.")  # fmt: skip
+SCORER_RULES = ("This market will resolve to the player who scores the most goals during the 2026-27 Premier League "
+                "season.\n\nOnly goals scored in Premier League matches will count.\n\nIf multiple players tie for the "
+                "top goal scorer, this market will resolve to the player whose last name comes first alphabetically.")
+RELEGATED_RULES = ("This market will resolve to \"Yes\" if the listed team is relegated from Premier League at the "
+                   "conclusion of the 2026-27 Premier League season. Otherwise, this market will resolve to \"No\".")
+UCL_RULES = ("This market will resolve to \"Yes\" if the listed team earns a place in the 2027-28 UEFA Champions League "
+             "through the 2026-27 Premier League season or by winning a 2026-27 UEFA club competition. Otherwise, this "
+             "market will resolve to \"No\".\n\nIf at any point it becomes impossible for the listed team to qualify, "
+             "the market will resolve to \"No\".")  # fmt: skip
+MATCH_RULES = ("In the upcoming Premier League game between AFC Bournemouth and Nottingham Forest FC, originally "
+               "scheduled for Saturday, November 21, 2026 at 10:00 AM ET (as of creation of the first market related to "
+               "the event):\nIf AFC Bournemouth wins, this market will resolve to \"Yes\".\nOtherwise, this market will "
+               "resolve to \"No\".")  # fmt: skip
+SCORE_RULES = ("In the upcoming Premier League game between Hull City AFC and Brighton & Hove Albion FC, originally "
+               "scheduled for Sunday, November 22, 2026 at 9:00 AM ET (as of creation of the first market related to the "
+               "event): This market will resolve based on the final score of the Hull City AFC vs. Brighton & Hove Albion "
+               "FC match, considering only the result at the end of 90 minutes of regulation plus stoppage time.")
+MANAGER_RULES = ("This market will resolve according to the person who is appointed as the next permanent manager of "
+                 "Manchester United.  If no permanent manager is appointed by December 31, 2026, 11:59 PM ET, the market "
+                 "will resolve to \"Other.\"")  # fmt: skip
+PUNISH_RULES = ("This market will resolve to \"Yes\" if the sanctions imposed on Manchester City FC by the independent "
+                "Regulatory Commission for the breaches found in the Premier League's proceedings against Manchester "
+                "City FC are officially announced by the specified date. Otherwise, it will resolve to \"No\".")
+BALLON_RULES = ("This market will resolve to “Yes” if Vinicius Jr wins the 2024 Ballon D’Or. Otherwise, this market "
+                "will resolve to “No”.  The primary resolution source for this market is official information from "
+                "France Football (https://www.francefootball.fr/).")
+EPL_SLUG = "will-arsenal-win-the-2026-27-english-premier-league-epl-championship-20260701200428761"
+EPL_CID = "0x" + "44" * 32
+EPL_TAGS = [{"label": "EPL"}, {"label": "Soccer"}, {"label": "Sports"}]
+
+
+def _epl(question: str, rules: str, tags: tuple[str, ...] = ("EPL", "Soccer", "Sports"), **kw: Any) -> dict[str, Any]:
+    return {"question": question, "description": rules, "tags": list(tags), **kw}
+
+
+def test_a_premier_league_market_is_known_by_its_epl_tag_and_its_own_text() -> None:
+    assert M.by_id("premier-league") is M.PREMIER_LEAGUE and M.by_id("epl") is M.PREMIER_LEAGUE
+    assert M.PREMIER_LEAGUE.outside is None and M.PREMIER_LEAGUE.min_days == 7.0 and M.PREMIER_LEAGUE.looks_at == 180
+    pl = M.premier_league_matches
+    assert pl(EPL_SLUG, {}) and not pl("btc-updown-15m-1794285000", {})  # no facts yet: not ruled out
+    assert pl("x", _epl("Will Arsenal win the 2026-27 English Premier League (EPL) Championship?", CHAMP_RULES))
+    assert pl("x", _epl("Will Arsenal be relegated from the 2026-27 Premier League?", RELEGATED_RULES))
+    # a Champions League place: its question doesn't name the league, its rules do
+    assert pl("x", _epl("Will Arsenal qualify for the 2027-28 UEFA Champions League?", UCL_RULES))
+    # a club's manager names the club, not the league; a national team's manager isn't the league
+    assert pl("x", _epl("Will Darren Fletcher be appointed as manager of Manchester United?", MANAGER_RULES,
+                        tags=("Sports", "man united", "EPL", "Soccer")))  # fmt: skip
+    assert not pl("x", _epl("Will Thomas Tuchel be the next England manager?", "Resolves to the next permanent manager."))
+    # Polymarket put the EPL tag on the Ballon d'Or, Euro 2024 and the FA Cup: their own text doesn't name the league
+    ballon = _epl("Will Vinicius Jr win the Ballon D’Or?", BALLON_RULES, event_title="Ballon d'Or Winner")
+    assert not pl("x", ballon) and M.premier_league_near(ballon)
+    assert not pl("x", _epl("Will England win the 2024 Euros?", "Resolves Yes if England wins Euro 2024.", ("Sports", "EPL")))
+    assert not pl("x", _epl("Will Preston North End win the 2024-25 FA Cup?", "Resolves to the winner of the FA Cup.",
+                            ("Sports", "Soccer", "FA Cup", "EPL")))  # fmt: skip
+    # the league's name without the tag (cricket's Indian Premier League), or another country's league, isn't it
+    assert not pl("x", _epl("Will Mumbai win the Indian Premier League?", "The Indian Premier League final.", ("Cricket",)))
+    assert not pl("x", _epl("Will Zenit win the Russian Premier League?", "The Russian Premier League table."))
+    assert not M.premier_league_near(_epl("Will Mumbai win?", "x", ("Cricket",)))
+    # the facts the service reads carry Gamma's tag labels; the type is found, not politics or BTC
+    f = D.market_facts({"slug": EPL_SLUG, "conditionId": EPL_CID, "question": "Will Arsenal win the 2026-27 English "
+                        "Premier League (EPL) Championship?", "outcomes": '["Yes", "No"]', "clobTokenIds": '["a", "b"]',
+                        "negRisk": True, "groupItemTitle": "Arsenal", "description": CHAMP_RULES, "tags": EPL_TAGS})
+    assert M.of_market(EPL_SLUG, f) is M.PREMIER_LEAGUE and f["category"] != "Politics"
+    assert M.premier_league_hint(EPL_SLUG) and M.premier_league_hint("epl-bou-not-2026-11-21-bou")
+    assert not M.premier_league_hint("will-arsenal-qualify-for-the-2027-28-uefa-champions-league")
+    assert not M.premier_league_hint("will-the-sepl-ban-pass")  # a whole word, not a substring
+    # the types before it have no hint, so their reads are as before
+    assert all(t.hint is None for t in M.TYPES if t is not M.PREMIER_LEAGUE)
+
+
+def test_what_resolves_a_premier_league_market_is_read_from_its_own_rules() -> None:
+    r = M.premier_league_rule
+    champ = r(_epl("Will Arsenal win the 2026-27 English Premier League (EPL) Championship?", CHAMP_RULES,
+                   group_item="Arsenal", neg_risk=True, end_iso="2027-06-15T00:00:00Z"))  # fmt: skip
+    assert champ["kind"] == "one_of" and champ["ends_early"] and champ["tie"] is None
+    assert champ["source"] == "official information from English Premier League (EPL)"  # not "…; however, a consensus"
+    assert champ["says"].startswith("Whether Arsenal is the one of its event's outcomes: “This market will resolve according")
+    scorer = r(_epl("Will Erling Haaland (Man City) be the top goalscorer of the 2026-27 Premier League season?",
+                    SCORER_RULES, group_item="Erling Haaland", neg_risk=True))  # fmt: skip
+    assert scorer["kind"] == "one_of" and not scorer["ends_early"] and "alphabetically" in scorer["tie"]
+    rel = r(_epl("Will Arsenal be relegated from the 2026-27 Premier League?", RELEGATED_RULES, group_item="Arsenal"))
+    assert rel["kind"] == "season" and rel["says"].startswith("At the end of the season: “This market will resolve to")
+    ucl = r(_epl("Will Arsenal qualify for the 2027-28 UEFA Champions League?", UCL_RULES, group_item="Arsenal"))
+    assert ucl["kind"] == "season" and ucl["ends_early"]
+    old = r(_epl("Will Southampton be relegated?", "This market will resolve to “Yes” if Southampton finishes in the "
+                 "bottom 3 of the 2024-25 Premier League season."))  # fmt: skip
+    assert old["kind"] == "season"
+    win = r(_epl("Will AFC Bournemouth win on 2026-11-21?", MATCH_RULES, slug="epl-bou-not-2026-11-21-bou",
+                 group_item="AFC Bournemouth", neg_risk=True))  # fmt: skip
+    assert win["kind"] == "match" and win["quote"] == "If AFC Bournemouth wins, this market will resolve to \"Yes\"."
+    score = r(_epl("Exact Score: Hull City AFC 0 - 0 Brighton & Hove Albion FC?", SCORE_RULES,
+                   slug="epl-hul-bri-2026-11-22-exact-score-0-0"))  # fmt: skip
+    assert score["kind"] == "match" and "Hull City AFC vs. Brighton & Hove Albion FC match" in score["quote"]  # not cut at "vs."
+    mgr = r(_epl("Will Darren Fletcher be appointed as manager of Manchester United?", MANAGER_RULES,
+                 group_item="Darren Fletcher", neg_risk=True))  # fmt: skip
+    assert mgr["kind"] == "one_of"
+    pun = r(_epl("Manchester City punishment announced by October 9?", PUNISH_RULES, group_item="October 9"))
+    assert pun["kind"] == "by_date"
+    bucket = r(_epl("Will Manchester City be deducted 0 Premier League points?", "This market will resolve according to "
+                    "the total number of Premier League points Manchester City FC is deducted.", group_item="0",
+                    neg_risk=True))  # fmt: skip
+    assert bucket["kind"] == "one_of" and bucket["says"].startswith("Whether “Will Manchester City be deducted 0")
+    # its section is in the agent's instructions, with no example numbers, and never claims a result, a table or news
+    import re
+
+    assert M.PREMIER_LEAGUE_PROMPT in A.SYSTEM and set(re.findall(r"\d+", M.PREMIER_LEAGUE_PROMPT)) <= {"0", "1"}
+    assert "never say a trade followed a match" in M.PREMIER_LEAGUE_PROMPT and "no league table" in M.PREMIER_LEAGUE_PROMPT
+
+
+class EplPoly(Poly):
+    """A Premier League wallet: Arsenal for the title (negRisk), still held."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.market = {"slug": EPL_SLUG, "conditionId": EPL_CID, "description": CHAMP_RULES,
+                       "question": "Will Arsenal win the 2026-27 English Premier League (EPL) Championship?",
+                       "outcomes": '["Yes", "No"]', "clobTokenIds": '["tY", "tN"]', "outcomePrices": '["0.25", "0.75"]',
+                       "closed": False, "negRisk": True, "groupItemTitle": "Arsenal", "tags": EPL_TAGS,
+                       "startDate": "2026-07-01T20:04:28Z", "endDate": "2027-06-15T00:00:00Z",
+                       "events": [{"slug": "epl-2027-champion", "title": "English Premier League Winner"}]}  # fmt: skip
+        self.fills = [_act(T0, "buy", "Yes", 0.2, 100, "0xa") | {"conditionId": EPL_CID, "slug": EPL_SLUG},
+                      _act(T0 + 9 * DAY, "buy", "Yes", 0.22, 50, "0xb") | {"conditionId": EPL_CID, "slug": EPL_SLUG}]
+
+    def _pages(self, path: str, params: dict[str, Any], limit: int, offset: int, page: int) -> list[dict[str, Any]]:
+        return []
+
+
+def test_a_premier_league_replay_has_no_outside_line_and_is_open_at_todays_price(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(D, "now", lambda: T0 + 10 * DAY)
+    monkeypatch.setattr(workspace, "now", lambda: T0 + 10 * DAY)
+    store, sid = _store_with_wallet()
+    reads = _reads()
+    reads.whales._poly = EplPoly()
+    r = workspace.build(store, reads, sid, EPL_SLUG)
+    assert r["market_type"] == "premier-league" and r["outside"] is None and r["rule"]["kind"] == "one_of"
+    assert r["group_item"] == "Arsenal" and r["neg_risk"] and r["rule"]["ends_early"]
+    cov = r["coverage"]
+    assert cov["outside"] is None and "tied to a match result or news" in " ".join(cov["notes"])
+    assert r["value"]["profit_kind"] == "open" and r["value"]["exit"] == {"how": "open"}
+    assert store.summaries(sid)[0]["coverage"]["outside_none"].startswith("No outside series for Premier League")
+
+
+def test_a_premier_league_scope_reads_slugs_naming_the_league_first_and_tiles_the_most_money(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads = _reads()
+    other = [("0x" + f"{i:064x}", f"nba-game-{i}") for i in range(200)]  # 200 busier markets that aren't the league
+    ucl = ("0x" + "55" * 32, "will-arsenal-qualify-for-the-2027-28-uefa-champions-league")  # its slug doesn't say
+    clubs = [("0x" + f"{0xE0 + i:064x}", f"will-club-{i}-win-the-2026-27-english-premier-league-epl") for i in range(3)]
+    ballon = ("0x" + "66" * 32, "ballon-dor-epl-2026")
+    rows = [{"ts": T0 + i, "slug": s, "condition_id": c, "usd": 1000.0 - i, "action": "buy", "outcome": "Yes"}
+            for i, (c, s) in enumerate(other)]  # fmt: skip
+    rows += [{"ts": T0 + 300, "slug": ucl[1], "condition_id": ucl[0], "usd": 950.5, "action": "buy", "outcome": "No"},
+             {"ts": T0 + 301, "slug": ballon[1], "condition_id": ballon[0], "usd": 30.0, "action": "buy", "outcome": "Yes"}]
+    rows += [{"ts": T0 + 310 + i, "slug": s, "condition_id": c, "usd": 20.0 - i, "action": "buy", "outcome": "Yes"}
+             for i, (c, s) in enumerate(clubs)]  # fmt: skip
+    base = {"outcomes": '["Yes", "No"]', "clobTokenIds": '["a", "b"]', "startDate": "2026-07-01T00:00:00Z",
+            "endDate": "2027-06-15T00:00:00Z"}
+    gamma = {c: base | {"slug": s, "conditionId": c, "question": f"Will {s} win?", "description": "An NBA game.",
+                        "tags": [{"label": "NBA"}, {"label": "Sports"}]} for c, s in other}  # fmt: skip
+    for i, (c, s) in enumerate(clubs):
+        gamma[c] = base | {"slug": s, "conditionId": c, "description": CHAMP_RULES, "negRisk": True, "tags": EPL_TAGS,
+                           "question": f"Will Club {i} win the 2026-27 English Premier League (EPL) Championship?",
+                           "groupItemTitle": f"Club {i}",
+                           "events": [{"slug": "epl-2027-champion", "title": "English Premier League Winner"}]}  # fmt: skip
+    gamma[ucl[0]] = base | {"slug": ucl[1], "conditionId": ucl[0], "description": UCL_RULES, "tags": EPL_TAGS,
+                            "question": "Will Arsenal qualify for the 2027-28 UEFA Champions League?",
+                            "groupItemTitle": "Arsenal", "events": [{"slug": "ucl-places", "title": "UCL places"}]}
+    gamma[ballon[0]] = base | {"slug": ballon[1], "conditionId": ballon[0], "description": BALLON_RULES,
+                               "question": "Will Vinicius Jr win the Ballon D’Or?", "tags": EPL_TAGS}
+    asked: list[list[str]] = []
+
+    def facts(ids: list[str]) -> dict[str, dict[str, Any]]:
+        asked.append(ids)
+        return {c: D.market_facts(gamma[c]) for c in ids if c in gamma}
+
+    monkeypatch.setattr(reads, "_newest_trades", lambda w, a, b: {"trades": rows, "count": len(rows), "start": a,
+                                                                   "complete": True, "read_to": b, "source": "s", "note": ""})
+    monkeypatch.setattr(reads, "markets_facts", facts)
+    got = reads.wallet_markets(W, T0, T0 + 90 * DAY, "premier-league", top=2)
+    # the clubs (their slugs name the league) are 203rd to 205th by money, past the cap of 180 by money alone: they're
+    # read in the first batch, before the 200 busier markets
+    assert {c for c, _ in clubs} <= set(asked[0])
+    # with 2 kept, it reads on while a bigger market could still outrank them, and finds the Champions League place
+    # (its slug doesn't say): the tiles are the most money first, never the order read
+    assert [m["slug"] for m in got["markets"]] == [ucl[1], clubs[0][1]] and got["matched"] == 4
+    assert got["markets_looked_at"] == M.PREMIER_LEAGUE.looks_at
+    assert [x["question"] for x in got["skipped_near"]] == ["Will Vinicius Jr win the Ballon D’Or?"]
+    assert got["not_this_type"] == 176  # 180 read: 4 kept, the Ballon d'Or and 175 NBA markets left out
+    e = got["events"][0]
+    assert e["event_title"] == "English Premier League Winner" and e["markets"] == 3 and e["shown"] == 1
+    assert "whose slugs name the league first" in got["note"]
+
+
+def test_the_pages_premier_league_chips_say_end_of_the_season_and_one_match() -> None:
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node isn't installed")
+    js = (Path(__file__).resolve().parent.parent / "signals" / "research" / "static" / "js" / "marketdata.js").as_uri()
+    code = (f"import {{ ruleChip }} from '{js}';\n"
+            "console.log(JSON.stringify([ruleChip({ kind: 'season' }), ruleChip({ kind: 'match' }),"
+            " ruleChip({ kind: 'one_of', deadline: '2027-06-15T00:00:00Z' })]));")  # fmt: skip
+    out = subprocess.run([node, "--input-type=module", "-e", code], capture_output=True, text=True, timeout=30, check=True)
+    assert json.loads(out.stdout) == ["End of the season", "One match", "One of several outcomes · by 15 Jun"]
