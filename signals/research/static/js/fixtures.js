@@ -19,7 +19,10 @@ export async function fixtureApi(base = './fixtures/') {
   let asked = 2;
   return {
     fixtures: true,
-    config: async () => ({ clerk_key: null, event_version: 2, fixtures: true }),
+    config: async () => ({ clerk_key: null, event_version: 2, fixtures: true, market_types: [
+      { id: 'btc-updown-15m', label: 'BTC Up or Down 15m', unit: 'window', min_days: 0 },
+      { id: 'btc-long', label: 'Long-dated BTC', unit: 'market', min_days: 7 },
+      { id: 'politics', label: 'Politics', unit: 'market', min_days: 7 }] }),
     sessions: async () => [{ id: SID, title: sample.runs[0][0].title, created: Date.now() / 1000 - 3600, sample: true }],
     create: async () => SID,
     session: async () => ({ id: SID, title: sample.runs[0][0].title, running, events: [...log] }),

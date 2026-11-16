@@ -472,3 +472,35 @@ def test_an_opened_finding_shows_only_what_is_needed() -> None:
 
     desc = next(t for t in CASE_TOOLS if t["name"] == "finding")["description"]
     assert "at most 20 words" in desc and "never repeat the title or" in desc and "no new numbers" in desc
+
+
+def test_the_ask_box_says_which_market_and_how_far_back() -> None:
+    """George West (13 Nov): no filter by market or time frame, the default was 15 minutes and he wants a month or
+    two; traders keep different timelines, so short ones too (an hour). The ask box has Market (the service's own
+    market types, from /api/research/config) and Time range, sent with the question in words the agent reads, and
+    the plan card says the scope in words: which markets, from when to when, how long."""
+    from signals.research import markets
+
+    cfg = TestClient(app).get("/api/research/config").json()
+    assert [t["id"] for t in cfg["market_types"]] == [t.id for t in markets.TYPES]
+    js = (STATIC / "js" / "app.js").read_text()
+    assert 'aria-label="What to study"' in js and "<label>Market <select" in js and "<label>Time range <select" in js
+    assert "askScope(type, h)" in js and "types=${types || MARKET_TYPES}" in js
+    assert "scopeText(p)" in (STATIC / "js" / "views.js").read_text()
+    out = _page_store("""
+      const now = Date.parse('2026-11-15T20:07:00Z') / 1000;
+      const w = { id: 'btc-updown-15m', label: 'BTC Up or Down 15m', unit: 'window' }, m = { id: 'politics', label: 'Politics', unit: 'market' };
+      console.log(JSON.stringify({
+        win: S.RANGES.window.map(r => r[0]), mkt: S.RANGES.market.map(r => r[0]), dw: S.defaultRange('window'), dm: S.defaultRange('market'),
+        hour: S.askScope(w, 1, now), sixty: S.askScope(m, 1440, now),
+        pol: S.scopeText({ scope: { from: '2026-08-17T20:00:00Z', to: 'now', market_type: 'politics', min_days: 7 }, market: { label: 'Politics', unit: 'market' } }, now),
+        btc: S.scopeText({ scope: { from: '2026-11-15T19:00:00Z', to: 'now' }, market: { label: 'BTC Up or Down 15m', unit: 'window' } }, now),
+        odd: S.scopeText({ scope: { from: 'the start of its trading', to: 'now' } }, now), none: S.scopeText({ scope: {} }, now),
+      }));""")
+    assert out["win"][0] == 1 and out["mkt"][-1] == 2160 and out["dw"] == 24 and out["dm"] == 2160  # an hour; 90 days
+    assert out["hour"] == ("Market: BTC Up or Down 15m (market_type btc-updown-15m)\n"
+                           "Time range: the last hour, from 2026-11-15T19:00:00Z to now")  # on a window's start
+    assert out["sixty"].endswith("the last 60 days, from 2026-09-16T20:00:00Z to now")
+    assert out["pol"] == "Politics markets, 17 Aug 2026 to now (90 days), only markets that run 7 days or more"
+    assert out["btc"] == "BTC Up or Down 15m windows, 15 Nov 2026 19:00 UTC to now (1 hour)"
+    assert out["odd"] == "the start of its trading to now" and out["none"] == "as asked"
