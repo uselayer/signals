@@ -3,7 +3,7 @@
 // for visitors (no sign-in: the signed-out page's "Watch a sample breakdown"); ?signin opens Sign in at once; ?q=
 // prefills a question (the main site's ask bar sends it).
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
-import { live, startAuth, openSignIn, mountUser } from './api.js';
+import { live, startAuth, openSignIn, mountUser, copyTradingOn } from './api.js';
 import { fixtureApi } from './fixtures.js';
 import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun, RANGES, defaultRange, askScope } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
@@ -19,18 +19,19 @@ const params = new URLSearchParams(location.search);
 const SAMPLE = params.has('sample'), FIXTURES = SAMPLE || params.has('fixtures');
 const route = () => { const m = /^#\/i\/([\w-]+)/.exec(location.hash); return m ? { inv: m[1] } : { home: true }; };
 
-function Top({ fixtures }) {
+// The main site's tabs, the same order; Copy trading only for an account with copying on (as the main site's header).
+function Top({ fixtures, copyTrading }) {
   const acct = useRef();
   useEffect(() => mountUser(acct.current));
   return html`<header class="top"><div class="in">
     <a class="brand" href="/"><span class="logo">${LOGO}</span>Signals</a>
-    <nav class="tabs" aria-label="Main"><a class="on new" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a></nav>
+    <nav class="tabs" aria-label="Main"><a class="on new" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a>${copyTrading && html`<a href="/#/copies">Copy trading</a>`}</nav>
     <div class="acct">${SAMPLE ? html`<span class="chip">Sample: a recorded breakdown</span><a class="btn sm primary" href="./?signin#/">Sign in to ask your own</a>`
       : fixtures ? html`<span class="chip">Fixtures: recorded data, no service</span>` : html`<div ref=${acct}></div>`}</div></div></header>`;
 }
 
 function App() {
-  const [api, setApi] = useState(null), [r, setR] = useState(route()), [gate, setGate] = useState(null), [err, setErr] = useState(null), [types, setTypes] = useState(null);
+  const [api, setApi] = useState(null), [r, setR] = useState(route()), [gate, setGate] = useState(null), [err, setErr] = useState(null), [types, setTypes] = useState(null), [copyTrading, setCopyTrading] = useState(false);
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   useEffect(() => { (async () => {
     try {
@@ -39,11 +40,12 @@ function App() {
       if (cfg.event_version > 2) setErr('This page is older than the research service. Reload to get the new one.');
       setTypes(cfg.market_types && cfg.market_types.length ? cfg.market_types : null);
       const au = FIXTURES ? { signedIn: true } : await startAuth(cfg.clerk_key);
-      if (!au.signedIn) { setGate('signin'); if (params.has('signin')) openSignIn(); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) setGate(null); }); }
+      if (!au.signedIn) { setGate('signin'); if (params.has('signin')) openSignIn(); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) { setGate(null); copyTradingOn().then(setCopyTrading); } }); }
+      else if (!FIXTURES) copyTradingOn().then(setCopyTrading);
       setApi(a);
     } catch (e) { setErr(e.message || 'The research service isn\'t reachable.'); }
   })(); }, []);
-  return html`<${Hatch} /><${Top} fixtures=${FIXTURES} />
+  return html`<${Hatch} /><${Top} fixtures=${FIXTURES} copyTrading=${copyTrading} />
     ${err && html`<div class="home"><div class="banner err"><div><p>${err}</p><p class="small muted" style="margin-top:4px">To see the page with recorded data, open <a class="link" href="?fixtures#/">fixtures mode</a>.</p></div></div></div>`}
     ${!err && !api && html`<div class="home"><p class="muted">Loading…</p></div>`}
     ${api && gate === 'signin' && html`<${Teaser} />`}
