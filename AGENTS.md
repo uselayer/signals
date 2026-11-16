@@ -467,7 +467,8 @@ behind Vercel (see README, "Hosting").
 - Choosing a wallet (owner, 16 Nov: someone with no wallet to reverse-engineer needs one to start from): the ask
   box's wallet field opens a list, "Pick one for me" first, then each market type's top 3 by trading profit over 30
   days on Signals' own Leaderboard (`suggest.py`, from the engine's `/api/leaderboard`, never Polymarket's board;
-  Crypto wallets sorted into BTC 15-minute and long-dated BTC by one read of their latest 500 trades), kept 6 hours.
+  Crypto wallets sorted into BTC 15-minute and long-dated BTC, and Sports wallets into Premier League, by one read of
+  their latest 500 trades; each list always holds its best Human-tagged wallet when one was found), kept 6 hours.
   Facts only: rank, profit, money traded, Bot or Human; never "recommended". Picking one sets Market. "Pick one for
   me" sends the best-ranked Human-tagged wallet for the Market chosen (owner, 16 Nov; a bot only when none of the
   three is Human; `store.js` `pickOrder`), and the plan's page says which one and why, with the others to
