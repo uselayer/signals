@@ -4,13 +4,18 @@ profit over 30 days in its category on Signals' own Leaderboard (the engine's ``
 records, never a Polymarket read), its profit and money traded, and Bot or Human. Never "recommended", never a
 reading of whether it will keep making money.
 
-Each market type a breakdown can study gets the top few that trade it:
+Each market type a breakdown can study gets the top ``PER_TYPE`` that trade it, by rank, always with its best
+wallet tagged Human among them when one was found (owner, 16 Nov: "Pick one for me" studies a person first, and
+three bots would leave it none; ``with_human``):
 
-- Politics: the Politics category's first ``PER_TYPE`` (a wallet's category is where most of its trades are).
-- BTC 15-minute windows and long-dated BTC: the Crypto category's first ``CRYPTO_LOOKED_AT``, each one's latest
+- Politics: the Politics category's first ``LOOKED_AT`` (a wallet's category is where most of its trades are).
+- BTC 15-minute windows and long-dated BTC: the Crypto category's first ``LOOKED_AT``, each one's latest
   ``RECENT`` trades read once (one SDK read each, on the research budget) and sorted by what they are: a fifth or
   more BTC 15-minute windows, or any long-dated BTC market that isn't a one-day one (``markets.btc_long_matches``).
   A wallet can be in both.
+- Premier League: the Sports category's first ``SPORTS_LOOKED_AT``, read the same way, with ``EPL_MIN`` or more of
+  their recent trades in Premier League markets (``markets.premier_league_hint``; its matches count: they're
+  listed about two weeks ahead, so they pass the 7 days a breakdown keeps, checked on ndb1 16 Nov: 60 of 60).
 
 Built in a background thread at most every ``TTL_S`` and kept in memory; a page asks while it builds and gets what
 was kept last (or nothing yet, ``ready`` false)."""
@@ -26,8 +31,10 @@ from typing import Any
 import httpx
 
 PER_TYPE = 3  # wallets shown per market type
-CRYPTO_LOOKED_AT = 30  # the Crypto category's first wallets whose recent trades are read
-RECENT = 500  # recent trades read per Crypto wallet
+LOOKED_AT = 30  # the Politics and Crypto categories' first wallets looked at (Crypto's: their recent trades read)
+SPORTS_LOOKED_AT = 50  # Sports: most of its top traders trade other leagues (8 of 50 had Premier League, 16 Nov)
+RECENT = 500  # recent trades read per Crypto or Sports wallet
+EPL_MIN = 10  # a Premier League trader: at least this many of its recent trades in Premier League markets
 # a BTC 15-minute trader: at least this share of its recent trades in those windows (16 Nov, the top 30 read: the
 # busiest window traders spread over many coins, so half was too strict; a breakdown reads only its BTC windows)
 WINDOWS_SHARE = 0.2
@@ -55,9 +62,21 @@ def _row(r: dict[str, Any], rank: int, category: str) -> dict[str, Any]:
             "rank": rank, "profit_30d": p.get("trading_pnl"), "traded_30d": p.get("volume")}  # fmt: skip
 
 
+def with_human(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The first ``PER_TYPE`` of ``rows`` (rank order), the last swapped for the best-ranked wallet tagged Human when
+    none of them is and one is further down."""
+    top = rows[:PER_TYPE]
+    if top and not any(r.get("bot") == 0 for r in top):
+        human = next((r for r in rows[PER_TYPE:] if r.get("bot") == 0), None)
+        if human:
+            top = top[: PER_TYPE - 1] + [human]
+    return top
+
+
 def kinds_of(slugs: list[str]) -> set[str]:
     """What a wallet's recent markets say it trades: "btc-updown-15m" when a fifth or more are BTC 15-minute
-    windows, "btc-long" when any is a long-dated BTC market (not a one-day one)."""
+    windows, "btc-long" when any is a long-dated BTC market (not a one-day one), "premier-league" when ``EPL_MIN`` or
+    more are Premier League markets."""
     from signals.research import markets as M
     from signals.research.data import BTC_15M
 
@@ -66,6 +85,8 @@ def kinds_of(slugs: list[str]) -> set[str]:
         out.add(M.BTC_15M.id)
     if any(not M.is_window(s) and M.btc_long_matches(s, {}) and not DAILY.search(s) for s in slugs):
         out.add(M.BTC_LONG.id)
+    if sum(M.premier_league_hint(s) for s in slugs) >= EPL_MIN:
+        out.add(M.PREMIER_LEAGUE.id)
     return out
 
 
@@ -74,14 +95,15 @@ def build(whales: Any, web: httpx.Client, engine: str) -> list[dict[str, Any]]:
     from signals.research import markets as M
 
     found: dict[str, list[dict[str, Any]]] = {t.id: [] for t in M.TYPES}
-    try:
-        found[M.POLITICS.id] = [_row(r, i + 1, "Politics") for i, r in enumerate(_board(web, engine, "Politics")[:PER_TYPE])]
-    except (httpx.HTTPError, ValueError, KeyError):
-        pass
-    try:
-        crypto = [_row(r, i + 1, "Crypto") for i, r in enumerate(_board(web, engine, "Crypto")[:CRYPTO_LOOKED_AT])]
-    except (httpx.HTTPError, ValueError, KeyError):
-        crypto = []
+
+    def board(category: str, n: int) -> list[dict[str, Any]]:
+        try:
+            return [_row(r, i + 1, category) for i, r in enumerate(_board(web, engine, category)[:n])]
+        except (httpx.HTTPError, ValueError, KeyError):
+            return []
+
+    found[M.POLITICS.id] = board("Politics", LOOKED_AT)
+    read = board("Crypto", LOOKED_AT) + board("Sports", SPORTS_LOOKED_AT)
 
     def recent(w: str) -> set[str]:
         try:
@@ -90,11 +112,11 @@ def build(whales: Any, web: httpx.Client, engine: str) -> list[dict[str, Any]]:
             return set()
 
     with ThreadPoolExecutor(READS_AT_ONCE) as pool:
-        kinds = list(pool.map(recent, [r["wallet"] for r in crypto]))
-    for r, k in zip(crypto, kinds, strict=True):
+        kinds = list(pool.map(recent, [r["wallet"] for r in read]))
+    for r, k in zip(read, kinds, strict=True):
         for t in k:
-            if len(found[t]) < PER_TYPE:
-                found[t].append(r)
+            found[t].append(r)
+    found = {t: with_human(rows) for t, rows in found.items()}
     return [{"id": t.id, "label": t.label, "wallets": found[t.id]} for t in M.TYPES if found[t.id]]
 
 

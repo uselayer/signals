@@ -107,6 +107,15 @@ const isoAt = t => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
 const hoursWord = h => (h === 1 ? 'hour' : h < 48 ? `${h} hours` : `${Math.round(h / 24)} days`);
 // The lines sent with the question, beside "Wallet: …": the agent picks the plan's scope from the question, so the
 // market type's id and the exact start go in words it can't misread.
+// "Pick one for me" (owner, 16 Nov: a new person learns more from a person's choices than from a bot's rhythm): the
+// best-ranked wallet tagged Human goes first, then any not tagged yet, then bots, each kept in rank order. The first
+// is studied; the rest are offered on the plan to study instead. `human` says whether the first is tagged Human.
+export function pickOrder(wallets) {
+  const tier = w => (w.bot === 0 || w.bot === false ? 0 : w.bot == null ? 1 : 2);
+  const order = (wallets || []).map((w, i) => [tier(w), i, w]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map(x => x[2]);
+  return { first: order[0] || null, rest: order.slice(1), human: !!order[0] && tier(order[0]) === 0 };
+}
+
 export function askScope(type, hours, now = Date.now() / 1000) {
   const step = type.unit === 'window' ? 900 : 3600;
   const from = isoAt(Math.floor((now - hours * 3600) / step) * step);
