@@ -23,8 +23,10 @@ behind Vercel (see README, "Hosting").
   `SIGNALS_BOARD_FRESH_TOP` (300) by 30-day profit, each market chip's first 100, and every followed trader;
   `SIGNALS_BOARD_FRESH_HOURS`), on the background's budget like the rest (~0.3 reads a second), so a trader's page
   mostly finds a record under 6 hours old instead of reading one on the spot. Facts only: no tier, no "recommended", nothing about whether they'll make money next.
-  One tag, never a verdict: a "Bot" pill (amber robot; `bot` 1: 100+ trades a day, the SDK score's rule, worked out by
-  `records._bot` from the trades a record already reads; a record read before it falls back to the wallet's last score
+  One tag, never a verdict: a "Bot" pill (amber robot; `bot` 1: 100+ orders a day, the SDK score's rule, worked out by
+  `records._bot` from the trades a record already reads; orders, never fills: fills of one outcome, side and price, each
+  within an hour of the one before, are one order (`records._orders`), since one big resting order fills in hundreds of
+  pieces (BreakTheBank, 15 Nov: ~48,700 fills, ~37 orders a day); a read cut at 500 trades counts as a day at least; a record read before it falls back to the wallet's last score
   tag, `directory.bot_tag`), else a "Human" pill (blue person; `bot` 0), and a grey dashed "Unknown" (question mark) when a record hasn't said yet
   (read before the label; none without a record) (`whoBadge`): the
   Leaderboard's Human/Bot column (beside the name on a phone), a trader's page and Watchlist header, Explore's rows and

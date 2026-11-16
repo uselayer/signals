@@ -124,9 +124,9 @@ def test_the_usual_trade_is_where_their_money_goes_not_the_middle_of_their_scrap
     assert records._usual([10.0, 10.0, 10.0]) == 10 and records._usual([]) is None
 
 
-def test_a_record_tags_100_or_more_trades_a_day_bot_like_as_the_sdks_score_does() -> None:
+def test_a_record_tags_100_or_more_orders_a_day_bot_like_as_the_sdks_score_does() -> None:
     """13 Nov, user feedback: show "Bot-like" on every tagged wallet. A read cut at QUICK_TRADES covers only back to its
-    oldest trade, so 500 in 2 days is 250 a day; 500 over 20 days, or a handful in one busy hour, isn't."""
+    oldest trade, so 500 orders in 2 days is 250 a day; 500 over 20 days, or a handful in one busy hour, isn't."""
     cap = records.QUICK_TRADES
 
     def bot(n: int, span_s: float) -> int:
@@ -137,6 +137,27 @@ def test_a_record_tags_100_or_more_trades_a_day_bot_like_as_the_sdks_score_does(
     assert bot(cap, 20 * DAY) == 0  # cut short at 25 a day
     assert bot(120, 3600) == 0  # every trade of the 30 days read: 4 a day over the month, as the SDK counts it
     assert records.build(ProfitHistory([]), positions([]), [], NOW)["bot"] == 0
+
+
+def test_a_big_order_filled_in_hundreds_of_pieces_is_one_order_not_a_bot() -> None:
+    """15 Nov, owner: "BreakTheBank is a bot????" Their 500 latest fills were 2 hours of a few big resting orders
+    filled by strangers ($8 a fill), which counting fills called 5,789 trades a day. Fills of one outcome, side and
+    price, each within an hour of the one before, are one order; a cut read is a day at least, so a busy 2 hours isn't
+    scaled up to a day."""
+    cap = records.QUICK_TRADES
+    outcomes = [f"0xm{i % 5}:tok{i % 5}" for i in range(cap)]  # 5 orders, each filled 100 times over 2 hours
+    fills = [(NOW - 7200 * i / cap, True, o.partition(":")[0], 8.0, 0.6, o) for i, o in enumerate(outcomes)]
+    assert records._orders(fills) == 5
+    assert records.build(ProfitHistory([]), positions([]), fills, NOW)["bot"] == 0
+    # a bot's 500 latest fills: 150 different orders inside 3 hours is still 100 or more in a day
+    busy = [(NOW - 10800 * i / cap, True, f"0xm{i % 150}", 8.0, 0.5, f"0xm{i % 150}:t") for i in range(cap)]
+    assert records.build(ProfitHistory([]), positions([]), busy, NOW)["bot"] == 1
+    # the same outcome and side: another price, or more than an hour after its last fill, is another order
+    one = (NOW - 10_000, True, "0xm", 8.0, 0.6, "0xm:t")
+    assert records._orders([one, (NOW - 9_000, True, "0xm", 8.0, 0.6, "0xm:t")]) == 1
+    assert records._orders([one, (NOW - 9_000, True, "0xm", 8.0, 0.61, "0xm:t")]) == 2
+    assert records._orders([one, (NOW - 9_000, False, "0xm", 8.0, 0.6, "0xm:t")]) == 2  # a sell
+    assert records._orders([one, (NOW - 10_000 + records.ORDER_GAP_S + 1, True, "0xm", 8.0, 0.6, "0xm:t")]) == 2
 
 
 def test_a_record_read_takes_the_profit_history_and_the_completed_positions() -> None:

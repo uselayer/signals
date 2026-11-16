@@ -170,8 +170,8 @@ function Home({ api, types }) {
       <div class="compose-big">
         <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => onWallet(e.target.value)} />
         ${!SAMPLE && html`<div class="pickers" role="group" aria-label="What to study">
-          <label>Market <select id="market" value=${type.id} onChange=${e => onMarket(e.target.value)}>${types.map(t => html`<option value=${t.id}>${t.label}</option>`)}</select></label>
-          <label>Time range <select id="range" value=${String(h)} onChange=${e => setHours(Number(e.target.value))}>${ranges.map(([x, label]) => html`<option value=${String(x)}>${label}</option>`)}</select></label>
+          <div class="prow"><span class="pl" id="market-l">Market</span><div class="seg" id="market" role="radiogroup" aria-labelledby="market-l">${types.map(t => html`<button type="button" role="radio" aria-checked=${t.id === type.id ? 'true' : 'false'} class=${t.id === type.id ? 'on' : ''} data-v=${t.id} onClick=${() => onMarket(t.id)}>${t.label.replace(' Up or Down ', ' ')}</button>`)}</div></div>
+          <div class="prow"><span class="pl" id="range-l">Time range</span><div class="seg" id="range" role="radiogroup" aria-labelledby="range-l">${ranges.map(([x, label]) => html`<button type="button" role="radio" aria-checked=${x === h ? 'true' : 'false'} class=${x === h ? 'on' : ''} data-v=${String(x)} onClick=${() => setHours(x)}>${label}</button>`)}</div></div>
           <span class="muted small">${type.unit === 'window' ? 'Every window it traded. For a month or two, pick a market type with longer markets.' : `Its 20 markets with the most money${type.min_days ? `, of those that run ${type.min_days}+ days` : ''}.`}</span></div>`}
         <textarea id="q" rows="3" aria-label="Your question" placeholder=${type.unit === 'window' ? 'How does this wallet trade BTC 15-minute markets?' : `How does this wallet trade ${type.label} markets?`} value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
@@ -365,8 +365,8 @@ function Investigation({ api, id }) {
             return html`<button class="qrun" key=${i} aria-pressed=${i === idx ? 'true' : 'false'} title=${runTitle(inv, r, i)} onClick=${() => act.viewRun(i, rs.length)}>
               <span class="qt">${shortWallets(runTitle(inv, r, i))}</span><span class=${'st' + (stt === 'working' ? ' live' : '')}>${stt}</span></button>`; })}</div>`}
         ${past && html`<div class="banner"><span>You're looking at an earlier question. It's finished and won't change.</span><button class="link" onClick=${() => act.viewRun(rs.length - 1, rs.length)}>Back to the new question →</button></div>`}
-        <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}${isBot(rec) ? html`<span class="who-tag bot" title="100 or more trades a day, from its Signals record">${BOT_ICON}Bot</span>`
-          : isHuman(rec) ? html`<span class="who-tag human" title="Fewer than 100 trades a day, from its Signals record">${HUMAN_ICON}Human</span>`
+        <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}${isBot(rec) ? html`<span class="who-tag bot" title="100 or more orders a day, from its Signals record">${BOT_ICON}Bot</span>`
+          : isHuman(rec) ? html`<span class="who-tag human" title="Fewer than 100 orders a day, from its Signals record">${HUMAN_ICON}Human</span>`
           : rec ? html`<span class="who-tag unknown" title="Not read since this label was added: Human or Bot once their trades are read again">${UNKNOWN_ICON}Unknown</span>` : null}<span>${mk.label}</span>
           ${vsum.length > 0 && !byMarket && html`<span>· ${plural(vsum.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills${!past && inv.running ? ' so far' : ''}</span>`}
           ${vsum.length > 0 && byMarket && html`<span>· ${plural(vsum.length, 'market')}</span>${mt.decided > 0 && html`<span>· <b class=${mt.profitMade + mt.profitLost >= 0 ? 'gain' : 'loss'}>${signedMoney(mt.profitMade + mt.profitLost)}</b> on ${plural(mt.decided, 'market')} ended or sold out</span>`}${mt.open > 0 && html`<span>· ${signedMoney(mt.profitOpen)} open, at today's prices</span>`}`}
@@ -392,7 +392,7 @@ function Investigation({ api, id }) {
 // profit (from 10 closed), always with the average price paid beside it (a price is the market's chance, so paying
 // 97¢ wins about 97% of the time by buying alone), and it covers every market, not only these windows.
 const WIN_MIN = 10;
-// Tagged a bot by its record (100+ trades a day) or score: the header's "Bot", else "Human", as the Leaderboard shows it
+// Tagged a bot by its record (100+ orders a day) or score: the header's "Bot", else "Human", as the Leaderboard shows it
 const isBot = r => !!r && (r.bot === 1 || r.bot === true || (Array.isArray(r.tags) && r.tags.includes('bot')));
 const isHuman = r => !!r && !isBot(r) && (r.bot === 0 || r.bot === false || (r.bot == null && Array.isArray(r.tags)));
 const HUMAN_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>`;

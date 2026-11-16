@@ -484,7 +484,8 @@ def test_the_ask_box_says_which_market_and_how_far_back() -> None:
     cfg = TestClient(app).get("/api/research/config").json()
     assert [t["id"] for t in cfg["market_types"]] == [t.id for t in markets.TYPES]
     js = (STATIC / "js" / "app.js").read_text()
-    assert 'aria-label="What to study"' in js and "<label>Market <select" in js and "<label>Time range <select" in js
+    assert 'aria-label="What to study"' in js and "<select" not in js  # the app's segmented pills, never a native menu
+    assert '<div class="seg" id="market" role="radiogroup"' in js and '<div class="seg" id="range" role="radiogroup"' in js
     assert "askScope(type, h)" in js and "types=${types || MARKET_TYPES}" in js
     assert "scopeText(p)" in (STATIC / "js" / "views.js").read_text()
     out = _page_store("""
