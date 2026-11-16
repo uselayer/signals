@@ -42,6 +42,15 @@ async function headers(extra = {}) {
   return h;
 }
 
+// Whether the main site shows this account its Copy trading tab (the engine's /api/me/copies/on), so the header
+// here matches it. False signed out, on any failure, and where the engine isn't behind the same site.
+export const copyTradingOn = async () => {
+  try {
+    const res = await fetch('/api/me/copies/on', { headers: await headers() });
+    return res.ok && !!(await res.json()).on;
+  } catch { return false; }
+};
+
 export class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
 
 async function call(method, path, body) {

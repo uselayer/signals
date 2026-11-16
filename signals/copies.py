@@ -17,6 +17,9 @@ and the view never says copying makes money. Nothing here buys or sells.
 
 from __future__ import annotations
 
+import html
+import json
+import re
 import sqlite3
 from collections import defaultdict
 from typing import Any
@@ -31,8 +34,9 @@ _NOBODY = ("not_filled", "fak_not_filled", "fok_not_filled", "unmatched", "no_li
 _SHORT = ("not_enough_balance", "insufficient_balance", "insufficient_funds", "no_balance")
 
 
-def reason(error: str | None, max_price: float, usd: float) -> str:
-    """Why a tap bought nothing."""
+def reason(error: str | None, max_price: float, usd: float, exchange: str | None = None) -> str:
+    """Why a tap bought nothing. A code we know reads as one plain sentence; anything else the exchange said is shown
+    as it said it (owner, 15 Nov: "the exchange didn't take the order" alone says nothing)."""
     code = (error or "").strip()
     if code in _NOBODY or code.startswith("Not bought: no one"):
         return f"No one was selling at {round(max_price * 100)}¢ or less."
@@ -42,7 +46,25 @@ def reason(error: str | None, max_price: float, usd: float) -> str:
         return "The market wasn't taking orders."
     if code == "too_small":
         return "The amount was too small for one contract."
+    if " " in code:  # the exchange's own words, not a code
+        said = code if len(code) <= 160 else code[:157].rstrip() + "…"
+        return f"{exchange or 'The exchange'} said: {said}"
+    if code:
+        return f"{exchange or 'The exchange'} didn't take the order ({code}). Nothing was spent."
     return "The exchange didn't take the order. Nothing was spent."
+
+
+_ALERT_HEAD = re.compile(r"<b>(?P<who>[^<]*)</b> bought <b>(?P<label>[^<]*)</b> · (?P<title>[^\n]+)")
+
+
+def _from_alert(body: str | None) -> dict[str, str]:
+    """The trader, outcome and market from an alert's kept message ("<b>Sam</b> bought <b>Yes</b> · Rain in NYC?"),
+    for a tap from before its offer kept names. Empty when the message isn't that shape (a grouped alert)."""
+    try:
+        m = _ALERT_HEAD.search(json.loads(body or "{}").get("text") or "")
+    except ValueError:
+        return {}
+    return {k: html.unescape(v).strip() for k, v in m.groupdict().items()} if m else {}
 
 
 def _venue_of(token: str) -> tuple[str | None, str, str, str]:
@@ -59,10 +81,10 @@ def kept(con: sqlite3.Connection, uid: str) -> list[dict[str, Any]]:
     """This account's taps, newest first, with what each copied. Only ``uid``'s own: never anyone else's."""
     rows = con.execute(
         "SELECT o.alert_id, o.token, o.usd, o.max_price, o.state, o.spent, o.shares, o.error, o.at,"
-        " a.trader, a.outcome, a.sent_at, a.trade_at FROM copy_orders o LEFT JOIN alerts a ON a.id = o.alert_id"
+        " a.trader, a.outcome, a.sent_at, a.trade_at, a.body FROM copy_orders o LEFT JOIN alerts a ON a.id = o.alert_id"
         " WHERE o.uid = ? ORDER BY o.at DESC LIMIT ?", (uid, MAX_ROWS)).fetchall()  # fmt: skip
     out = []
-    for (aid, token, usd, cap, state, spent, shares, error, at, wallet, outcome, sent_at, trade_at) in rows:
+    for (aid, token, usd, cap, state, spent, shares, error, at, wallet, outcome, sent_at, trade_at, body) in rows:
         code, venue, market, side = _venue_of(str(token))
         if code:
             names = con.execute("SELECT label, title, trader, url, price FROM own_offers WHERE alert_id = ? AND code = ?",
@@ -73,6 +95,9 @@ def kept(con: sqlite3.Connection, uid: str) -> list[dict[str, Any]]:
                                 (aid,)).fetchone()  # fmt: skip
             exchange = POLY[1]
         label, title, trader, url, alert_price = names or (None, None, None, None, None)
+        if not (title and label and trader):  # an offer from before it kept names: the alert's own words
+            said = _from_alert(body)
+            title, label, trader = title or said.get("title"), label or said.get("label"), trader or said.get("who")
         theirs = None
         if wallet and outcome and trade_at is not None:
             theirs = con.execute("SELECT price, usd FROM buys WHERE uid = ? AND outcome = ? AND trader = ?"
@@ -120,7 +145,7 @@ def view(rows: list[dict[str, Any]], own: dict[str, Any], poly: dict[tuple[str, 
                 worth = float(r["shares"]) * end
             pnl = None if worth is None else worth - float(r["spent"])
         elif r["state"] == "missed":
-            why = reason(r["error"], r["max_price"], r["usd"])
+            why = reason(r["error"], r["max_price"], r["usd"], r["exchange"])
         elif r["state"] == "resting":
             status = "waiting"
         elif r["state"] == "delayed":
