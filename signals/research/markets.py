@@ -359,8 +359,13 @@ def premier_league_matches(slug: str | None, facts: dict[str, Any]) -> bool:
         return False
     if not facts:
         return True
-    if EPL_TAG not in {str(t).strip().lower() for t in facts.get("tags") or []}:
+    tags = {str(t).strip().lower() for t in facts.get("tags") or []}
+    if EPL_TAG not in tags:
         return False
+    # older match markets ("In the upcoming game, scheduled for October 10, 2026 If Arsenal FC wins, …") don't name
+    # the league; they carry Gamma's "Premier League" tag too and an epl-<home>-<away>-<date> slug
+    if "premier league" in tags or _EPL_MATCH_SLUG.match(str(facts.get("slug") or slug or "")):
+        return True
     text = _epl_text(facts)
     if _EPL_TEXT.search(text) and not _NOT_EPL.search(text):
         return True

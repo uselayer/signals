@@ -664,6 +664,11 @@ def test_a_premier_league_market_is_known_by_its_epl_tag_and_its_own_text() -> N
     assert not pl("x", _epl("Will England win the 2024 Euros?", "Resolves Yes if England wins Euro 2024.", ("Sports", "EPL")))
     assert not pl("x", _epl("Will Preston North End win the 2024-25 FA Cup?", "Resolves to the winner of the FA Cup.",
                             ("Sports", "Soccer", "FA Cup", "EPL")))  # fmt: skip
+    # an older match market doesn't name the league: its "Premier League" tag or its epl-<home>-<away>-<date> slug do
+    old_match = _epl("Will Arsenal FC win on 2026-10-10?", "In the upcoming game, scheduled for October 10, 2026 If "
+                     "Arsenal FC wins, this market will resolve to \"Yes\".", slug="epl-ars-lee-2026-10-10-ars")  # fmt: skip
+    assert pl("x", old_match) and pl("x", old_match | {"slug": "x", "tags": ["EPL", "Premier League"]})
+    assert M.premier_league_rule(old_match)["quote"] == "If Arsenal FC wins, this market will resolve to \"Yes\"."
     # the league's name without the tag (cricket's Indian Premier League), or another country's league, isn't it
     assert not pl("x", _epl("Will Mumbai win the Indian Premier League?", "The Indian Premier League final.", ("Cricket",)))
     assert not pl("x", _epl("Will Zenit win the Russian Premier League?", "The Russian Premier League table."))
