@@ -54,7 +54,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   label, unit}, steps: [{id, title, source, estimate_s}], scope_options: [{id, text}], estimate_usd, estimate_s,
   needs_approval: true}`. `market` is the market type studied (`signals/research/markets.py` `TYPES`): `unit` `window`
   (BTC 15-minute windows; `family` "btc-updown-15m", the scope as before) or `market` (`btc-long`, "Long-dated
-  BTC", or `politics`, "Politics": one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
+  BTC", `politics`, "Politics", or `premier-league`, "Premier League": one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
   many markets to tile, default 20). The page's header says `market.label`; a plan without `market` is BTC 15-minute. Every new investigation shows its plan and waits;
   a follow-up that widens the scope (more windows, a longer range, another wallet) does too. The run ends after it.
   `estimate_usd` is the server's, never the agent's: the median `cost_usd` of the latest 20 Starts that ran to their
@@ -108,7 +108,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   lost: [{from, to, why}], seconds_without_book, market_trades: {recorded, polymarket, pct}|{read, complete},
   outage, reasons, notes, pre_open_entries: {fills, first_s_before, before_axis}}`. `why` is plain English for the
   chart's hatching.
-- **Markets** (a market type whose unit is a market, e.g. long-dated BTC; later politics, sports). The same events
+- **Markets** (a market type whose unit is a market: long-dated BTC, politics, the Premier League). The same events
   carry them, `window_id` being the market's slug, with `kind: "market"`; times are unix seconds, never seconds
   from a start.
   - Start's tiles: the wallet's trades in the range read newest week first up to 30,000 (`Reads.wallet_markets`),
@@ -121,7 +121,11 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     match, at most 180 (`MarketType.looks_at`); its `selection` adds `not_this_type`, `skipped_near` [{question,
     category, usd_in_range}] (left out, but with a politics tag) and `events` [{event_slug, event_title, neg_risk,
     markets, shown, legs: [{slug, name (group_item), bought_in_range: {Yes: $, No: $}, result, shown}]}]: every event
-    with 2+ of its markets, past the tiles shown. `per_source.moves` {read, total, markets_with, converted} and
+    with 2+ of its markets, past the tiles shown. The Premier League is the same, told apart by Gamma's EPL tag (id
+    306) AND its own question, event or rules naming the league (or a club's manager market): Polymarket also put
+    that tag on the Ballon d'Or, Euro 2024 and the FA Cup, which land in `skipped_near` (`category` "Sports"). Its
+    slugs can't all say (a Champions League place market's doesn't), so markets whose slugs name the league
+    (`MarketType.hint`) are read first, then the rest by money, and the tiles are still the `top` by money. `per_source.moves` {read, total, markets_with, converted} and
     `outside.none` (why there's no outside line) come with every market type.
   - `window.summary` (a market tile) `{kind: "market", window_id, market_type, title (the question), event_slug,
     event_title, group_item, neg_risk, start (first fill), end (end of the hold), market_end, closed, result, rule, outcomes, entries: [{t,
@@ -134,7 +138,9 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   - `window.ready` (a market replay) `{kind: "market", window_id, market_type, market_label, title, condition_id,
     event_slug, event_title, start, end, axis: {from, to}, market_start, market_end, closed, closed_at, result, rule:
     {kind: touch_high|touch_low|close_above|close_below|all_time_high|other (BTC) or result|one_of|by_date|other (politics,
-    with quote: the rules' own resolving sentence, and deadline), strike, source, binance, says}, group_item,
+    with quote: the rules' own resolving sentence, and deadline) or one_of|season|match|by_date|other (Premier League,
+    with quote, deadline, ends_early: resolves No once impossible, tie: the rules' tie-break), strike, source, binance,
+    says}, group_item,
     neg_risk, rules
     (the market's own text), outcomes, prices: {outcome: [{t, p}]}, outside: {name, unit, step, points: [{t, p}],
     ranges: [{t, h, l}], highest, lowest}|null, trades: [{trade_id, t, side, action, shares, price, usd, outside}],
@@ -151,7 +157,8 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     the first outcome's is read and the second is 1 minus it (`coverage.notes`). The outside line for BTC price
     markets is Binance BTCUSDT (what they resolve on): 1-minute closes to 2 days, else hourly (daily past 120 days)
     candles with each one's high and low, which hold every minute's, so "did it touch the strike" is exact.
-    Politics has none (`outside` null, `coverage.outside_none` says why: no news or polls feed).
+    Politics and the Premier League have none (`outside` null, `coverage.outside_none` says why: no news or polls
+    feed; no league table, results or news feed).
   - Agent tools: `wallet_markets` (that list, same answer as Start's) and `market` (a market's `window.ready`).
 - `walkthrough.ready` `{window_id, steps: [{index, t, title, observed, inferred|null, trade_ids, annotations: [{kind:
   point|span|region, t0, t1, panel: btc|prices|position, label}], number_check}]}`

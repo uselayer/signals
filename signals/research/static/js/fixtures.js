@@ -22,7 +22,8 @@ export async function fixtureApi(base = './fixtures/') {
     config: async () => ({ clerk_key: null, event_version: 2, fixtures: true, market_types: [
       { id: 'btc-updown-15m', label: 'BTC Up or Down 15m', unit: 'window', min_days: 0 },
       { id: 'btc-long', label: 'Long-dated BTC', unit: 'market', min_days: 7 },
-      { id: 'politics', label: 'Politics', unit: 'market', min_days: 7 }] }),
+      { id: 'politics', label: 'Politics', unit: 'market', min_days: 7 },
+      { id: 'premier-league', label: 'Premier League', unit: 'market', min_days: 7 }] }),
     sessions: async () => [{ id: SID, title: sample.runs[0][0].title, created: Date.now() / 1000 - 3600, sample: true }],
     // the wallet field's list, as /api/research/suggestions answered on 16 Nov (Politics from Signals' Leaderboard;
     // the 15-minute pair are the sample traders, with Polymarket's 30-day crypto figures)

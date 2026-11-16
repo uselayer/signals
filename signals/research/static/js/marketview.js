@@ -90,13 +90,16 @@ function EveryBuyChart({ tiles, act }) {
   const X = d => L + (1 - f(d) / f(maxD)) * (width - L - R), Y = c => T + (1 - c / 100) * (H - T - B);
   const fill = p => (p.open ? 'none' : p.made ? 'var(--gain)' : p.lostMoney ? 'var(--loss)' : 'var(--faint)');
   const stroke = p => (p.open ? 'var(--fg)' : 'none');
-  const ticksD = (root ? [maxD, maxD * 0.5625, maxD / 4, maxD / 16, 0] : [maxD, maxD * 0.75, maxD / 2, maxD / 4, 0]).map(d => Math.round(d));
+  // a phone has room for three labels ("326 d before" is wide: a season's futures are listed a year ahead)
+  const narrow = width < 520;
+  const ticksD = (narrow ? (root ? [maxD, maxD / 4, 0] : [maxD, maxD / 2, 0])
+    : root ? [maxD, maxD * 0.5625, maxD / 4, maxD / 16, 0] : [maxD, maxD * 0.75, maxD / 2, maxD / 4, 0]).map(d => Math.round(d));
   const n = new Set(pts.map(p => p.window_id)).size, high = pts.filter(p => p.price >= 90).length;
   return html`<figure class="allwin">
     <div class="allwin-head"><b>Every buy, across ${plural(n, 'market')}: how long before the end, at what price</b></div>
     <div ref=${box}><svg viewBox=${`0 0 ${width} ${H}`} width=${width} height=${H} role="img" aria-label="Every buy: days before its market's end against the price paid, in cents a share">
       ${[0, 25, 50, 75, 100].map(c => html`<g><line x1=${L} x2=${width - R} y1=${Y(c)} y2=${Y(c)} stroke="var(--line)" /><text class="axs" x=${L - 6} y=${Y(c) + 4} text-anchor="end">${c}¢</text></g>`)}
-      ${ticksD.map((d, i) => html`<text class="axs" x=${X(d)} y=${H - 10} text-anchor=${i === 0 ? 'start' : i === 4 ? 'end' : 'middle'}>${d === 0 ? 'the end' : `${d} d before`}</text>`)}
+      ${ticksD.map((d, i) => html`<text class="axs" x=${X(d)} y=${H - 10} text-anchor=${i === 0 ? 'start' : i === ticksD.length - 1 ? 'end' : 'middle'}>${d === 0 ? 'the end' : `${d} d before`}</text>`)}
       ${pts.map(p => html`<circle cx=${X(p.daysLeft)} cy=${Y(p.price)} r=${Math.min(7, 2.4 + Math.sqrt(p.usd || 0) / 30)} fill=${fill(p)} fill-opacity=".55" stroke=${stroke(p)} stroke-opacity=".6" onClick=${() => act.openWin(p.window_id)}>
         <title>${`${p.title}: bought ${p.side} at ${cents(p.price)} for ${money(p.usd || 0)}, ${days(p.daysLeft * 86400)} before the end${p.outside != null ? `; Binance BTCUSDT ${usdt(p.outside)}` : ''}. ${p.open ? 'Still open.' : p.profit == null ? '' : `The market ${signedMoney(p.profit)} from its fills.`} Click to open it.`}</title></circle>`)}
     </svg></div>
