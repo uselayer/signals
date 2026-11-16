@@ -68,6 +68,8 @@ async function call(method, path, body) {
 export const live = {
   config: () => fetch('/api/research/config').then(r => (r.ok ? r.json() : Promise.reject(new ApiError(r.status, 'No research service here.')))),
   sessions: () => call('GET', '/sessions').then(j => j.sessions || []),
+  // wallets to study by market type, for the wallet field's list and "Pick one for me" (signals/research/suggest.py)
+  suggestions: () => call('GET', '/suggestions'),
   create: title => call('POST', '/sessions', { title }).then(j => j.id),
   session: id => call('GET', `/sessions/${id}`),
   ask: (id, question, context, origin) => call('POST', `/sessions/${id}/ask`, { question, context: context || null, origin: origin || null }),

@@ -462,6 +462,14 @@ behind Vercel (see README, "Hosting").
   and called open.
 - The wording check sends back a finding, step or answer that says "bet", "edge", "ROI", "it's a bot"… once to
   reword it (`trace.banned_words`), as the number check does.
+- Choosing a wallet (owner, 16 Nov: someone with no wallet to reverse-engineer needs one to start from): the ask
+  box's wallet field opens a list, "Pick one for me" first, then each market type's top 3 by trading profit over 30
+  days on Signals' own Leaderboard (`suggest.py`, from the engine's `/api/leaderboard`, never Polymarket's board;
+  Crypto wallets sorted into BTC 15-minute and long-dated BTC by one read of their latest 500 trades), kept 6 hours.
+  Facts only: rank, profit, money traded, Bot or Human; never "recommended". Picking one sets Market. "Pick one for
+  me" sends the top wallet for the Market chosen, and the plan's page says which one and why, with the others to
+  study instead (a "Change the plan"), before Start. Traders' rows (on hover) and a trader's page carry "Break it
+  down" for Politics and Crypto traders: `/breakdowns/?wallet=&name=&market=&q=`, nothing runs until Start.
 - Signed in only, and an investigation, its events and charts are only ever its owner's. Costs are capped per
   question, per person and per day (`RESEARCH_*_USD`); raising them is the owner's call.
 - Signed out, `/research` is a teaser (owner, 10 Nov: tease visitors into signing up): what a breakdown is, "Sign in
