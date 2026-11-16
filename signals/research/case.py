@@ -50,7 +50,7 @@ CASE_TOOLS: list[dict[str, Any]] = [
             + ", ".join(f"'{t['id']}': {t['label']}" for t in M.described() if t["unit"] == "market")
             + "; one tile per market), with min_days (only markets that run at least this many days; default "
             + ", ".join(f"{t['min_days']:g} for {t['id']}" for t in M.described() if t["unit"] == "market")
-            + ") and top (how many markets to tile, the most money traded first; default 20); for these, from is 90 "
+            + "; premier-league match markets are in whatever min_days says) and top (how many markets to tile, the most money traded first; default 20); for these, from is 90 "
             "days back unless asked otherwise. scope_options: choices the user can tick, e.g. "
             "{id: 'october', text: 'Also look at October with 1-minute prices'}."
         ),
@@ -235,6 +235,14 @@ def resolve_context(store: Any, reads: Any, sid: str, context: dict[str, Any] | 
                        "outside": _at(out_line, t), "outside_name": (ready.get("outside") or {}).get("name"),
                        "position": _at(ready["position"], t),
                        "fills_within_a_day": [f for f in ready["trades"] if abs(f["t"] - t) <= 86_400]}  # fmt: skip
+                if ready.get("match"):  # a match: the score then, as the feed had it, and its goals
+                    from signals.research import scores
+
+                    m = ready["match"]
+                    mo |= {"match": {"home": m.get("home"), "away": m.get("away"), "side": m.get("side"),
+                                     "at": scores.state_at(m, t), "goals": m.get("goals"), "final": m.get("final"),
+                                     "coverage": m.get("coverage")},
+                           "fills_within_10_minutes": [f for f in ready["trades"] if abs(f["t"] - t) <= 600]}  # fmt: skip
             return mo
         out: dict[str, Any] = {"kind": "moment" if t is not None else "window", "window_id": slug,
                                "start": ready["start"], "end": ready["end"], "price_to_beat": ready["price_to_beat"],
@@ -323,6 +331,8 @@ def prebuild_markets(store: Any, reads: Any, sid: str, scope: dict[str, Any], mt
                         "to": got["end"],
                         "trades_read": got["trades_read"], "trades_complete": got["trades_complete"],
                         "read_to": got["read_to"]}  # fmt: skip
+    if mt.short_ok:  # markets let in whatever min_days says (the Premier League's match markets)
+        per["selection"]["also_short"] = "match markets"
     for k in ("not_this_type", "skipped_near", "events"):  # a type told apart by its tags (politics)
         if k in got:
             per["selection"][k] = got[k]

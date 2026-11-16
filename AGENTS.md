@@ -454,7 +454,12 @@ behind Vercel (see README, "Hosting").
 - Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC, politics and the Premier League (one
   tile per market; politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it; the
   Premier League = Gamma's EPL tag AND the market's own text naming the league, or a club's manager market, since
-  the tag is also on the Ballon d'Or, Euro 2024 and the FA Cup; neither has an outside line).
+  the tag is also on the Ballon d'Or, Euro 2024 and the FA Cup; neither has an outside line). The Premier League's
+  match markets are tiled whatever `min_days` says and draw the match's live score (`scores.py`: Layer's recording
+  of polymarket.com's sports feed, from 11 Nov 2026 18:26 UTC, joined by the Gamma event's `gameId`): goals,
+  halves, gaps, and each fill's minute, score and time since the last goal, server-built. The feed can be late
+  (0 to 2 match minutes behind the match reports on 15 Nov), wrong or take a goal back, and prices are one a
+  minute: never say a wallet saw a goal first or knew, only how long after the feed showed it.
   A market replay counts the wallet's merges and splits too (`Reads.market_moves`): a tile never says it held to
   the result when it merged out, and when they can't be read it says so. A new kind (a sports league) is one entry
   there: what matches, what resolves one market (read from its own rules,

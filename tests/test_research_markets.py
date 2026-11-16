@@ -725,8 +725,13 @@ def test_what_resolves_a_premier_league_market_is_read_from_its_own_rules() -> N
     # its section is in the agent's instructions, with no example numbers, and never claims a result, a table or news
     import re
 
-    assert M.PREMIER_LEAGUE_PROMPT in A.SYSTEM and set(re.findall(r"\d+", M.PREMIER_LEAGUE_PROMPT)) <= {"0", "1"}
-    assert "never say a trade followed a match" in M.PREMIER_LEAGUE_PROMPT and "no league table" in M.PREMIER_LEAGUE_PROMPT
+    # no example numbers; only the score recording's start (11 Nov 2026 18:26 UTC), a match's 90 minutes and the
+    # counts' own cut-offs (60 seconds, 5 minutes, the 75th minute)
+    assert M.PREMIER_LEAGUE_PROMPT in A.SYSTEM and set(re.findall(r"\d+", M.PREMIER_LEAGUE_PROMPT)) <= {
+        "0", "1", "11", "2026", "18", "26", "90", "60", "5", "75"}
+    # season futures are never tied to a match; a match market's trades only to the goals the feed showed
+    assert "never tie a season future's trade to a match" in M.PREMIER_LEAGUE_PROMPT
+    assert "no league table" in M.PREMIER_LEAGUE_PROMPT and "never that the wallet saw the goal first" in M.PREMIER_LEAGUE_PROMPT
 
 
 class EplPoly(Poly):

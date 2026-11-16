@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from datetime import UTC, datetime
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,6 +44,11 @@ class MarketType:
     # a slug that's likely this type: those markets are read first, so a type spread thin across a busy wallet's
     # markets (the Premier League) isn't cut off by ``looks_at``; the tiles are still the most money traded
     hint: Callable[[str | None], bool] | None = None
+    # a market let in whatever ``min_days`` says (a type's match markets: listed about a week before kickoff and
+    # decided in 90 minutes, so a timeframe meant for season futures would leave every one out)
+    short_ok: Callable[[dict[str, Any]], bool] | None = None
+    # its match markets (a gameId and a kickoff) draw the match's live score: Layer's recording, scores.py
+    score_line: bool = False
 
 
 # ---- BTC 15-minute Up/Down windows (the first Breakdowns; their path is unchanged) ----
@@ -384,6 +390,13 @@ def premier_league_hint(slug: str | None) -> bool:
     return bool(_EPL_SLUG.search(slug or ""))
 
 
+def premier_league_is_match(facts: dict[str, Any]) -> bool:
+    """One match's market (result, score, totals, first to score…): an epl-<home>-<away>-<date> slug, a match's
+    rules, or a Gamma game (a gameId)."""
+    return bool(_EPL_MATCH_SLUG.match(str(facts.get("slug") or "")) or _MATCH_RULE.search(str(facts.get("description") or ""))
+                or facts.get("game_id"))  # fmt: skip
+
+
 def premier_league_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
     """What resolves one Premier League market, read from its own rules (Gamma's ``description``), never assumed
     for the type. ``kind``: ``one_of`` (one leg of a "which club / player / manager" event, negRisk: Yes if this one
@@ -400,7 +413,7 @@ def premier_league_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
     sentences = [x for x in _SENTENCE.split(rules) if x]
     quote = _clip_words(next((x for x in sentences if _RESOLVES.search(x)), sentences[0] if sentences else ""))
     item = str(facts.get("group_item") or "")
-    if _EPL_MATCH_SLUG.match(slug) or _MATCH_RULE.search(rules):
+    if premier_league_is_match(facts):
         kind = "match"
         # a match's rules open with the fixture ("In the upcoming Premier League game between A and B, …:"): the
         # clause that says what this market pays on comes after it
@@ -423,8 +436,9 @@ def premier_league_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
     tie = next((x for x in sentences if _TIE.search(x) and _RESOLVES.search(x)), None)
     deadline = facts.get("end_iso")
     # a match market's listed end is its kickoff (Gamma's endDate = the game's start), not when it settles: a fill
-    # after it came during or after the match
-    kickoff = deadline if kind == "match" else None
+    # after it came during or after the match. Gamma's gameStartTime when it has one.
+    ko = facts.get("kickoff")
+    kickoff = (datetime.fromtimestamp(ko, UTC).strftime("%Y-%m-%dT%H:%M:%SZ") if ko else deadline) if kind == "match" else None
     # a club or a player names the leg; a bucket ("0", "1-5") reads better as the question itself
     leg = item if re.search(r"[A-Za-z]{3}", item) else f"“{q}”"
     lead = {"one_of": f"Whether {leg} is the one of its event's outcomes",
@@ -441,7 +455,7 @@ PREMIER_LEAGUE_PROMPT = """## The Premier League (market_type premier-league; th
 A Premier League market is one Polymarket tags EPL whose own question, event or rules name the league (or a \
 club's manager market): season futures ("Will Arsenal win the Premier League this season?", relegation, a top-four \
 finish, Champions League places, top goalscorer, last place), a club's next manager, a punishment or points deduction, and \
-match markets listed a week or more ahead. Outcomes are Yes and No; a share pays $1 if its outcome wins, and its \
+match markets (one match: a club to win, the draw, totals, the exact score, first to score). Outcomes are Yes and No; a share pays $1 if its outcome wins, and its \
 price (0 to 1) is the market's chance. The unit is a market: one market's life for this wallet, from its first buy \
 to its last sell or merge, the resolution, or now. A tile or a market's replay (the market tool) holds every fill \
 over the market's whole life, its merges, splits and conversions (moves), its position after each, and the \
@@ -453,13 +467,37 @@ manager); season: Yes or No for one club at the end of the season, and several c
 finish, Champions League places); match: one match; by_date: whether it happens by the date in its rules; other: quote \
 the rules. rule.ends_early true means the rules resolve it No as soon as it's impossible (a club mathematically \
 out), so it can close before the season ends; rule.tie is the rules' own tie-break (top goalscorer: alphabetical). \
-A match market's listed end (market_end, rule.kickoff) is its kickoff, not when it settles: a fill after it came \
-during or after the match (say "after kickoff", never "after the market ended"); the match itself isn't in the data. \
 Most season markets resolve when the season ends: until then they're open.
-There is no outside line: no league table, no results, no fixtures, no injuries, no transfers and no news. So \
-never say a trade followed a match, a goal, a result, an injury, a sacking or a signing, never that it "knew" or \
-"expected" anything, and never who should win the league or a match. Say a buy came after a move in the market's \
-own price, with the move's size and time. Never give your own view of a club, a player or a manager.
+Match markets (rule.kind match): listed about a week ahead and decided in 90 minutes, so they're in whatever min_days \
+says. A match market's listed end (market_end, rule.kickoff) is its kickoff, not when it settles: a fill after it \
+came during or after the match (say "after kickoff", never "after the market ended"). Its replay carries match: the \
+match's live score from Layer's recording of polymarket.com's sports feed (from 11 Nov 2026 18:26 UTC; nothing \
+earlier exists anywhere): home, away, kickoff (scheduled), first_live_update, goals [{t, minute, score (home-away), \
+by home|away, kind goal|correction, retracted, reinstated, first_said}], periods [{period, word, from, to}] (first \
+half, half-time, second half, full time: from the feed's first update in each), final {score, t}, counts, and \
+coverage {recorded, why, gaps [{from, to, why}], gap_s, updates, goals, corrections}. match.coverage.recorded false \
+means there's no score line: say why (coverage.why) and nothing about the score. Each of its fills carries match, \
+server-built (never work it out yourself): phase (pre_kickoff | in_play | half_time | after_full_time | unknown), \
+minute, period, score then, since_goal_s (seconds since the feed showed the last goal; null before any goal or while \
+the feed had just taken one back), last_goal_by (home | away), in_gap (the fill fell in a recording gap: the score \
+may be stale), backs (home | away | draw | not_home | not_away | not_draw; null for totals and other markets) and \
+margin (for a home or away buy of Yes: that club's goals minus the other's then; below 0 is behind). match.counts \
+adds them up for the market (buys before kickoff and in play, within 60 seconds and 5 minutes after a goal, backing \
+the side behind, the draw bought from the 75th minute, sells before full time, fills within a minute of a goal): \
+count across markets from these, never re-derive them.
+The score feed's timing: an update about once a minute (the clock, whole minutes) and each score change as its own \
+update, stamped when Layer received it. Polymarket says the feed can be late, wrong or miss events, and it can take \
+a goal back (kind correction: the goal before it is retracted; the same score said again is reinstated): say so \
+where a finding rests on one. So say "bought N seconds after the feed showed the goal", never that the wallet saw \
+the goal first, reacted to it, or "knew". Prices are Polymarket's history at about one point a minute over the match \
+(coverage.match_price_step_s): too coarse to say whether a fill came before or after the price moved on a goal, so \
+for fills within a minute of a goal say the minute prices can't order them.
+Outside the score line there's nothing: no league table, no lineups, injuries, cards, shots, transfers or news, and \
+season futures have no outside line at all. So never say a trade followed any of those, never tie a season \
+future's trade to a match or a result, never say a wallet "knew" or "expected" anything, and never who should win \
+the league or a match. Say a buy came after a move in the market's own price, with the move's size and time, or \
+(in a match market) after a goal the feed showed, with the seconds. Never give your own view of a club, a player \
+or a manager.
 Multi-outcome events: "Who will win the Premier League?" is one market per club under one event (event_slug, \
 event_title; group_item is the club or player, often neg_risk). A tile stays one market, but count across the \
 event: wallet_markets.events lists each event with two or more of its markets and what it bought of each side, \
@@ -474,19 +512,21 @@ open, never a result. A club's market that resolved No early (ends_early) is a r
 Worth checking: scaling in over weeks; buys after big moves in the market's own price; holding several clubs or \
 players of one event; long shots bought cheaply (a low price is a low chance, not a bargain); buying the side \
 priced near $1; selling or merging before the end of the season vs holding to the result; how long it holds; \
-profit per market and per event; match markets against season futures."""
+profit per market and per event; match markets against season futures. In matches: buys before kickoff vs in play; \
+buys soon after a goal (how many seconds or minutes after, from since_goal_s); backing the side that's behind \
+(margin below 0); the draw bought late; selling before full time vs holding to the result; scaling in during the \
+match; several markets of one match (result, totals, exact score: its event)."""
 
 PREMIER_LEAGUE = MarketType(
     id="premier-league", label="Premier League", unit="market", prompt=PREMIER_LEAGUE_PROMPT,
     matches=premier_league_matches, rule=premier_league_rule, min_days=7.0, looks_at=180,
-    near=premier_league_near, hint=premier_league_hint,
+    near=premier_league_near, hint=premier_league_hint, short_ok=premier_league_is_match, score_line=True,
     no_outside=("No outside series for Premier League markets: the replay is the market's own price, the wallet's "
                 "fills and its position. There's no league table, results or news feed, so no trade here can be "
                 "tied to a match result or news."),
     aliases=("epl", "english-premier-league", "premier-league-futures", "premierleague"),
 )  # fmt: skip
 
-# Session 4 (Premier League matches: a live score line) extends PREMIER_LEAGUE, not a new entry.
 TYPES: list[MarketType] = [BTC_15M, BTC_LONG, POLITICS, PREMIER_LEAGUE]
 DEFAULT = BTC_15M
 

@@ -222,6 +222,10 @@ p { margin: 0; }
 .cov { color: var(--ink); }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); align-items: center; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
+/* a match replay: "The match / Whole market" (the app's .seg pills) and what the score line is */
+.spanpick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 6px 0 4px; }
+.spanpick .muted { flex: 1 1 260px; min-width: 0; }
+svg text.goal { font-size: 11px; font-weight: 600; fill: var(--fg); }
 .sw { width: 16px; height: 0; border-top: 2px solid; display: inline-block; }
 .readout { display: flex; gap: 4px 14px; flex-wrap: wrap; font-size: 12.5px; padding: 6px 10px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; min-height: 32px; align-items: center; }
 .readout .k { color: var(--muted); }
@@ -451,5 +455,7 @@ table.tr tr.click { cursor: pointer; } table.tr tr.click:hover td { background: 
 .mtiles { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .mtile .mt { font-size: 13px; font-weight: 600; line-height: 1.3; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.6em; }
 .mtile .tt .open { color: var(--ink); font-weight: 600; } .mtile .tt .res { color: var(--fg); font-weight: 600; }
+.mtile .mscore { font-size: 12px; color: var(--muted); margin: 2px 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mtile .mscore b { color: var(--fg); }
 .evlegs ul { margin: 2px 0 0; padding-left: 18px; } .evlegs li { margin: 1px 0; overflow-wrap: anywhere; }
 .wv .sum .rule { flex-basis: 100%; }

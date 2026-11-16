@@ -8,11 +8,12 @@ Shapes are the UI-to-agent contract's (docs/research-contract.md): times in unix
 from __future__ import annotations
 
 import bisect
+import re
 import threading
 from datetime import datetime
 from typing import Any
 
-from signals.research import markets
+from signals.research import markets, scores
 from signals.research.data import OUTSIDE_FROM, UNUSABLE, complete_slugs, now, trade_id
 
 SPARK_POINTS = 60  # a tile's line: one Binance point every 15 s of a 15-minute window
@@ -383,7 +384,7 @@ def _exit(fs: list[dict[str, Any]], moves: list[dict[str, Any]], pos: list[dict[
 
 def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: dict[str, Any] | None,
                  fills_complete: bool, tags: dict[str, Any] | None = None,
-                 moves: dict[str, Any] | None = None) -> dict[str, Any]:  # fmt: skip
+                 moves: dict[str, Any] | None = None, match: dict[str, Any] | None = None) -> dict[str, Any]:  # fmt: skip
     """``window.ready`` for a market (``kind`` "market"): the market's prices over the replay's span, the outside
     line (Binance BTCUSDT for BTC price markets: closes, and each candle's high and low; none for politics), the
     wallet's fills and its merges, splits and conversions (``moves``, ``Reads.market_moves``) over the market's
@@ -398,6 +399,12 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
     pos = market_position(fs, outcomes, mv)
     held = pos[-1]["held"] if pos else {o: 0.0 for o in outcomes}
     prices = {o: _points(read.get("prices", {}).get(o)) for o in outcomes}
+    fine = (match or {}).get("prices") or {}
+    if fine:  # the match itself at 1 minute, whatever step the rest of the span was read at
+        a, b = match["prices_span"]
+        for o in outcomes:
+            if fine.get(o):
+                prices[o] = sorted([p for p in prices[o] if not a <= p["t"] <= b] + _points(fine[o]), key=lambda p: p["t"])
     last = {o: (prices[o][-1]["p"] if prices[o] else None) for o in outcomes}
     lows = {o: min((p["held"].get(o, 0.0) for p in pos), default=0.0) for o in outcomes}
     before = any(v < -DUST for v in lows.values())  # sold more than its fills bought: shares came another way (a split)
@@ -449,6 +456,10 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
         out_ranges = [{"t": int(t), "h": float(h), "l": float(lo)} for t, h, lo in outside.get("ranges") or []]
     for f in fs:  # each fill with the outside line's price then (the last close at or before it)
         f["outside"] = _value_at(out_pts, f["t"]) if out_pts else None
+    line = (match or {}).get("line")
+    if line is not None:  # each fill with the match as the feed had it then
+        for f in fs:
+            f["match"] = match_context(f, line, match.get("side"))
     rule = read.get("rule") or {}
     notes = []
     if read.get("coverage", {}).get("price_note"):
@@ -469,7 +480,9 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
     if mv and not converted:
         notes.append("Merges and splits are counted: a merged pair of Yes and No is $1 back, a split pair $1 paid.")
     mt = markets.by_id(read.get("market_type"))
-    if not (outside and outside.get("available")) and mt and mt.outside is None and mt.no_outside:
+    if line is not None:
+        notes += match_notes(line, fs)
+    elif not (outside and outside.get("available")) and mt and mt.outside is None and mt.no_outside:
         notes.append(mt.no_outside)
     coverage = {"window_id": read.get("slug"), "kind": "market", "source": "Polymarket API (uselayer)",
                 "price_step_s": (read.get("coverage") or {}).get("price_step_s"),
@@ -481,6 +494,11 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
                 "outside_step": (outside or {}).get("step") if outside and outside.get("available") else None,
                 "outside_why": (outside or {}).get("why") if outside and not outside.get("available") else None,
                 "chainlink": "none", "book": False, "outage": False, "notes": notes}  # fmt: skip
+    if line is not None:
+        coverage["score"] = {k: line["coverage"].get(k) for k in ("recorded", "why", "updates", "gap_s", "goals",
+                                                                   "corrections")} | {"gaps": len(line["coverage"]["gaps"])}
+        coverage["match_price_step_s"] = 60 if fine else None
+        coverage["outside_none"] = None
     return {
         "kind": "market", "window_id": read.get("slug"), "market_type": read.get("market_type"),
         "market_label": read.get("market_label"), "title": read.get("question"), "condition_id": read.get("condition_id"),
@@ -502,6 +520,8 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
                   "value_now": None if value_now is None else round(value_now, 2), "last_prices": last,
                   "profit": profit, "profit_kind": kind, "exit": exit_},
         "tags": tags or {}, "coverage": coverage,
+        "match": None if line is None else {**line, "side": match.get("side"), "axis": match.get("axis"),
+                                            "counts": match_counts(fs, line)},
     }  # fmt: skip
 
 
@@ -530,7 +550,8 @@ def market_summary(r: dict[str, Any]) -> dict[str, Any]:
         "market_end": r.get("closed_at") or r.get("market_end"), "closed": r.get("closed"), "result": r.get("result"),
         "rule": r.get("rule"), "outcomes": r["outcomes"],
         "entries": [{"t": f["t"], "side": f["side"], "action": f["action"], "price": f["price"], "shares": f["shares"],
-                     "usd": f.get("usd"), "outside": f.get("outside")} for f in fs],
+                     "usd": f.get("usd"), "outside": f.get("outside"),
+                     **({"match": f["match"]} if f.get("match") else {})} for f in fs],
         "first_entry_s": None, "shares": bought, "held": v["held"],
         "cost": v["cost"], "sold_for": v["sold_for"], "payout": v["payout"], "value_now": v["value_now"],
         "profit": v["profit"], "profit_kind": v["profit_kind"], "open": v["profit_kind"] == "open",
@@ -540,7 +561,8 @@ def market_summary(r: dict[str, Any]) -> dict[str, Any]:
         "outside_spark": _thin((r.get("outside") or {}).get("points") or []),
         "coverage": {k: r["coverage"].get(k) for k in ("kind", "fills_complete", "shares_not_from_fills", "price_step_s",
                                                        "outside", "chainlink", "book", "outage", "moves_read",
-                                                       "converted", "outside_none")},
+                                                       "converted", "outside_none", "score")},
+        "match": match_brief(r.get("match")),
     }  # fmt: skip
 
 
@@ -586,6 +608,10 @@ def _build_market(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, A
         if mt and mt.outside and mt.outside.get("source") == "binance":
             read["_outside"] = reads.outside_prices("binance", lo, hi, mt.outside.get("symbol") or "BTC")
         store.put_window(sid, slug, read=read)
+    match = None
+    if mt and mt.score_line and markets.premier_league_is_match(facts):
+        match = _match(reads, read, facts, fresh, trades)
+        store.put_window(sid, slug, read=read)
     moves = read.get("_moves")
     if wallet and facts.get("condition_id") and (moves is None or moves.get("failed") or not fresh):
         try:  # merges, splits and conversions: what changes its shares without a fill (how it got out, too)
@@ -595,6 +621,154 @@ def _build_market(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, A
         read["_moves"] = moves
         store.put_window(sid, slug, read=read)
     r = market_ready(read, trades, read.get("_outside"), complete,
-                     tags if tags is not None else (kept["ready"] or {}).get("tags"), moves)  # fmt: skip
+                     tags if tags is not None else (kept["ready"] or {}).get("tags"), moves, match)  # fmt: skip
     store.put_window(sid, slug, ready=r, summary=market_summary(r))
     return r
+
+
+# ---- a match market: the live score beside the prices (Premier League matches; any league's the same) ----
+
+MATCH_BEFORE_S = 3_600  # the score is read from an hour before the scheduled kickoff (kickoffs run late)
+MATCH_AFTER_S = 4 * 3_600  # to four hours after it (stoppages, a late start, extra time)
+MATCH_PAD_S = 600  # the match view: ten minutes either side of the match (and of the wallet's fills during it)
+GOAL_NEAR_S = 60  # a fill this close to a goal: one-minute prices can't say whether it came before the move
+_BASE = re.compile(r"^([a-z0-9]+)-([a-z0-9]+)-([a-z0-9]+)-(\d{4}-\d\d-\d\d)")
+
+
+def match_base(slug: str | None) -> str | None:
+    """A match's own slug, ``<league>-<home>-<away>-<date>``, from any of its markets' slugs."""
+    m = _BASE.match(slug or "")
+    return m[0] if m else None
+
+
+def match_side(slug: str | None) -> str | None:
+    """Which result a match market is about, from its slug: ``<base>-<home code>`` is the home club to win,
+    ``<base>-<away code>`` the away club, ``<base>-draw`` the draw; anything else (totals, exact score, spreads) None."""
+    m = _BASE.match(slug or "")
+    if not m:
+        return None
+    rest = (slug or "")[len(m[0]) :].lstrip("-")
+    return "home" if rest == m[2] else "away" if rest == m[3] else "draw" if rest == "draw" else None
+
+
+def _match(reads: Any, read: dict[str, Any], facts: dict[str, Any], fresh: bool,
+           trades: list[dict[str, Any]]) -> dict[str, Any]:  # fmt: skip
+    """The score line for a match market (kept in the read once the match has ended; read again while it may still
+    be going), the match's prices at 1 minute, which result the market is about, and the match view's span."""
+    ko = facts.get("kickoff") or facts.get("end")
+    kept = read.get("_match")
+    if kept and (kept["line"].get("final") or fresh):
+        return kept
+    gid = facts.get("game_id")
+    if not gid and match_base(facts.get("slug")):
+        gid = getattr(reads, "event_game_id", lambda s: None)(match_base(facts.get("slug")))
+    a, b = int(ko - MATCH_BEFORE_S), int(ko + MATCH_AFTER_S)
+    got = reads.scores(gid, a, b) if gid and b >= scores.SCORES_FROM else None
+    line = scores.match_line(got, kickoff=ko, start=a, end=b)
+    line["game_id"] = gid
+    if not gid:
+        line["coverage"]["recorded"] = False
+        line["coverage"]["why"] = "Polymarket lists no game for this market, so its score can't be joined."
+    clock = line["clock"]
+    m_from = min(ko, line["first_live_update"] or (clock[0]["t"] if clock else ko))
+    m_to = (line["final"] or {}).get("t") or (clock[-1]["t"] if clock else ko + 2 * 3_600)
+    during = [int(t["ts"]) for t in trades if m_from - MATCH_PAD_S <= int(t["ts"]) <= m_to + 3_600]
+    axis = {"from": int(min([m_from, *during]) - MATCH_PAD_S), "to": int(max([m_to, *during]) + MATCH_PAD_S)}
+    span = (axis["from"], min(axis["to"], int(now())))
+    prices: dict[str, Any] = {}
+    if span[0] < span[1]:
+        try:
+            prices = reads.match_prices(facts, *span)
+        except Exception as e:  # noqa: BLE001 - the replay keeps the coarser read and says so
+            print(f"research: match prices for {facts.get('slug')} unreadable: {type(e).__name__}", flush=True)
+    out = {"line": line, "side": match_side(facts.get("slug")), "axis": axis, "prices": prices,
+           "prices_span": list(span)}  # fmt: skip
+    read["_match"] = out
+    return out
+
+
+def match_context(f: dict[str, Any], line: dict[str, Any], side: str | None) -> dict[str, Any]:
+    """One fill with the match as the feed had it then (``scores.state_at``), what it backs (a buy of Yes on the
+    home club's market backs the home club; of No, not the home club) and, for a club's Yes, the margin then (that
+    club's goals minus the other's; below 0 is behind)."""
+    st = scores.state_at(line, f["t"])
+    yes = str(f.get("side") or "").lower() == "yes"
+    backs = None
+    if side and f["action"] == "buy":
+        backs = side if yes else f"not_{side}"
+    margin = None
+    sc = scores.parse_score(st["score"]) if st["known"] and st["score"] else None
+    if sc and side in ("home", "away") and yes:
+        margin = sc[0] - sc[1] if side == "home" else sc[1] - sc[0]
+    return {"phase": st["phase"], "minute": st["minute"], "period": st["period"], "score": st["score"],
+            "since_goal_s": st["since_goal_s"], "last_goal_by": (st["last_goal"] or {}).get("by"),
+            "in_gap": st["in_gap"], "backs": backs, "margin": margin}  # fmt: skip
+
+
+def match_counts(fs: list[dict[str, Any]], line: dict[str, Any]) -> dict[str, Any]:
+    """A match market's fills counted against the score, for the tile and the agent (never re-derived by it)."""
+    goals = [g for g in line.get("goals") or [] if g["kind"] != "correction"]
+    buys = [f for f in fs if f["action"] == "buy" and f.get("match")]
+    sells = [f for f in fs if f["action"] == "sell" and f.get("match")]
+
+    def usd(xs: list[dict[str, Any]]) -> float:
+        return round(sum(float(x["usd"]) if x.get("usd") is not None else x["shares"] * x["price"] for x in xs), 2)
+
+    def tally(xs: list[dict[str, Any]]) -> dict[str, Any]:
+        return {"fills": len(xs), "usd": usd(xs)}
+
+    def after(s: float) -> list[dict[str, Any]]:
+        return [f for f in buys if f["match"]["phase"] == "in_play" and f["match"]["since_goal_s"] is not None
+                and f["match"]["since_goal_s"] <= s]  # fmt: skip
+
+    out: dict[str, Any] = {"fills": len(fs), "buys": len(buys), "buys_usd": usd(buys)}
+    for p in ("pre_kickoff", "in_play", "half_time", "after_full_time", "unknown"):
+        out[f"buys_{p}"] = tally([f for f in buys if f["match"]["phase"] == p])
+    m = lambda f: f["match"]  # noqa: E731
+    out |= {
+        "buys_within_60s_after_goal": tally(after(60)),
+        "buys_within_5min_after_goal": tally(after(300)),
+        "buys_backing_side_behind": tally([f for f in buys if m(f)["margin"] is not None and m(f)["margin"] < 0]),
+        "buys_backing_side_level_in_play": tally([f for f in buys if m(f)["margin"] == 0 and m(f)["phase"] == "in_play"]),
+        "buys_backing_side_ahead": tally([f for f in buys if m(f)["margin"] is not None and m(f)["margin"] > 0]),
+        "draw_bought_from_75th_minute": tally([f for f in buys if m(f)["backs"] == "draw" and m(f)["period"] == "2H"
+                                               and (m(f)["minute"] or 0) >= 75]),
+        "sells_before_full_time": tally([f for f in sells if m(f)["phase"] in ("pre_kickoff", "in_play", "half_time")]),
+        "fills_within_60s_of_a_goal": sum(any(abs(f["t"] - g["t"]) <= GOAL_NEAR_S for g in goals) for f in fs),
+        "fills_in_a_recording_gap": sum(bool(f.get("match") and f["match"]["in_gap"]) for f in fs),
+    }  # fmt: skip
+    return out
+
+
+def match_notes(line: dict[str, Any], fs: list[dict[str, Any]]) -> list[str]:
+    """What the score line covers, in plain words, for the replay's coverage."""
+    cov = line["coverage"]
+    if not cov.get("recorded") or not cov.get("updates"):
+        return [cov.get("why") or "There's no recorded score for this match."]
+    gaps = cov["gaps"]
+    out = [f"The score is Layer's recording of polymarket.com's live sports feed ({cov['updates']} updates, about one "
+           "a minute; a goal is when the feed said so, and Polymarket says the feed can be late or wrong)."]  # fmt: skip
+    if gaps:
+        out.append(f"The recording had {len(gaps)} gap{'s' if len(gaps) > 1 else ''} during the match "
+                   f"({round(cov['gap_s'])} s in all): the score there is only known from the next update.")  # fmt: skip
+    if cov.get("corrections"):
+        n = cov["corrections"]
+        out.append(f"The feed took back a score {n} time{'s' if n > 1 else ''} (a goal shown, then removed): the line "
+                   "shows both.")  # fmt: skip
+    goals = [g for g in line.get("goals") or [] if g["kind"] != "correction"]
+    near = sum(any(abs(f["t"] - g["t"]) <= GOAL_NEAR_S for g in goals) for f in fs)
+    if near:
+        out.append(f"{near} of its fills came within a minute of a goal: Polymarket's prices are about one a minute, "
+                   "too coarse to say whether they came before or after the price moved on it.")  # fmt: skip
+    return out
+
+
+def match_brief(m: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The match on a tile: the clubs, the final score, the goals' minutes and the counts."""
+    if not m:
+        return None
+    return {"home": m.get("home"), "away": m.get("away"), "side": m.get("side"), "kickoff": m.get("kickoff"),
+            "final": m.get("final"), "recorded": (m.get("coverage") or {}).get("recorded"),
+            "goals": [{"t": g["t"], "minute": g["minute"], "score": g["score"], "by": g["by"], "kind": g["kind"],
+                       "retracted": bool(g.get("retracted"))} for g in m.get("goals") or []],
+            "counts": m.get("counts")}  # fmt: skip
