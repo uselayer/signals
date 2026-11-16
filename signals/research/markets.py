@@ -40,6 +40,9 @@ class MarketType:
     near: Callable[[dict[str, Any]], bool] | None = None
     # with no outside line: why, in one sentence, for the replay's coverage
     no_outside: str | None = None
+    # a slug that's likely this type: those markets are read first, so a type spread thin across a busy wallet's
+    # markets (the Premier League) isn't cut off by ``looks_at``; the tiles are still the most money traded
+    hint: Callable[[str | None], bool] | None = None
 
 
 # ---- BTC 15-minute Up/Down windows (the first Breakdowns; their path is unchanged) ----
@@ -314,8 +317,177 @@ POLITICS = MarketType(
     aliases=("politics-markets", "elections", "election", "us-politics", "geopolitics"),
 )  # fmt: skip
 
-# Session 3 (Premier League) adds its entry here.
-TYPES: list[MarketType] = [BTC_15M, BTC_LONG, POLITICS]
+# ---- the Premier League (England's top football league: season futures, managers, punishments, matches) ----
+
+# Gamma's tag for the league (id 306, label "EPL": its /sports entry for sport "epl"). The tag alone isn't enough:
+# Polymarket also put it on the Ballon d'Or, Euro 2024 and the FA Cup, so a market's own text must name the league
+EPL_TAG = "epl"
+_EPL_TEXT = re.compile(r"\bpremier league\b|\bEPL\b", re.IGNORECASE)
+_NOT_EPL = re.compile(r"\b(?:indian|russian|ukrainian|egyptian|scottish|welsh|bangladesh|caribbean|lanka)\b"
+                      r"[^.]{0,20}\bpremier league\b", re.IGNORECASE)  # fmt: skip
+# a club's manager market ("Next Manchester United manager?") names the club, not the league
+_MANAGER = re.compile(r"\b(?:manager|head coach)\b", re.IGNORECASE)
+_NATIONAL = re.compile(r"\b(?:national team|england|scotland|wales|ireland|usmnt)\b(?! ?(?:fc|city|united))",
+                       re.IGNORECASE)  # fmt: skip
+_EPL_SLUG = re.compile(r"(?:^|-)(?:epl|premier-league)(?:-|$)")
+_EPL_MATCH_SLUG = re.compile(r"^epl-[a-z]{3}-[a-z]{3}-\d{4}-\d\d-\d\d")
+_MATCH_RULE = re.compile(r"\bupcoming premier league game\b|\bpremier league (?:game|match) between\b", re.IGNORECASE)
+_SEASON_RULE = re.compile(r"\b(?:at the (?:end|conclusion) of the|following the|after the|through the)\b[^.]{0,60}"
+                          r"\bseason\b|"
+                          r"\bfinal stand(?:ing|ings)\b|\bstandings at the end\b|"
+                          r"\bfinish(?:es)? in the (?:top|bottom) \d+ of\b", re.IGNORECASE)  # fmt: skip
+# what a match market pays on, after the fixture line ("…, scheduled for … ET: If A wins, … "Yes"." / "This market
+# will resolve to "Over" if …")
+_MATCH_PAYS = re.compile(r"\bIf\b(?:vs\.|[^.])*?\bresolve to\b(?:vs\.|[^.])*\.|"
+                         r"\bThis market will resolve\b(?:vs\.|[^.])*\.")  # "A vs. B" isn't a sentence's end
+_BY_Q = re.compile(r"\bby (?:January|February|March|April|May|June|July|August|September|October|November|December|"
+                   r"\.\.\.|…|the end of)|\bby\s*\.\.\.|\bannounced by\b", re.IGNORECASE)  # fmt: skip
+_EARLY = re.compile(r"becomes? impossible|mathematically (?:eliminated|unable)|immediately resolve", re.IGNORECASE)
+_TIE = re.compile(r"\btie\b|\btied\b|tiebreak", re.IGNORECASE)
+
+
+def _epl_text(facts: dict[str, Any]) -> str:
+    return " ".join(str(facts.get(k) or "") for k in ("question", "event_title", "description"))
+
+
+def premier_league_matches(slug: str | None, facts: dict[str, Any]) -> bool:
+    """A Premier League market: Gamma's EPL tag (the league's own, id 306) and its own question, event or rules
+    name the league, or it's a club's manager market (it names the club, not the league). Ballon d'Or, Euro 2024
+    and FA Cup markets carry the tag too and are left out. A slug alone can't say (no facts yet): it isn't ruled
+    out, except an Up/Down window."""
+    if UPDOWN.match(slug or ""):
+        return False
+    if not facts:
+        return True
+    tags = {str(t).strip().lower() for t in facts.get("tags") or []}
+    if EPL_TAG not in tags:
+        return False
+    # older match markets ("In the upcoming game, scheduled for October 10, 2026 If Arsenal FC wins, …") don't name
+    # the league; they carry Gamma's "Premier League" tag too and an epl-<home>-<away>-<date> slug
+    if "premier league" in tags or _EPL_MATCH_SLUG.match(str(facts.get("slug") or slug or "")):
+        return True
+    text = _epl_text(facts)
+    if _EPL_TEXT.search(text) and not _NOT_EPL.search(text):
+        return True
+    q = f"{facts.get('question') or ''} {facts.get('event_title') or ''}"
+    return bool(_MANAGER.search(q) and not _NATIONAL.search(q))
+
+
+def premier_league_near(facts: dict[str, Any]) -> bool:
+    """Read and left out, but close: a market with the EPL tag that isn't the league (Ballon d'Or, a Euros or FA
+    Cup winner)."""
+    return EPL_TAG in {str(t).strip().lower() for t in facts.get("tags") or []} and not premier_league_matches(
+        facts.get("slug"), facts)
+
+
+def premier_league_hint(slug: str | None) -> bool:
+    return bool(_EPL_SLUG.search(slug or ""))
+
+
+def premier_league_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
+    """What resolves one Premier League market, read from its own rules (Gamma's ``description``), never assumed
+    for the type. ``kind``: ``one_of`` (one leg of a "which club / player / manager" event, negRisk: Yes if this one
+    is the one: the champion, the top goalscorer, last place, the next manager), ``season`` (Yes or No for one club
+    at the season's end, and several clubs can be Yes: relegated, top 4, Champions League places), ``match`` (one
+    match's result, score or corners), ``by_date`` (whether something happens by a date: a punishment, a points
+    deduction), else ``other`` (read the quote). ``quote``: the rules' own resolving sentence, short. ``source``:
+    what the rules name (official information from the English Premier League, the official table…), else the
+    market's resolution source, else None. ``ends_early``: the rules resolve it No as soon as it's impossible (a
+    club mathematically out), so it can close before the season ends. ``tie``: the rules' tie-break, if any."""
+    rules = " ".join(str(facts.get("description") or "").split())
+    q = str(facts.get("question") or "")
+    slug = str(facts.get("slug") or "")
+    sentences = [x for x in _SENTENCE.split(rules) if x]
+    quote = _clip_words(next((x for x in sentences if _RESOLVES.search(x)), sentences[0] if sentences else ""))
+    item = str(facts.get("group_item") or "")
+    if _EPL_MATCH_SLUG.match(slug) or _MATCH_RULE.search(rules):
+        kind = "match"
+        # a match's rules open with the fixture ("In the upcoming Premier League game between A and B, …:"): the
+        # clause that says what this market pays on comes after it
+        pays = _MATCH_PAYS.search(rules)
+        quote = _clip_words(pays[0] if pays else quote)
+    elif _BY_Q.search(q):  # "… announced by October 9?", "… deducted points by June 30, 2027?"
+        kind = "by_date"
+    elif item and (facts.get("neg_risk") or re.search(r"resolve (?:according )?to the (?:team|club|player|person)",
+                                                      rules, re.IGNORECASE)):  # fmt: skip
+        kind = "one_of"
+    elif _SEASON_RULE.search(rules) or _SEASON_RULE.search(q):
+        kind = "season"
+    else:
+        kind = "other"
+    m = _SOURCE.search(rules)
+    source = _clip_words(m[1].split(";")[0].strip(), 120) if m else None  # not "…; however, a consensus of …"
+    if not source:
+        url = re.search(r"https?://[^\s)\"]+", rules)
+        source = url[0].rstrip(".") if url else (facts.get("resolution_source") or None)
+    tie = next((x for x in sentences if _TIE.search(x) and _RESOLVES.search(x)), None)
+    deadline = facts.get("end_iso")
+    # a match market's listed end is its kickoff (Gamma's endDate = the game's start), not when it settles: a fill
+    # after it came during or after the match
+    kickoff = deadline if kind == "match" else None
+    # a club or a player names the leg; a bucket ("0", "1-5") reads better as the question itself
+    leg = item if re.search(r"[A-Za-z]{3}", item) else f"“{q}”"
+    lead = {"one_of": f"Whether {leg} is the one of its event's outcomes",
+            "season": "At the end of the season",
+            "match": f"One match, kicking off {kickoff[:16].replace('T', ' ')} UTC" if kickoff else "One match",
+            "by_date": "Whether it happens by the date in its rules", "other": "Its rules say"}[kind]
+    says = f"{lead}: “{quote}”" if quote else f"{lead}."
+    return {"kind": kind, "strike": None, "source": source, "deadline": deadline, "quote": quote or None,
+            "ends_early": bool(_EARLY.search(rules)), "tie": _clip_words(tie, 200) if tie else None,
+            "kickoff": kickoff, "says": says}  # fmt: skip
+
+
+PREMIER_LEAGUE_PROMPT = """## The Premier League (market_type premier-league; the unit is a market)
+A Premier League market is one Polymarket tags EPL whose own question, event or rules name the league (or a \
+club's manager market): season futures ("Will Arsenal win the Premier League this season?", relegation, a top-four \
+finish, Champions League places, top goalscorer, last place), a club's next manager, a punishment or points deduction, and \
+match markets listed a week or more ahead. Outcomes are Yes and No; a share pays $1 if its outcome wins, and its \
+price (0 to 1) is the market's chance. The unit is a market: one market's life for this wallet, from its first buy \
+to its last sell or merge, the resolution, or now. A tile or a market's replay (the market tool) holds every fill \
+over the market's whole life, its merges, splits and conversions (moves), its position after each, and the \
+market's own price at the stated step (coverage.price_step_s: never claim timing finer than the step).
+What resolves it: read each market's rule (rule.kind, rule.quote, rule.source) and its rules text, and say which \
+applies; never assume one for all. rule.kind one_of: one leg of a "which club / player / manager" event (one \
+market per club or player): Yes if this one is the one (the champion, the top goalscorer, last place, the next \
+manager); season: Yes or No for one club at the end of the season, and several clubs can be Yes (relegated, a top-four \
+finish, Champions League places); match: one match; by_date: whether it happens by the date in its rules; other: quote \
+the rules. rule.ends_early true means the rules resolve it No as soon as it's impossible (a club mathematically \
+out), so it can close before the season ends; rule.tie is the rules' own tie-break (top goalscorer: alphabetical). \
+A match market's listed end (market_end, rule.kickoff) is its kickoff, not when it settles: a fill after it came \
+during or after the match (say "after kickoff", never "after the market ended"); the match itself isn't in the data. \
+Most season markets resolve when the season ends: until then they're open.
+There is no outside line: no league table, no results, no fixtures, no injuries, no transfers and no news. So \
+never say a trade followed a match, a goal, a result, an injury, a sacking or a signing, never that it "knew" or \
+"expected" anything, and never who should win the league or a match. Say a buy came after a move in the market's \
+own price, with the move's size and time. Never give your own view of a club, a player or a manager.
+Multi-outcome events: "Who will win the Premier League?" is one market per club under one event (event_slug, \
+event_title; group_item is the club or player, often neg_risk). A tile stays one market, but count across the \
+event: wallet_markets.events lists each event with two or more of its markets and what it bought of each side, \
+including markets past the tiles shown. Holding several clubs for the title, or Yes on one club and No on the \
+others, is a pattern worth showing; so is the same club across events (champion and a top-four finish).
+Moves: a merge turns pairs of Yes and No into $1 each (a way out before the end, like a sell); a split turns \
+dollars into pairs; a conversion (neg_risk) swaps No shares across the event's markets, and Polymarket doesn't \
+say which, so that market's profit isn't counted. value.exit says how it left: sold, merged, held to the result, \
+or still open; coverage.moves_read false means its moves couldn't be read: then never say it held to the result.
+Open markets: profit is valued at today's price (profit_kind "open"), as if it ended now, and must be called \
+open, never a result. A club's market that resolved No early (ends_early) is a result, not a sale.
+Worth checking: scaling in over weeks; buys after big moves in the market's own price; holding several clubs or \
+players of one event; long shots bought cheaply (a low price is a low chance, not a bargain); buying the side \
+priced near $1; selling or merging before the end of the season vs holding to the result; how long it holds; \
+profit per market and per event; match markets against season futures."""
+
+PREMIER_LEAGUE = MarketType(
+    id="premier-league", label="Premier League", unit="market", prompt=PREMIER_LEAGUE_PROMPT,
+    matches=premier_league_matches, rule=premier_league_rule, min_days=7.0, looks_at=180,
+    near=premier_league_near, hint=premier_league_hint,
+    no_outside=("No outside series for Premier League markets: the replay is the market's own price, the wallet's "
+                "fills and its position. There's no league table, results or news feed, so no trade here can be "
+                "tied to a match result or news."),
+    aliases=("epl", "english-premier-league", "premier-league-futures", "premierleague"),
+)  # fmt: skip
+
+# Session 4 (Premier League matches: a live score line) extends PREMIER_LEAGUE, not a new entry.
+TYPES: list[MarketType] = [BTC_15M, BTC_LONG, POLITICS, PREMIER_LEAGUE]
 DEFAULT = BTC_15M
 
 

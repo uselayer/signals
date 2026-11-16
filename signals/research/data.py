@@ -617,10 +617,21 @@ class Reads:
             if t.get("action") == "buy" and t.get("outcome"):
                 m["bought"][t["outcome"]] = m["bought"].get(t["outcome"], 0.0) + float(t.get("usd") or 0)
         ranked = sorted(by, key=lambda c: -by[c]["usd"])
+        if mt.hint:  # slugs that are likely this type first (each part still the most money first)
+            ranked = [c for c in ranked if mt.hint(by[c]["slug"])] + [c for c in ranked if not mt.hint(by[c]["slug"])]
+
+        def more(kept: list[dict[str, Any]]) -> bool:
+            if len(kept) < n:
+                return True
+            # with a hint, the `n` biggest kept may still be outranked by a bigger market read later: read on while one
+            # could (up to ``looks_at``)
+            nth = sorted((k["usd_in_range"] for k in kept), reverse=True)[n - 1]
+            return bool(mt.hint) and by[ranked[len(looked)]]["usd"] > nth
+
         # a batch of the busiest at a time; a type its slugs can't narrow (politics) reads on until `n` match
         looked: list[str] = []
         kept, skipped, not_type = [], [], 0
-        while len(looked) < min(len(ranked), mt.looks_at) and len(kept) < n:
+        while len(looked) < min(len(ranked), mt.looks_at) and more(kept):
             batch = ranked[len(looked) : min(len(ranked), len(looked) + MARKETS_LOOKED_AT, mt.looks_at)]
             looked += batch
             facts = self.markets_facts(batch)
@@ -645,14 +656,18 @@ class Reads:
                              "fills_in_range": m["fills"], "first_fill_in_range": m["first"],
                              "last_fill_in_range": m["last"],
                              "bought_in_range": {o: round(v, 2) for o, v in m["bought"].items()}})  # fmt: skip
+        if mt.hint:  # read hinted first: the tiles are still the most money traded
+            kept.sort(key=lambda k: -k["usd_in_range"])
+        checked = (f"The {len(looked)} markets checked were those whose slugs name the league first, then the most "
+                   f"money traded; " if mt.hint else f"The {len(looked)} markets with the most money traded were checked; ")
         out = {"wallet": w, "start": got["start"], "asked_from": a, "end": b, "market_type": mt.id, "label": mt.label,
                "min_days": days,
                "top": n, "trades_read": got["count"], "trades_complete": got["complete"],
                "read_to": got["read_to"],
                "markets_traded": len(by), "markets_looked_at": len(looked), "matched": len(kept),
                "markets": kept[:n], "source": got["source"],
-               "note": (f"The {len(looked)} markets with the most money traded were checked; "
-                        f"{max(0, len(ranked) - len(looked))} smaller ones weren't. " + got["note"])}  # fmt: skip
+               "note": (checked + f"{max(0, len(ranked) - len(looked))} "
+                        f"{'others' if mt.hint else 'smaller ones'} weren't. " + got["note"])}  # fmt: skip
         if mt.near:  # a type told apart by its tags, not its slugs: what it read but left out, and events held
             out["not_this_type"] = not_type
             out["skipped_near"] = skipped

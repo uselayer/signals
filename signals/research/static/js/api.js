@@ -42,6 +42,15 @@ async function headers(extra = {}) {
   return h;
 }
 
+// Whether the main site shows this account its Copy trading tab (the engine's /api/me/copies/on), so the header
+// here matches it. False signed out, on any failure, and where the engine isn't behind the same site.
+export const copyTradingOn = async () => {
+  try {
+    const res = await fetch('/api/me/copies/on', { headers: await headers() });
+    return res.ok && !!(await res.json()).on;
+  } catch { return false; }
+};
+
 export class ApiError extends Error { constructor(status, message) { super(message); this.status = status; } }
 
 async function call(method, path, body) {
@@ -59,6 +68,8 @@ async function call(method, path, body) {
 export const live = {
   config: () => fetch('/api/research/config').then(r => (r.ok ? r.json() : Promise.reject(new ApiError(r.status, 'No research service here.')))),
   sessions: () => call('GET', '/sessions').then(j => j.sessions || []),
+  // wallets to study by market type, for the wallet field's list and "Pick one for me" (signals/research/suggest.py)
+  suggestions: () => call('GET', '/suggestions'),
   create: title => call('POST', '/sessions', { title }).then(j => j.id),
   session: id => call('GET', `/sessions/${id}`),
   ask: (id, question, context, origin) => call('POST', `/sessions/${id}/ask`, { question, context: context || null, origin: origin || null }),

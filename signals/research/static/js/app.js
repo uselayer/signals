@@ -3,7 +3,7 @@
 // for visitors (no sign-in: the signed-out page's "Watch a sample breakdown"); ?signin opens Sign in at once; ?q=
 // prefills a question (the main site's ask bar sends it).
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
-import { live, startAuth, openSignIn, mountUser } from './api.js';
+import { live, startAuth, openSignIn, mountUser, copyTradingOn } from './api.js';
 import { fixtureApi } from './fixtures.js';
 import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun, RANGES, defaultRange, askScope } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
@@ -19,18 +19,19 @@ const params = new URLSearchParams(location.search);
 const SAMPLE = params.has('sample'), FIXTURES = SAMPLE || params.has('fixtures');
 const route = () => { const m = /^#\/i\/([\w-]+)/.exec(location.hash); return m ? { inv: m[1] } : { home: true }; };
 
-function Top({ fixtures }) {
+// The main site's tabs, the same order; Copy trading only for an account with copying on (as the main site's header).
+function Top({ fixtures, copyTrading }) {
   const acct = useRef();
   useEffect(() => mountUser(acct.current));
   return html`<header class="top"><div class="in">
     <a class="brand" href="/"><span class="logo">${LOGO}</span>Signals</a>
-    <nav class="tabs" aria-label="Main"><a class="on new" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a></nav>
+    <nav class="tabs" aria-label="Main"><a class="on new" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a>${copyTrading && html`<a href="/#/copies">Copy trading</a>`}</nav>
     <div class="acct">${SAMPLE ? html`<span class="chip">Sample: a recorded breakdown</span><a class="btn sm primary" href="./?signin#/">Sign in to ask your own</a>`
       : fixtures ? html`<span class="chip">Fixtures: recorded data, no service</span>` : html`<div ref=${acct}></div>`}</div></div></header>`;
 }
 
 function App() {
-  const [api, setApi] = useState(null), [r, setR] = useState(route()), [gate, setGate] = useState(null), [err, setErr] = useState(null), [types, setTypes] = useState(null);
+  const [api, setApi] = useState(null), [r, setR] = useState(route()), [gate, setGate] = useState(null), [err, setErr] = useState(null), [types, setTypes] = useState(null), [copyTrading, setCopyTrading] = useState(false);
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   useEffect(() => { (async () => {
     try {
@@ -39,19 +40,20 @@ function App() {
       if (cfg.event_version > 2) setErr('This page is older than the research service. Reload to get the new one.');
       setTypes(cfg.market_types && cfg.market_types.length ? cfg.market_types : null);
       const au = FIXTURES ? { signedIn: true } : await startAuth(cfg.clerk_key);
-      if (!au.signedIn) { setGate('signin'); if (params.has('signin')) openSignIn(); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) setGate(null); }); }
+      if (!au.signedIn) { setGate('signin'); if (params.has('signin')) openSignIn(); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) { setGate(null); copyTradingOn().then(setCopyTrading); } }); }
+      else if (!FIXTURES) copyTradingOn().then(setCopyTrading);
       setApi(a);
     } catch (e) { setErr(e.message || 'The research service isn\'t reachable.'); }
   })(); }, []);
-  return html`<${Hatch} /><${Top} fixtures=${FIXTURES} />
+  return html`<${Hatch} /><${Top} fixtures=${FIXTURES} copyTrading=${copyTrading} />
     ${err && html`<div class="home"><div class="banner err"><div><p>${err}</p><p class="small muted" style="margin-top:4px">To see the page with recorded data, open <a class="link" href="?fixtures#/">fixtures mode</a>.</p></div></div></div>`}
     ${!err && !api && html`<div class="home"><p class="muted">Loading…</p></div>`}
     ${api && gate === 'signin' && html`<${Teaser} />`}
     ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} types=${types || MARKET_TYPES} />`)}`;
 }
 
-// Example questions under the ask box (owner, 10 Nov: four, small, one row, and each must say WHICH wallet). Each card
-// shows a different kind of answer (owner, 10 Nov): an explanation, a chart, a replay, a comparison. Two sample traders
+// Example questions under the ask box (owner, 10 Nov: four, small, one row, and each must say WHICH wallet; 16 Nov:
+// the goal first, the wallet it uses under it). Three use the sample traders; the fourth is "Pick one for me". Two sample traders
 // share them (owner: mix and match two traders across the four), both active in every BTC 15-minute window. With the
 // wallet field empty, or holding a sample trader's wallet, each card names its own trader and a click fills both fields;
 // with any other wallet typed, every card names that one (shortened) and fills the question only. A click never starts
@@ -64,11 +66,10 @@ const SAMPLE_TRADERS = [
 const INFO = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v6" /><circle cx="12" cy="7.6" r=".6" fill="currentColor" /></svg>`;
 // The ask box's Market choice when the service doesn't list its types (an older service): 15-minute windows only.
 const MARKET_TYPES = [{ id: 'btc-updown-15m', label: 'BTC Up or Down 15m', unit: 'window', min_days: 0 }];
-const EXAMPLES = [  // [sample trader, card, question]
-  [0, w => `How does ${w} make money?`, w => `How does ${w} make money on BTC 15-minute markets?`],
-  [1, w => `Chart ${w}'s buys against the BTC price`, w => `In BTC 15-minute markets, chart ${w}'s buys against the BTC price over its latest windows.`],
-  [0, w => `Replay ${w}'s latest window`, w => `Replay ${w}'s latest finished BTC 15-minute window: when did it buy Up and Down, and where was BTC?`],
-  [1, w => `Compare ${w}'s winning and losing windows`, w => `In BTC 15-minute markets, compare ${w}'s winning and losing windows: what did it do differently?`],
+const EXAMPLES = [  // [sample trader, card (the goal), question]
+  [1, () => `Learn a BTC 15-minute trader's pattern`, w => `How does ${w} trade BTC 15-minute markets? Which side does it buy, when in the window, and at what prices?`],
+  [0, () => `Replay its latest 15-minute window`, w => `Replay ${w}'s latest finished BTC 15-minute window: when did it buy Up and Down, and where was BTC?`],
+  [1, () => `Compare its winning and losing windows`, w => `In BTC 15-minute markets, compare ${w}'s winning and losing windows: what did it do differently?`],
 ];
 
 // Signed out: what a breakdown is, the recorded one to watch (no sign-in, no model run), and Sign in to ask your own.
@@ -130,28 +131,140 @@ function rowLabel(s) {
   return html`<span class="r">${st === 'stopped' ? 'Stopped' : 'Saved'}</span>`;
 }
 
+// Wallets to study (owner, 16 Nov: someone with no wallet to reverse-engineer needs one to start from). The wallet
+// field opens a list: "Pick one for me" first, then each market type's top wallets by trading profit over 30 days on
+// Signals' Leaderboard (server: signals/research/suggest.py), facts only, never "recommended". Picking one fills the
+// field with its name and sets Market to its type; typing filters it by name. "Pick one for me" sends the top wallet
+// of the Market chosen, and the plan's page shows which one was picked, why, and the others to swap to before Start.
+const PICK = { pick: true };
+const PICKED = 'breakdowns.picked'; // {breakdown id: {wallet, name, why, others}}, the 20 latest, this browser only
+const compactMoney = (v, signed) => {
+  if (v == null) return '—';
+  const a = Math.abs(v), s = signed ? (v < 0 ? '−' : '+') : '';
+  return s + '$' + (a >= 1e6 ? `${(a / 1e6).toFixed(a >= 1e7 ? 1 : 2)}M` : a >= 1e3 ? `${Math.round(a / 1e3)}K` : Math.round(a));
+};
+const whyOf = r => (r.rank ? `#${r.rank} in ${r.category} by trading profit, 30 days` : 'A sample trader, in every BTC 15-minute window');
+const shortLabel = t => t.label.replace(' Up or Down ', ' '); // as the Market pills say it
+const marketWords = t => (t.unit === 'window' ? 'BTC 15-minute' : t.id === 'politics' ? 'politics' : t.label);
+const pickQuestion = t => `How does this wallet make money on ${marketWords(t)} markets?`;
+function savePick(id, p) { const o = readLs(PICKED, {}); o[id] = { ...p, at: Date.now() / 1000 }; writeLs(PICKED, Object.fromEntries(Object.entries(o).sort((a, b) => b[1].at - a[1].at).slice(0, 20))); }
+const pickOf = id => readLs(PICKED, {})[id] || null;
+
+function useSuggestions(api) {
+  const [s, setS] = useState(null);
+  useEffect(() => {
+    if (SAMPLE || !api.suggestions) return undefined;
+    let t = 0, tries = 0;
+    const load = () => api.suggestions().then(j => { setS(j); if (!j.ready && ++tries < 8) t = setTimeout(load, 6000); }, () => setS({ types: [], ready: true, failed: true }));
+    load();
+    return () => clearTimeout(t);
+  }, []);
+  return s;
+}
+
+function WhoTag({ bot }) {
+  if (bot === 1 || bot === true) return html`<span class="who-tag bot">${BOT_ICON}Bot</span>`;
+  if (bot === 0 || bot === false) return html`<span class="who-tag human">${HUMAN_ICON}Human</span>`;
+  return null;
+}
+
+// The wallet field as a combobox: its list is "Pick one for me" and the suggestions, by market type.
+function WalletField({ wallet, chosen, sugg, onText, onChoose, onClear }) {
+  const [open, setOpen] = useState(false), [active, setActive] = useState(-1);
+  const input = useRef();
+  const text = wallet.trim().toLowerCase();
+  const groupsShown = ((sugg && sugg.types) || []).map(g => ({ ...g, wallets: g.wallets.filter(w => !text || (w.name || '').toLowerCase().includes(text) || w.wallet.startsWith(text)) })).filter(g => g.wallets.length);
+  const opts = [...(text ? [] : [{ pick: true }]), ...groupsShown.flatMap(g => g.wallets.map(w => ({ w, g })))];
+  const loading = !text && (!sugg || !sugg.ready);
+  const shown = open && !chosen && (opts.length > 0 || loading);
+  const choose = o => { setOpen(false); setActive(-1); onChoose(o.pick ? PICK : o.w, o.g); };
+  const key = e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); setOpen(true); const n = opts.length; if (n) setActive(a => (e.key === 'ArrowDown' ? (a + 1) % n : (a - 1 + n) % n)); }
+    else if (e.key === 'Enter' && shown && active >= 0 && opts[active]) { e.preventDefault(); choose(opts[active]); }
+    else if (e.key === 'Escape') { setOpen(false); setActive(-1); }
+    else if (chosen && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); onClear(); }
+  };
+  let i = -1;
+  const optId = n => `wopt-${n}`;
+  const row = (o, n) => html`<li id=${optId(n)} role="option" aria-selected=${active === n ? 'true' : 'false'} class=${'wopt' + (active === n ? ' on' : '')}
+      onMouseDown=${e => e.preventDefault()} onClick=${() => choose(o)} onMouseEnter=${() => setActive(n)}>${o.pick
+    ? html`<span class="wpick-ic" aria-hidden="true">${PICK_ICON}</span><span class="wmain"><b>Pick one for me</b><span class="muted small">Just ask your question. The top trader for the Market you choose is picked and named on the plan, before anything runs.</span></span>`
+    : html`<span class="wmain"><span class="wname"><b>${traderName(o.w)}</b><${WhoTag} bot=${o.w.bot} /></span><span class="muted small">${whyOf(o.w)}</span></span>
+      <span class="wnum"><b class=${(o.w.profit_30d || 0) >= 0 ? 'gain' : 'loss'}>${compactMoney(o.w.profit_30d, true)}</b><span class="muted small">${compactMoney(o.w.traded_30d)} traded</span></span>`}</li>`;
+  return html`<div class="wfield">
+    <input id="wallet" ref=${input} role="combobox" aria-label="Wallet" aria-autocomplete="list" aria-expanded=${shown ? 'true' : 'false'} aria-controls="wallet-list"
+      aria-activedescendant=${shown && active >= 0 ? optId(active) : undefined} autocomplete="off" spellcheck="false"
+      placeholder="Pick a wallet, or paste a 0x wallet or Polymarket name" readOnly=${!!chosen}
+      value=${chosen ? (chosen.pick ? 'Pick one for me' : traderName(chosen)) : wallet}
+      onFocus=${() => setOpen(true)} onClick=${() => setOpen(true)} onBlur=${() => setTimeout(() => setOpen(false), 120)}
+      onInput=${e => { setOpen(true); setActive(-1); onText(e.target.value); }} onKeyDown=${key} />
+    ${chosen ? html`<button type="button" class="wclear" aria-label="Clear the wallet" onClick=${() => { onClear(); setTimeout(() => input.current && input.current.focus(), 0); }}>×</button>`
+      : html`<button type="button" class="wcaret" aria-label="Show wallets to study" tabIndex="-1" onMouseDown=${e => e.preventDefault()} onClick=${() => { setOpen(o => !o); if (input.current) input.current.focus(); }}>${CARET_ICON}</button>`}
+    ${shown && html`<div class="wmenu"><ul id="wallet-list" role="listbox" aria-label="Wallets to study">
+      ${opts[0] && opts[0].pick && row(opts[0], ++i)}
+      ${groupsShown.map(g => html`<li role="presentation" class="wgrp"><b>${g.label}</b><span>trading profit, last 30 days</span></li>
+        ${g.wallets.map(w => row({ w, g }, ++i))}`)}</ul>
+      ${loading && html`<p class="muted small wnote">Finding wallets to study…</p>`}
+      ${sugg && sugg.failed && !text && html`<p class="muted small wnote">Wallets to study couldn't load just now. Paste one, or browse Traders.</p>`}
+      <div class="wfoot"><span>Picking one sets Market to its kind.</span><a class="link" href="/#/traders" onMouseDown=${e => e.preventDefault()}>Browse all traders →</a></div></div>`}
+  </div>`;
+}
+const PICK_ICON = html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 20 20"/><path d="M8 11.5l1.8-2 1.6 1.4 2-2.4"/></svg>`;
+const CARET_ICON = html`<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>`;
+
+// Above a plan that hasn't started: which wallet "Pick one for me" chose, why, and the others to study instead
+// ("Change the plan" with that wallet: the same breakdown gets a new plan, nothing runs until Start).
+function PickedCard({ pick, plan, act }) {
+  if (!pick || !plan || plan.status !== 'proposed') return null;
+  return html`<div class="picked">
+    <div class="pk-head"><span class="muted small">Picked for you</span><b>${traderName(pick)}</b><${WhoTag} bot=${pick.bot} /><span class="muted small">${pick.why}${pick.profit_30d != null ? html` · <span class=${pick.profit_30d >= 0 ? 'gain' : 'loss'}>${compactMoney(pick.profit_30d, true)}</span> on ${compactMoney(pick.traded_30d)} traded` : ''}</span></div>
+    ${pick.others && pick.others.length > 0 && html`<div class="pk-swap"><span class="muted small">Study instead:</span>${pick.others.map(o => html`<button type="button" class="btn sm" onClick=${() => act.swapWallet(plan.plan_id, o)}>${traderName(o)}</button>`)}</div>`}
+  </div>`;
+}
+
 function Home({ api, types }) {
   // Market and Time range (store.js RANGES): what the plan will study, chosen before asking and sent with the question
   const [mid, setMid] = useState(() => (types.find(t => t.id === params.get('market')) || types[0]).id), [hours, setHours] = useState(null);
   const type = types.find(t => t.id === mid) || types[0], ranges = RANGES[type.unit] || RANGES.window;
   const h = ranges.some(([x]) => x === hours) ? hours : defaultRange(type.unit);
   const onMarket = id => { setMid(id); setHours(null); };
+  // a wallet in the link (Traders' "Break it down"): the field holds it, by its name when the link carries one
+  const linked = (params.get('wallet') || '').trim().toLowerCase(), linkedOk = /^0x[0-9a-f]{40}$/.test(linked);
+  const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : linkedOk && !params.get('name') ? linked : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
+  const [chosen, setChosen] = useState(() => (linkedOk && params.get('name') ? { wallet: linked, name: params.get('name').slice(0, 60) } : null));
+  const sugg = useSuggestions(api);
   // what the choice covers, behind an (i) beside Time range (owner, 16 Nov: not a line of text under the pills);
   // hover or focus shows it, a tap toggles it on a phone
   const [tip, setTip] = useState(false);
   const hint = type.unit === 'window' ? 'Every window it traded. For a month or two, pick a market type with longer markets.' : `Its 20 markets with the most money${type.min_days ? `, of those that run ${type.min_days}+ days` : ''}.`;
-  const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
   // after a card: focus Break it down
   const go = useRef(), focusNext = useRef(null);
   useEffect(() => { const el = focusNext.current; focusNext.current = null; if (el && el.current) el.current.focus(); });
-  // whom card i names: its own sample trader by name (also once a card filled a sample address in), else the wallet typed
+  // whom card i names: its own sample trader by name (also once a card filled a sample address in), else the wallet
+  // in the field (by its name when it came from the list)
+  const listed = chosen && !chosen.pick ? chosen : null;
+  const typed = listed ? listed.wallet : wallet;
   const isSample = w => !w.trim() || SAMPLE_TRADERS.some(t => t.wallet === w.trim().toLowerCase());
-  const whoOf = (w, i) => (isSample(w) ? SAMPLE_TRADERS[EXAMPLES[i][0]].name : shortWallets(w.trim()));
+  const whoOf = (w, i) => (isSample(w) ? SAMPLE_TRADERS[EXAMPLES[i][0]].name : listed && w === listed.wallet ? traderName(listed) : shortWallets(w.trim()));
+  const isExample = s => !s.trim() || s === pickQuestion(type) || EXAMPLES.some(([, , question], j) => question(whoOf(typed, j)) === s);
   // the cards are BTC 15-minute questions, so a card also sets Market to it
-  const pick = i => { if (isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet); setQ(EXAMPLES[i][2](whoOf(wallet, i))); if (mid !== MARKET_TYPES[0].id) onMarket(MARKET_TYPES[0].id); focusNext.current = go; };
+  const pick = i => {
+    if (chosen && chosen.pick) setChosen(null);
+    if (!listed && isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet);
+    setQ(EXAMPLES[i][2](whoOf(typed, i))); if (mid !== MARKET_TYPES[0].id) onMarket(MARKET_TYPES[0].id); focusNext.current = go;
+  };
+  const pickForMe = () => { setChosen(PICK); setWallet(''); setQ(pickQuestion(type)); focusNext.current = go; };
   // a card's question follows the wallet field, so it never names one trader while the field holds another
   const onWallet = w => { setWallet(w); const i = EXAMPLES.findIndex(([, , question], j) => question(whoOf(wallet, j)) === q); if (i >= 0) setQ(EXAMPLES[i][2](whoOf(w, i))); };
+  const onChoose = (c, g) => {
+    const t = (g && types.find(x => x.id === g.id)) || type;
+    if (t.id !== mid) onMarket(t.id);
+    setChosen(c); setWallet('');
+    if (isExample(q)) setQ(c.pick ? pickQuestion(t) : `How does ${traderName(c)} make money on ${marketWords(t)} markets?`);
+    focusNext.current = go;
+  };
+  const onClear = () => { if (chosen && chosen.pick && q === pickQuestion(type)) setQ(''); setChosen(null); };
   useEffect(() => { if (!SAMPLE) api.sessions().then(setList, e => setErr(e.message)); }, []);
   // while one of yours runs, its row's step and time left stay current
   const anyRunning = !!(list && list.some(s => s.running));
@@ -161,12 +274,26 @@ function Home({ api, types }) {
     return () => clearInterval(t);
   }, [anyRunning]);
   const start = async () => {
-    if (!q.trim()) return; setBusy(true); setErr(null);
+    if (!q.trim()) return;
+    // "Pick one for me": the top wallet suggested for the Market chosen; the others are offered on the plan
+    let w = wallet.trim(), named = null, picked = null, origin = 'pasted wallet';
+    if (chosen && chosen.pick) {
+      const g = ((sugg && sugg.types) || []).find(x => x.id === type.id);
+      if (!g || !g.wallets.length) { setErr(sugg && sugg.ready ? `No wallets to pick from for ${shortLabel(type)} yet. Paste one, or choose another Market.` : 'Still finding wallets to pick from. Try again in a few seconds.'); return; }
+      const [first, ...rest] = g.wallets;
+      picked = { ...first, why: whyOf(first), others: rest.map(o => ({ ...o, why: whyOf(o) })) };
+      w = first.wallet; named = first.name; origin = 'picked for you';
+    } else if (listed) { w = listed.wallet; named = listed.name; origin = linkedOk && listed.wallet === linked ? 'trader page' : 'wallet list'; }
+    else if (linkedOk && w === linked) origin = 'trader page';
+    setBusy(true); setErr(null);
     try {
-      const lines = [wallet.trim() && !q.includes(wallet.trim()) ? `Wallet: ${wallet.trim()}` : null, SAMPLE ? null : askScope(type, h)].filter(Boolean);
-      const question = lines.length ? `${q.trim()}\n\n${lines.join('\n')}` : q.trim();
-      const t = q.trim(), id = await api.create(t.length <= 120 ? t : t.slice(0, 119).replace(/\s+\S*$/, '').replace(/[\s,;:(\-'"]+$/, '') + '…');
-      await api.ask(id, question, null, 'pasted wallet');
+      const text = picked ? q.trim().replace(/\bthis wallet\b/, traderName(picked)) : q.trim();
+      const walletLine = w && !text.includes(w) ? `Wallet: ${w}${named ? ` (${named} on Polymarket)` : ''}` : null;
+      const lines = [walletLine, picked ? `Picked for the person asking, as the top ${type.label} wallet on Signals' Leaderboard: ${picked.why}.` : null, SAMPLE ? null : askScope(type, h)].filter(Boolean);
+      const question = lines.length ? `${text}\n\n${lines.join('\n')}` : text;
+      const id = await api.create(text.length <= 120 ? text : text.slice(0, 119).replace(/\s+\S*$/, '').replace(/[\s,;:(\-'"]+$/, '') + '…');
+      if (picked) savePick(id, picked);
+      await api.ask(id, question, null, origin);
       location.hash = `#/i/${id}`;
     } catch (e) { setErr(e.message); setBusy(false); }
   };
@@ -174,16 +301,18 @@ function Home({ api, types }) {
     <div style="display:flex;flex-direction:column;gap:10px"><h1>What do you want to find out?</h1>
       <p class="muted">${SAMPLE ? 'This is a sample: a breakdown recorded from a real run, with its question filled in. Press Break it down to watch it plan, read and chart the trades. Sign in to ask your own.' : 'Polymarket only. Research, no trading.'}</p>
       <div class="compose-big">
-        <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => onWallet(e.target.value)} />
+        ${SAMPLE ? html`<input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly />`
+          : html`<${WalletField} wallet=${wallet} chosen=${chosen} sugg=${sugg} onText=${w => { setChosen(null); onWallet(w); }} onChoose=${onChoose} onClear=${onClear} />`}
         ${!SAMPLE && html`<div class="pickers" role="group" aria-label="What to study">
           <div class="prow"><span class="pl" id="market-l">Market</span><div class="seg" id="market" role="radiogroup" aria-labelledby="market-l">${types.map(t => html`<button type="button" role="radio" aria-checked=${t.id === type.id ? 'true' : 'false'} class=${t.id === type.id ? 'on' : ''} data-v=${t.id} onClick=${() => onMarket(t.id)}>${t.label.replace(' Up or Down ', ' ')}</button>`)}</div></div>
           <div class="prow"><span class="pl" id="range-l">Time range</span><div class="seg" id="range" role="radiogroup" aria-labelledby="range-l">${ranges.map(([x, label]) => html`<button type="button" role="radio" aria-checked=${x === h ? 'true' : 'false'} class=${x === h ? 'on' : ''} data-v=${String(x)} onClick=${() => setHours(x)}>${label}</button>`)}</div>
             <span class=${'info' + (tip ? ' open' : '')}><button type="button" class="ibtn" aria-label="What this covers" aria-describedby="range-tip" aria-expanded=${tip ? 'true' : 'false'} onClick=${() => setTip(!tip)} onBlur=${() => setTip(false)}>${INFO}</button><span class="tip" id="range-tip" role="tooltip">${hint}</span></span></div></div>`}
         <textarea id="q" rows="3" aria-label="Your question" placeholder=${type.unit === 'window' ? 'How does this wallet trade BTC 15-minute markets?' : `How does this wallet trade ${type.label} markets?`} value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
-        <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
+        <div class="foot"><span class="muted small">${chosen && chosen.pick ? `The top ${shortLabel(type)} wallet is picked and named on the plan. Nothing runs until you press Start.` : "You'll see the plan and what it costs before it runs."}</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
         <p class="muted small">Try asking</p>
-        <div class="ex-grid">${EXAMPLES.map(([, label, question], i) => html`<button type="button" class=${'ex' + (q === question(whoOf(wallet, i)) ? ' on' : '')} onClick=${() => pick(i)}>${label(whoOf(wallet, i))}</button>`)}</div></div>`}
+        <div class="ex-grid">${EXAMPLES.map(([, label, question], i) => html`<button type="button" class=${'ex' + (q === question(whoOf(typed, i)) ? ' on' : '')} onClick=${() => pick(i)}><span>${label()}</span><span class="who">uses ${whoOf(typed, i)}</span></button>`)}
+          <button type="button" class=${'ex' + (chosen && chosen.pick ? ' on' : '')} onClick=${pickForMe}><span>No wallet? Let us pick one</span><span class="who">the top ${shortLabel(type)} trader</span></button></div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
@@ -285,6 +414,13 @@ function Investigation({ api, id }) {
       // (owner, 11 Nov: "There are no more recorded windows" was a dead end), nothing is played
       if (SAMPLE && pid !== inv.planOrder[0] && inv.plans[pid]) { inv.plans[pid].status = 'signin'; toPlan(); redraw(); return; }
       sending(null); toPlan(); redraw(); runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])); },
+    // "Pick one for me" chose a wallet: study another instead, as a change to the plan (nothing runs until Start)
+    swapWallet: (pid, o) => {
+      const p = pickOf(id);
+      if (p) savePick(id, { ...o, others: [{ ...p, others: undefined }, ...(p.others || []).filter(x => x.wallet !== o.wallet)] });
+      sending(null); redraw();
+      runCall(api.plan(id, pid, 'edit', `Study ${traderName(o)} (wallet ${o.wallet}) instead, picked for the person asking as ${o.why}. Same question, same market and time range.`));
+    },
     editPlan: pid => { ui.composeFocus = true; ui.composeText = 'Change the plan: '; ui.editing = pid; redraw(); },
     composed: () => { ui.composeFocus = false; ui.composeText = null; },
     proposal: (it, yes) => {
@@ -384,6 +520,7 @@ function Investigation({ api, id }) {
       ${FIXTURES && !SAMPLE && html`<div class="banner sample"><span>Fixtures mode: real windows recorded from the service, with a sample of the agent's events around them. Findings marked as samples show what's still to come.</span></div>`}
       ${inv.loadError && html`<div class="banner err">${inv.loadError}</div>`}
       <div class="stabs" role="tablist">${tabs.map(([k, l]) => html`<button role="tab" class=${ui.stage === k ? 'on' : ''} onClick=${() => act.stage(k)}>${l}</button>`)}</div>
+      ${ui.stage === 'plan' && !past && html`<${PickedCard} pick=${pickOf(id)} plan=${vplan} act=${act} />`}
       ${ui.stage === 'plan' && html`<${PlanStage} inv=${vinv} act=${act} plan=${vplan} past=${past} />`}
       ${ui.stage === 'windows' && (byMarket ? html`<${MarketsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} borrowed=${borrowed} />`
         : html`<${WindowsStage} inv=${vinv} ui=${ui} act=${act} plan=${vplan} live=${!past && inv.running} borrowed=${borrowed} />`)}

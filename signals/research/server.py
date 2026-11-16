@@ -151,6 +151,21 @@ def config() -> dict[str, Any]:
     return {"clerk_key": auth.CLERK_KEY or None, "event_version": EVENT_VERSION, "market_types": markets.described()}
 
 
+@app.get("/api/research/suggestions")
+def suggestions(_user: str = Depends(auth.user_of)) -> JSONResponse:
+    """Wallets to study per market type, for the ask box's wallet list and "Pick one for me" (``suggest.py``): what
+    was built last, while a rebuild may run in the background (``ready`` false until the first one finishes)."""
+    from signals.research import suggest
+
+    def make() -> tuple[Any, Any, str]:
+        from signals.research.data import reads
+
+        r = _reads or (_agent.reads if _agent is not None else reads())
+        return r.whales, r.web, r.engine
+
+    return _private(suggest.suggestions(make))
+
+
 @app.post("/api/research/sessions")
 def new_session(body: NewSession, user: str = Depends(auth.user_of)) -> JSONResponse:
     return _private({"id": store.new_session(user, body.title)}, 201)

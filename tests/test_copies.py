@@ -154,7 +154,24 @@ def test_a_one_tap_copy_keeps_its_names_and_an_old_table_gets_the_columns() -> N
     ("fak_not_filled", "No one was selling at 45¢ or less."),
     ("not_enough_balance", "Your balance was under $25.00."),
     ("market_not_ready", "The market wasn't taking orders."),
-    ("Something odd", "The exchange didn't take the order. Nothing was spent."),
+    ("Trading is restricted for this account in this market", "Kalshi said: Trading is restricted for this account in this market"),
+    ("odd_code", "Kalshi didn't take the order (odd_code). Nothing was spent."),
+    (None, "The exchange didn't take the order. Nothing was spent."),
 ])  # fmt: skip
-def test_why_a_copy_missed_is_one_plain_sentence(error: str, said: str) -> None:
-    assert copies.reason(error, 0.45, 25.0) == said
+def test_why_a_copy_missed_is_one_plain_sentence_or_the_exchanges_own_words(error: str | None, said: str) -> None:
+    assert copies.reason(error, 0.45, 25.0, "Kalshi") == said
+
+
+def test_a_tap_from_before_offers_kept_names_takes_them_from_the_alert(
+    ex: Exchange, api: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aid = new_alert()
+    tap(f"cv:{aid}")
+    monkeypatch.setattr(own_trading, "marks", marks())
+    before = mine(api)["rows"][0]
+    with engine._db() as con:
+        con.execute("UPDATE own_offers SET title = NULL, label = NULL, trader = NULL WHERE alert_id = ?", (aid,))
+    engine._cache.clear()
+    after = mine(api)["rows"][0]
+    assert (after["title"], after["label"], after["trader_name"]) == (before["title"], before["label"], before["trader_name"])
+    assert after["title"] and after["title"] != "A market"

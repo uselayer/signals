@@ -104,11 +104,13 @@ behind Vercel (see README, "Hosting").
   `SIGNALS_COPY_USD` (default $25) at most `COLLAR` (3¢) above the price the alert showed, kept as "placing" first
   so a second tap never buys twice; the reply says what was bought or plainly why nothing was. Never a sell, never
   without a tap, never a size the follower didn't choose.
-- Your copies (`signals/copies.py`, `#/copies`, owner 15 Nov 2026: "can I see like a list of all my copy trades"):
-  a Copies tab, shown only when `/api/me/copies/on` says the account can copy either way (one-tap copy or the owner's
-  own account); `/api/me/copies` is 404 for everyone else and only ever lists the asker's own taps. Every tap in
-  `copy_orders`, whichever way it went: what it bought (price, dollars, contracts) or why it didn't, in one plain
-  sentence (`copies.reason`); a limit order waiting; the trader's own buy beside it (`buys`: their price and dollars,
+- Copy trading (`signals/copies.py`, `#/copies`, owner 15 Nov 2026: "can I see like a list of all my copy trades";
+  named "Copy trading", owner, 15 Nov): a tab shown only when `/api/me/copies/on` says the account can copy either way
+  (one-tap copy or the owner's own account), on the main site and in Breakdowns' header alike (`copyTradingOn`);
+  `/api/me/copies` is 404 for everyone else and only ever lists the asker's own taps. Every tap in
+  `copy_orders`, whichever way it went: what it bought (price, dollars, contracts) or why it didn't (`copies.reason`:
+  a code we know in one plain sentence, else the exchange's own words, "Kalshi said: …"); a limit order waiting;
+  a tap from before its offer kept names takes the market, outcome and trader from the alert's own message; the trader's own buy beside it (`buys`: their price and dollars,
   "They paid": context, never a target); the price now (the best bid: what it sells for) or how it ended (won, lost,
   voided). Prices come from one `client.pnl` read per exchange for the owner's own account (`own_trading.marks`) and
   the one-tap wallet's Polymarket positions, with the cash on each exchange, at most once a minute
@@ -117,7 +119,9 @@ behind Vercel (see README, "Hosting").
   picker; a row opens its story in the sheet: their buy, the alert, the tap, the fill, how it ended) or By trader
   (your profit beside the same dollars at the trader's own price: what being second cost). Deposits happen on each
   exchange ("Deposit on Kalshi ↗"); the one-tap wallet's "Add funds" is /copy. Nothing on it buys or sells. On a
-  phone a trade row is the market, profit and status; the rest is in its sheet.
+  phone a trade row is the market, profit and status; the rest is in its sheet. Nothing bought yet (owner, 15 Nov:
+  "if i have no copied trades, why are we showing all these?"): no tiles, filters or By trader, only "Nothing bought
+  yet" and each tap with why it didn't buy.
 - The owner's own copy on Kalshi and Polymarket US (`signals/own_trading.py`, owner 11 Nov 2026): only the account in
   `SIGNALS_OWN_UID`, with the owner's own exchange keys, so Signals' software trades its owner's own account (Kalshi's
   Developer Agreement allows "a member's own trading"). Never anyone else's exchange keys: Kalshi (Developer Agreement
@@ -280,7 +284,7 @@ behind Vercel (see README, "Hosting").
   understand why: who they are, how they trade, and what the evidence does and doesn't show. Before anyone buys,
   show what it would really cost them now (above): what their amount fills at, the fee, the slippage, what's for
   sale. Nothing on the page may imply that copying makes money. Three tabs (Feed, Watchlist, Traders), and a
-  fourth, Copies, only for an account with copying on (below).
+  fourth, Copy trading, only for an account with copying on (below).
   - The Watchlist (`#/watchlist`, signed in) is the follow list (one list: Follow on a trader's page, "+ Follow a
     trader" there, alerts and the Feed's Following all use follows.json), a card per trader, read from what's kept
     (`/api/me/watchlist` reads nothing). A trader's watch page (`#/watch/<wallet>`, no account) is `/api/watch`: their
@@ -332,7 +336,7 @@ behind Vercel (see README, "Hosting").
     column, sort, filter, "Copying is paused" callout, How-we-pick tab, copy line in an alert, the SDK's
     "Copyable" check on a trader page, or colour (an open trade reads the same for every trader). A guard test
     keeps the page's words free of "Copy", "Copyable" and "Copying". Bringing it back is the owner's call. One
-    exception (owner, 15 Nov 2026): the Copies view ("Your copies" below), the copies a person made, never an
+    exception (owner, 15 Nov 2026): the Copy trading view (below), the copies a person made, never an
     estimate; the guard skips its block in the page and its header links (`data-copies`) and holds everything else.
   - Traders is the Leaderboard (above): facts only, no tier, chip, "Sharp", "Recommended" or "Why they're here".
     Only with the skill test on (`SIGNALS_SKILL_TEST=1`), the old way back: Traders lists the traders we recommend
@@ -447,8 +451,10 @@ behind Vercel (see README, "Hosting").
 - Wording: "Research wording" below (confirmed by the owner, 10 Nov).
 - Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
   Layer's recordings.
-- Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC and politics (one tile per market;
-  politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it, with no outside line).
+- Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC, politics and the Premier League (one
+  tile per market; politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it; the
+  Premier League = Gamma's EPL tag AND the market's own text naming the league, or a club's manager market, since
+  the tag is also on the Ballon d'Or, Euro 2024 and the FA Cup; neither has an outside line).
   A market replay counts the wallet's merges and splits too (`Reads.market_moves`): a tile never says it held to
   the result when it merged out, and when they can't be read it says so. A new kind (a sports league) is one entry
   there: what matches, what resolves one market (read from its own rules,
@@ -458,6 +464,14 @@ behind Vercel (see README, "Hosting").
   and called open.
 - The wording check sends back a finding, step or answer that says "bet", "edge", "ROI", "it's a bot"… once to
   reword it (`trace.banned_words`), as the number check does.
+- Choosing a wallet (owner, 16 Nov: someone with no wallet to reverse-engineer needs one to start from): the ask
+  box's wallet field opens a list, "Pick one for me" first, then each market type's top 3 by trading profit over 30
+  days on Signals' own Leaderboard (`suggest.py`, from the engine's `/api/leaderboard`, never Polymarket's board;
+  Crypto wallets sorted into BTC 15-minute and long-dated BTC by one read of their latest 500 trades), kept 6 hours.
+  Facts only: rank, profit, money traded, Bot or Human; never "recommended". Picking one sets Market. "Pick one for
+  me" sends the top wallet for the Market chosen, and the plan's page says which one and why, with the others to
+  study instead (a "Change the plan"), before Start. Traders' rows (on hover) and a trader's page carry "Break it
+  down" for Politics and Crypto traders: `/breakdowns/?wallet=&name=&market=&q=`, nothing runs until Start.
 - Signed in only, and an investigation, its events and charts are only ever its owner's. Costs are capped per
   question, per person and per day (`RESEARCH_*_USD`); raising them is the owner's call.
 - Signed out, `/research` is a teaser (owner, 10 Nov: tease visitors into signing up): what a breakdown is, "Sign in

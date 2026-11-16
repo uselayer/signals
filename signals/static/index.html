@@ -401,6 +401,10 @@
   .lb-head small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
   .lb-row { border-top: 1px solid var(--line); color: inherit; }
   .lb-row:hover { background: var(--soft); }
+  .lb-rw { position: relative; }
+  .lb-rw .lb-bd { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); z-index: 1; opacity: 0; pointer-events: none; box-shadow: 0 0 0 6px var(--soft); }
+  .lb-rw:hover .lb-bd, .lb-rw:focus-within .lb-bd { opacity: 1; pointer-events: auto; }
+  @media (hover: none), (max-width: 700px) { .lb-rw .lb-bd { display: none; } } /* phones: on the trader's page */
   .lb-rank { color: var(--faint); font-size: 14px; }
   .lb-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .lb-who .nm { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -790,7 +794,7 @@
   .cp-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .cp-filters select { font: inherit; font-size: 14px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; }
   .cp-scroll { overflow-x: auto; }
-  .cp-tbl { min-width: 1000px; }
+  .cp-tbl { min-width: 1000px; } .cp-tbl.cp-tries { min-width: 760px; } .cp-whycell { min-width: 220px; }
   .cp-tbl th, .cp-tbl td { padding-left: 12px; }
   .cp-tbl td { padding-top: 12px; padding-bottom: 12px; }
   .cp-tbl tr:last-child td { border-bottom: 0; }
@@ -815,7 +819,8 @@
   .cp-step b { font-weight: 500; display: block; } .cp-step small { color: var(--muted); font-size: 12.5px; }
   /* a phone: the market, the profit and the status (a tap opens the rest); By trader keeps the comparison */
   @media (max-width: 700px) {
-    .cp-tbl { min-width: 0; }
+    .cp-tbl, .cp-tbl.cp-tries { min-width: 0; }
+    .cp-whycell { min-width: 0; } .cp-tries td.mkt { width: 50%; }
     .cp-tbl .w { display: none; }
     .cp-tbl td.mkt { min-width: 0; width: auto; }
     .cp-tbl th, .cp-tbl th.n { white-space: normal; }
@@ -844,7 +849,7 @@
   <div class="wrap">
     <a class="brand" href="#/traders"><span class="logo"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1"/><rect x="8.5" y="7" width="3" height="10" rx="1"/><rect x="14" y="3" width="3" height="14" rx="1"/></svg></span>Signals</a>
     <nav class="tabs" aria-label="Main">
-      <a href="/breakdowns/" class="new" data-research hidden>Breakdowns</a><a href="#/" data-tab="feed">Feed</a><a href="#/watchlist" data-tab="watch">Watchlist</a><a href="#/traders" data-tab="traders">Traders</a><a href="#/copies" data-tab="copies" data-copies hidden>Copies</a>
+      <a href="/breakdowns/" class="new" data-research hidden>Breakdowns</a><a href="#/" data-tab="feed">Feed</a><a href="#/watchlist" data-tab="watch">Watchlist</a><a href="#/traders" data-tab="traders">Traders</a><a href="#/copies" data-tab="copies" data-copies hidden>Copy trading</a>
     </nav>
     <a class="bdpill" id="bdpill" hidden></a>
     <form class="askbar" data-research hidden action="/breakdowns/" method="get" role="search"><input type="search" name="q" placeholder="Ask about a trader or wallet" aria-label="Ask in Breakdowns"></form>
@@ -859,7 +864,7 @@
   <a href="#/" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13h3l2.5-6 4 11 2.5-5H20"/></svg>Feed</a>
   <a href="#/watchlist" data-tab="watch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>Watchlist</a>
   <a href="#/traders" data-tab="traders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.7-3.2 2.9-5 5.5-5s4.8 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.4c1.6.7 2.6 2.3 3 4.6"/></svg>Traders</a>
-  <a href="#/copies" data-tab="copies" data-copies hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>Copies</a>
+  <a href="#/copies" data-tab="copies" data-copies hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>Copy trading</a>
 </nav>
 <div id="sheet"></div>
 <div id="toast" role="status"></div>
@@ -876,6 +881,20 @@ const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket International", polyma
 // views (Top profit's venue choice, Kalshi trader pages, "Same person on Kalshi?") show only when it's on.
 let venuesOn = ["polymarket"];
 let exploreOn = false; // SIGNALS_EXPLORE: Traders' Explore tab (the directory)
+let researchOn = false; // SIGNALS_RESEARCH: Breakdowns is hosted, so a trader can be broken down from here
+// "Break it down" (owner, 16 Nov): Breakdowns opens with this wallet in its wallet field, by name, and for a
+// Politics or Crypto trader a market type and a starter question. Nothing runs there until its plan's Start.
+const BD_MARKET = { Politics: ["politics", "politics"], Crypto: ["", "BTC"] };
+function breakdownHref(wallet, name, category) {
+  const [market, words] = BD_MARKET[category] || ["", ""];
+  const q = new URLSearchParams({ wallet });
+  if (name) q.set("name", name);
+  if (market) q.set("market", market);
+  if (words) q.set("q", `How does ${name || "this wallet"} make money on ${words} markets?`);
+  return `/breakdowns/?${q}`;
+}
+const breakdownLink = (wallet, name, category, cls = "btn") =>
+  `<a class="${cls}" href="${esc(breakdownHref(wallet, name, category))}" data-research ${researchOn ? "" : "hidden"} aria-label="Break down ${esc(name || "this trader")}'s trades in Breakdowns">Break it down</a>`;
 const kalshiOn = () => venuesOn.includes("kalshi");
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
 
@@ -2376,7 +2395,8 @@ function renderBoard() {
   const row = (s, i) => {
     const p = s.periods?.[n] || {}, profit = p.trading_pnl ?? null, win = boardWin(s);
     const up = s.weeks_up, known = s.weeks_known;
-    return `<a class="lb-cols lb-hb lb-row" href="#/worth/${esc(s.wallet)}">
+    const bdl = BD_MARKET[s.category] ? breakdownLink(s.wallet, s.name, s.category, "btn small lb-bd") : "";
+    return `<div class="lb-rw"><a class="lb-cols lb-hb lb-row" href="#/worth/${esc(s.wallet)}">
       <span class="lb-rank">${offset + i + 1}</span>
       <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="lb-nmrow"><span class="nm">${esc(displayName(s.name, s.wallet))}</span>${whoBadge(s)}</span><span class="lb-sub">${[s.category, s.last_buy ? `active ${ago(s.last_buy * 1000)}` : "", s.new_account ? "new account" : ""].filter(Boolean).map(esc).join(" · ")}</span></span></span>
       <span class="lb-hbcell">${whoBadge(s) || `<span class="lb-none">—</span>`}</span>
@@ -2386,7 +2406,7 @@ function renderBoard() {
       <span class="lb-won">${win.cell}</span>
       <span class="lb-usual">${s.typical_usd != null ? `<span class="lb-main">${usd(s.typical_usd)}</span><span class="lb-sub">${perDayText(s.markets_per_day)}</span>` : `<span class="lb-none">—</span>`}</span>
       <span class="lb-meta">${[win.meta, s.typical_usd != null ? `usually ${usd(s.typical_usd)}` : "", perDayText(s.markets_per_day)].filter(Boolean).join(" · ")}</span>
-    </a>`;
+    </a>${bdl}</div>`;
   };
   const head = (key, label) => `<button type="button" data-bdsort="${key}" aria-pressed="${bd.sort === key}">${label}</button>`;
   const q = bd.q.trim();
@@ -3275,6 +3295,7 @@ function renderProfile() {
     <div class="pf-head">${avatar(s.wallet, 64)}
       <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}${whoBadge(s)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "updated" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}<span id="pfrefresh" class="pf-refresh">${refreshNote() ? ` · ${refreshNote()}` : ""}</span>${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div>
+        ${BD_MARKET[cats[0]?.category || s.category] ? breakdownLink(s.wallet, s.name, cats[0]?.category || s.category) : ""}
         <a class="link" href="#/watch/${esc(s.wallet)}" style="font-size:14px">What they hold and every change they make →</a></div></div>
     <div class="pf-grid">
       <section class="pf-card pf-sum" aria-label="Their numbers">
@@ -4052,7 +4073,7 @@ function showCopies(on) {
   $$("[data-copies]").forEach((el) => { el.hidden = !on; });
 }
 async function copiesPage() {
-  $("#app").innerHTML = `<div class="cp-top"><div><h1>Your copies</h1><p class="lede">Every trade you copied from Telegram. Prices update every minute.</p></div>
+  $("#app").innerHTML = `<div class="cp-top"><div><h1>Copy trading</h1><p class="lede">Every trade you copied from Telegram. Prices update every minute.</p></div>
     <div class="cp-cash" id="cpcash"></div></div><div id="cpbody">${skelRows(5)}</div>`;
   await loadCopies();
 }
@@ -4091,7 +4112,8 @@ function renderCopies() {
       `<button type="button" role="tab" aria-selected="${cp.filter === k}" class="${cp.filter === k ? "on" : ""}" data-cpfilter="${k}">${l}<span class="n">${inTrader.filter((r) => cpIn(r, k)).length}</span></button>`).join("")}</div>
     <label class="muted" style="font-size:13px;display:flex;gap:8px;align-items:center">Trader <select id="cptrader"><option value="all">All traders</option>${names.map(([k, n]) =>
       `<option value="${esc(k)}"${cp.trader === k ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label></div>`;
-  box.innerHTML = `${failed}${tiles}<div class="cp-bar">${views}${filters}</div>${cp.view === "trades" ? cpTrades(inTrader.filter((r) => cpIn(r, cp.filter))) : cpTraders(d.traders)}
+  box.innerHTML = !t.bought ? cpTriesOnly(d)
+    : `${failed}${tiles}<div class="cp-bar">${views}${filters}</div>${cp.view === "trades" ? cpTrades(inTrader.filter((r) => cpIn(r, cp.filter))) : cpTraders(d.traders)}
     <p class="foot-note">Prices read ${ago(d.read_at * 1000)}. "Now" is what a contract sells for right now (the best bid). Signals never sells for you.</p>`;
   $$("[data-cpview]", box).forEach((b) => (b.onclick = () => { cp.view = b.dataset.cpview; renderCopies(); }));
   $$("[data-cpfilter]", box).forEach((b) => (b.onclick = () => { cp.filter = b.dataset.cpfilter; renderCopies(); }));
@@ -4102,6 +4124,20 @@ function renderCopies() {
     if (r) sheet(cpSide(r));
   }));
   bindActions(box);
+}
+// Nothing bought yet (owner, 15 Nov: "if i have no copied trades, why are we showing all these?"): no tiles, filters
+// or By trader, only the taps and why each didn't buy, in a table without the columns a buy fills in.
+function cpTriesOnly(d) {
+  const line = (r) => `<tr class="pick" data-cprow="${esc(r.id)}">
+    <td class="mkt"><button type="button" class="rowbtn" data-cprow="${esc(r.id)}">${esc(r.title || "A market")}</button><div class="s">${esc(r.label || r.side || "")} · ${ago(r.tapped_at * 1000)}</div></td>
+    <td class="w"><div class="cp-who">${avatar(r.trader || r.trader_name, 26)}<span>${esc(cpName(r))}</span></div></td>
+    <td class="w" style="white-space:nowrap">${esc(r.exchange)}</td>
+    <td class="n w">${cents(r.their_price)}<div class="s">${r.their_usd != null ? usd(r.their_usd) : ""}</div></td>
+    <td class="cp-whycell"><span class="cp-pill ${r.status}">${CP_STATUS[r.status] || esc(r.status)}</span>${r.why ? `<div class="cp-why" style="max-width:none">${esc(r.why)}</div>` : ""}</td></tr>`;
+  return `<h2 class="h2" style="margin-top:0">Nothing bought yet <small>${plural(d.rows.length, "tap")} on Copy, none filled</small></h2>
+    <div class="list"><div class="cp-scroll"><table class="tbl cp-tbl cp-tries">
+    <thead><tr><th>Market</th><th class="w">Copied from</th><th class="w">Exchange</th><th class="n w">They paid</th><th>Why it didn't buy</th></tr></thead>
+    <tbody>${d.rows.map(line).join("")}</tbody></table></div></div>`;
 }
 function cpTrades(rows) {
   if (!rows.length) return `<div class="list">${emptyState("Nothing here", "Pick another of Open, Settled, Missed or All.")}</div>`;
@@ -4218,6 +4254,7 @@ window.addEventListener("hashchange", route);
 api("/api/config").then((c) => {
   venuesOn = c.venues; exploreOn = !!c.explore; boardOn = !!c.leaderboard; whyOn = !!c.why;
   // Breakdowns (the research service at /research) only once it's hosted: SIGNALS_RESEARCH on the engine
+  researchOn = !!c.research;
   if (c.research) document.querySelectorAll("[data-research]").forEach((el) => { el.hidden = false; });
   if (c.research) bdStart();
   if (c.clerk_key) startAuth(c.clerk_key, c.alerts);
