@@ -110,7 +110,18 @@ p { margin: 0; }
 .seg button:hover { color: var(--fg); }
 .seg button.on { background: var(--raised); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
 .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* the (i) beside Time range: its note shows on hover, focus or a tap (.open), in a card like the page's other pops */
+.pickers .info { position: relative; display: inline-flex; flex: none; margin-left: 2px; }
+.pickers .ibtn { border: 0; background: none; padding: 4px; border-radius: 999px; color: var(--muted); display: inline-flex; cursor: pointer; }
+.pickers .ibtn:hover, .pickers .info.open .ibtn { color: var(--fg); background: var(--soft); }
+.pickers .ibtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pickers .tip { display: none; position: absolute; z-index: 30; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); width: 250px;
+  background: var(--card); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.18);
+  padding: 9px 11px; font-size: 13px; line-height: 1.4; }
+.pickers .info:hover .tip, .pickers .info.open .tip, .pickers .ibtn:focus-visible + .tip { display: block; }
 @media (max-width: 600px) { .pickers .prow { flex-direction: column; align-items: flex-start; gap: 4px; } .pickers .pl { width: auto; }
+  .pickers .prow:has(.info) { flex-direction: row; flex-wrap: wrap; align-items: center; } .pickers .prow:has(.info) .pl { flex-basis: 100%; }
+  .pickers .tip { left: auto; right: -6px; transform: none; }
   .pickers .seg { flex-wrap: wrap; border-radius: 18px; overflow: visible; } }
 .compose-big .foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .compose-big .foot .btn { flex: none; white-space: nowrap; }
