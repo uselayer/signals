@@ -55,6 +55,7 @@ MARKETS_LOOKED_AT = 60  # markets whose facts are read to find them (the most mo
 MARKET_MOVES = 500  # a wallet's merges, splits and conversions in one market read at most (more: coverage says so)
 MOVE_TYPES = "MERGE,SPLIT,CONVERSION"  # what changes a position without a fill (a redemption is the payout, counted)
 NEWEST_CHUNK_S = 7 * 86_400  # a market-type scope reads the wallet's trades a week at a time, newest first
+NEWEST_STEPS_S = (NEWEST_CHUNK_S, 86_400, 6 * 3_600)  # and a day, then six hours, when a week holds too many to read
 ENGINE = os.environ.get("SIGNALS_ENGINE_URL", "https://usesignals.app").rstrip("/")
 # Layer's recordings, for the notes a recorded window carries (supervisor brief, 10 Nov; docs/tick-recorder.md in Layer).
 BOOKS_FROM = 1_793_638_800  # 2026-11-02 17:00 UTC: up/down windows recorded by default from here
@@ -620,9 +621,15 @@ class Reads:
         when that's later than ``a``."""
         rows: list[dict[str, Any]] = []
         hi, start, complete, note = b, b, True, ""
+        steps = list(NEWEST_STEPS_S)
         while hi > a:
-            lo = max(a, hi - NEWEST_CHUNK_S)
+            lo = max(a, hi - steps[0])
             got = self.wallet_trades(w, lo, hi, None)
+            if not got["complete"] and len(steps) > 1 and hi - lo > steps[1]:
+                # more trades in the step than one read holds (an in-play sports wallet: over 30,000 fills a week,
+                # 16 Nov): a smaller step from the same newest end, kept for the rest of the read
+                steps.pop(0)
+                continue
             if not got["complete"]:
                 complete = False
                 break

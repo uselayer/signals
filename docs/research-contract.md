@@ -159,6 +159,30 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     candles with each one's high and low, which hold every minute's, so "did it touch the strike" is exact.
     Politics and the Premier League have none (`outside` null, `coverage.outside_none` says why: no news or polls
     feed; no league table, results or news feed).
+  - **A match market** (the Premier League's `rule.kind` match: one match's result, the draw, totals, exact score…;
+    `MarketType.score_line`) is let in whatever `min_days` says (`MarketType.short_ok`; `selection.also_short`
+    "match markets") and its replay adds `match` {game_id, league, home, away, side: home|away|draw|null (what this
+    market is about, from its slug `<league>-<home>-<away>-<date>-<code>`), kickoff (Gamma's gameStartTime),
+    first_live_update, goals: [{t, minute, period, score (home-away), home, away, by: home|away|null, kind:
+    goal|goals|correction, after_gap, since_previous_update_s, retracted, reinstated, first_said, undoes}], periods:
+    [{period: 1H|HT|2H|FT|VFT|ET1|…, word, from, to, minute}], clock: [{t, minute, period, score, status}], final:
+    {score, t}|null, axis: {from, to} (the match view: ten minutes either side of the match and of the wallet's fills
+    in it), counts, coverage: {source, recorded, why, recorded_from, updates, gaps: [{from, to, why}], gap_s,
+    first_update, last_update, goals, corrections}}. The score is Layer's recording of polymarket.com's live sports
+    feed (`scores.py`: `raw/ticks/sports/` in R2, from 2026-11-11 18:26 UTC; joined by the Gamma event's `gameId`;
+    about one update a minute plus each score change as its own update, stamped when Layer received it). A score
+    the feed takes back is a `correction`: the goal it undid is `retracted`, the same score said again `reinstated`.
+    Each fill gets `match` {phase: pre_kickoff|in_play|half_time|after_full_time|unknown, minute, period, score,
+    since_goal_s (null before a goal or while the feed had just taken one back), last_goal_by, in_gap, backs:
+    home|away|draw|not_home|not_away|not_draw|null (buys only), margin (a club's Yes: its goals minus the other's)};
+    `counts` adds them up (buys by phase, within 60 s and 5 minutes after a goal, backing the side behind / level /
+    ahead, the draw from the 75th minute, sells before full time, fills within a minute of a goal, fills in a gap),
+    server-built, never by the model. The match itself is read at 1 minute (`coverage.match_price_step_s` 60)
+    whatever the span's step; `coverage.score` {recorded, why, updates, gaps, gap_s, goals, corrections} and
+    `coverage.notes` say what the score covers and when one-minute prices can't order a fill against a goal. The
+    tile adds `match` {home, away, side, kickoff, final, recorded, goals, counts} and each entry its `match`. The page
+    draws "The match" (default) or "Whole market", goal lines (a retracted one dashed), half-time bands, the
+    scheduled kick-off when it differs from the first live update, full time and hatched recording gaps.
   - Agent tools: `wallet_markets` (that list, same answer as Start's) and `market` (a market's `window.ready`).
 - `walkthrough.ready` `{window_id, steps: [{index, t, title, observed, inferred|null, trade_ids, annotations: [{kind:
   point|span|region, t0, t1, panel: btc|prices|position, label}], number_check}]}`

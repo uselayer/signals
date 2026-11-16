@@ -312,7 +312,9 @@ investigations are long and read a lot, and the engine keeps alerts first.
   whole life for the wallet, the market's price over weeks, Binance BTCUSDT with highs and lows, open positions
   valued at today's price), politics (Gamma's tags, as the Politics chip counts them) and the Premier League
   (Gamma's EPL tag and the market's own text naming the league: season futures, managers, punishments, and match
-  markets listed a week ahead), each one entry in `TYPES`, with no outside line.
+  markets), each one entry in `TYPES`, with no outside line. A Premier League match market's replay draws the
+  match's live score instead (`scores.py`: Layer's recording of polymarket.com's live sports feed in R2, from 11
+  Nov 2026 18:26 UTC), puts the minute and score on every fill, and reads the match itself at 1-minute prices.
 - **The loop** (`agent.py`): `claude-opus-5-5`, adaptive thinking, code execution. Its data tools are called from its
   code (programmatic tool calling), so a wallet's thousands of trades go to the code, never into the chat:
   `wallet_trades` (uselayer 0.19 `whales.trades_between`, filtered to `btc-updown-15m-` slugs, paged past full

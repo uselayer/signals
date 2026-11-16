@@ -232,3 +232,20 @@ def test_the_page_groups_fills_in_a_match_by_the_minute_and_words_the_score() ->
     assert out["at"] == {"minute": 10, "period": "1H", "score": "0-1"} and out["before"] is None
     assert out["text"] == ["Before kick-off", "Before kick-off", "10' · 0–1 · 25 s after a goal", "12' · 0–1 · 2 min after a goal"]
     assert out["goal"] == "1–2 60', taken back"
+
+
+def test_a_wallet_too_busy_for_a_weeks_read_is_read_a_day_at_a_time_newest_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """16 Nov: an in-play sports wallet made over 30,000 fills a week, so its newest week was never whole and a
+    Premier League scope read nothing at all; a smaller step from the same newest end reads its latest days."""
+    reads = D.Reads(Whales(), Binance())  # type: ignore[arg-type]
+    asked: list[tuple[int, int]] = []
+
+    def wallet_trades(w: str, lo: int, hi: int, prefix: Any) -> dict[str, Any]:
+        asked.append((lo, hi))
+        whole = hi - lo <= 86_400
+        return {"trades": [{"ts": hi - 10, "slug": SLUG}] if whole else [], "complete": whole}
+
+    monkeypatch.setattr(reads, "wallet_trades", wallet_trades)
+    got = reads._newest_trades(W, KO - 3 * 86_400, KO)
+    assert asked[0] == (KO - 3 * 86_400, KO) and asked[1] == (KO - 86_400, KO)  # the week, then a day from the end
+    assert got["complete"] and got["count"] == 3 and got["start"] == KO - 3 * 86_400
