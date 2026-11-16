@@ -343,7 +343,7 @@ first used to the end of the question.
 Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (required with `RESEARCH_HOSTED=1`),
 `RESEARCH_MAX_USD` per question (3), `RESEARCH_USER_DAILY_USD` (10), `RESEARCH_DAILY_USD` for everyone (30),
 `RESEARCH_AT_ONCE` (2), `RESEARCH_MAX_ROUNDS` (40), `RESEARCH_MAX_SECONDS` per question (600, a wall clock: a
-watchdog ends the run at the limit even while a request is blocked; at 80% the agent is told to answer), `RESEARCH_EFFORT` (high), `SIGNALS_ENGINE_URL`,
+watchdog ends the run at the limit even while a request is blocked, and frees its slot by the limit plus 30 s whatever it's blocked on; at 80% the agent is told to answer), `RESEARCH_EFFORT` (high), `SIGNALS_ENGINE_URL`,
 `RESEARCH_METRICS_KEY`, `RESEARCH_NOTIFY_KEY` (the same value on the engine: a Started plan that runs to its end
 asks the engine, `POST /api/research-ready`, to send "Your breakdown is ready" to the account's Telegram chat, if
 connected; off without it), and for Layer's recorded windows a read-only R2 token on `layer-history`: `R2_ACCOUNT_ID`,

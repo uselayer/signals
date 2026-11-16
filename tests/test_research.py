@@ -1470,6 +1470,196 @@ def test_the_watchdog_ends_a_run_blocked_on_a_read_and_the_read_returning_later_
     assert last["content"][0]["content"] == A.NOT_RUN and last["content"][1]["text"] == "Ask again"
 
 
+# ---- the limit is final (15 Nov): whatever a run's threads are blocked on, it ends and its slot frees ----
+
+
+def _wall(agent: A.Agent) -> list[float]:
+    """A faked wall clock for the agent: the test moves it by setting the returned list's one value (seconds ahead
+    of now). The agent then looks at it every 10 ms instead of every 5 s."""
+    skew = [0.0]
+    agent.clock = lambda: time.time() + skew[0]
+    agent.tick_s = 0.01
+    return skew
+
+
+def _wait_for(cond: Any) -> None:
+    for _ in range(500):
+        if cond():
+            return
+        time.sleep(0.01)
+    raise AssertionError("timed out")
+
+
+def test_a_tile_sweep_that_hangs_after_the_claim_still_ends_the_run_and_frees_its_slot(
+        monkeypatch: pytest.MonkeyPatch) -> None:  # fmt: skip
+    """The worker claims the end when the agent answers, then sweeps for missing tiles: out of the watchdog's reach
+    (its stop sees "already ending"), so a read that hangs there used to hold the run and its slot for good. Now the
+    sweep has its own limit: the run ends at the limit plus FINAL_GRACE_S at the latest, without the sweep's tiles,
+    and the service's slot frees."""
+    from signals.research import server
+
+    FakeTimer.made.clear()
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    sweeping, release = threading.Event(), threading.Event()
+
+    def hanging_fill(store: Any, reads: Any, sid: str, emit: Any) -> int:
+        sweeping.set()
+        release.wait(30)
+        emit({"type": "window.summary", "window_id": "late"})  # comes back after the run ended: dropped
+        return 1
+
+    monkeypatch.setattr(A, "fill_tiles", hanging_fill)
+    agent = A.Agent(FakeReads(), store, _model(_answers("Observed: 3 trades.")))  # type: ignore[arg-type]
+    agent.timer = FakeTimer
+    skew = _wall(agent)
+    monkeypatch.setattr(server, "store", store)
+    monkeypatch.setattr(server, "_agent", agent)
+    monkeypatch.setattr(server, "_running", {})
+    monkeypatch.setattr(server, "_planning", set())
+    monkeypatch.setattr(server, "_queue", [])
+    server.start_run(sid, "u1", "Go")
+    assert sweeping.wait(5)
+    time.sleep(0.05)
+    assert sid in server._running and agent.live  # the sweep holds it while it has time
+    FakeTimer.made[-1].fire()  # the watchdog at the limit: the run's end is already claimed, so it can't help
+    assert sid in server._running
+    skew[0] = A.MAX_SECONDS + A.FINAL_GRACE_S  # the sweep's time is up
+    _wait_for(lambda: sid not in server._running)
+    assert not agent.live
+    kinds = [e["type"] for e in store.events(sid)]
+    assert kinds[-3:] == ["answer.card", "usage", "done"]
+    assert store.runs()[0]["ended"]
+    release.set()  # the hung read comes back: nothing more is written
+    t = next((t for t in threading.enumerate() if t.name.startswith("research-tiles-")), None)
+    if t:
+        t.join(5)
+    assert [e["type"] for e in store.events(sid)] == kinds
+
+
+def test_a_request_that_never_hands_over_its_stream_still_ends_at_the_limit() -> None:
+    """A model request blocked before its first bytes (connecting, or waiting on the response): the run has no stream
+    to close yet. The watchdog ends the run anyway, the slot frees, and the worker is left behind, writing nothing."""
+    FakeTimer.made.clear()
+    store, sid = _session_with_findings()
+    entered, release = threading.Event(), threading.Event()
+
+    class Stuck:
+        def __init__(self) -> None:
+            self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
+
+        def _stream(self, **kw: Any) -> Any:
+            entered.set()
+            release.wait(30)  # never returns until the test lets it
+            raise httpx.ReadTimeout("timed out")
+
+    agent = A.Agent(FakeReads(), store, Stuck())  # type: ignore[arg-type]
+    agent.timer = FakeTimer
+    events: list[dict[str, Any]] = []
+    asking = _asking(agent, sid, events)
+    assert entered.wait(5)
+    FakeTimer.made[-1].fire()
+    asking.join(5)
+    assert not asking.is_alive() and not agent.live
+    kinds = [e["type"] for e in events]
+    assert kinds[-4:] == ["answer.card", "notice", "usage", "done"]
+    assert "10-minute limit" in events[kinds.index("notice")]["text"]
+    release.set()
+    w = _worker(events[0]["run"])
+    if w:
+        w.join(5)
+    assert len(events) == len(kinds) and store.runs()[0]["error"] == "over_time"
+
+
+def test_a_request_gets_a_timeout_and_retries_that_fit_in_the_time_left() -> None:
+    """Every try of a request, together, ends by the limit plus END_GRACE_S, since it can't be closed before its
+    first bytes. The full timeout while there's time; fewer retries and a shorter timeout near the limit."""
+    assert A.request_limits(A.MAX_SECONDS) == (pytest.approx((A.MAX_SECONDS + A.END_GRACE_S) / 3), 2)
+    assert A.request_limits(10_000) == (A.REQUEST_TIMEOUT_S, 2)
+    assert A.request_limits(100) == (pytest.approx(65), 1)
+    assert A.request_limits(20) == (pytest.approx(50), 0)
+    assert A.request_limits(-40) == (A.END_GRACE_S, 0)
+    for left in (A.MAX_SECONDS, 300, 100, 20, 0):
+        timeout, retries = A.request_limits(left)
+        assert timeout * (retries + 1) <= left + A.END_GRACE_S + 1e-9
+
+    class Options(Model):
+        def __init__(self, *r: Any) -> None:
+            super().__init__(*r)
+            self.options: list[dict[str, Any]] = []
+
+        def with_options(self, **kw: Any) -> Any:
+            self.options.append(kw)
+            return self
+
+    model = Options(_calls_tool(), _answers("Observed: 3 trades."))
+    store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
+    agent = A.Agent(FakeReads(), store, model)  # type: ignore[arg-type]
+    skew = _wall(agent)
+    skew[0] = A.MAX_SECONDS - 20  # 20 s left: one try, and it can't run past the grace
+    agent.ask(store.new_session("u1"), "u1", "Go", lambda e: None)
+    assert model.options[0] == {"timeout": pytest.approx(50, abs=1), "max_retries": 0}
+
+
+def test_a_machine_that_slept_through_the_limit_ends_the_run_when_it_wakes() -> None:
+    """15 Nov: the Mac slept 25 of a run's 23 minutes; threading.Timer counts only time awake, so the watchdog never
+    fired. The wall clock is looked at too: the run ends on waking, its blocked request closed."""
+    FakeTimer.made.clear()
+    store, sid = _session_with_findings()
+    model = BlockedModel()
+    agent = A.Agent(FakeReads(), store, model)  # type: ignore[arg-type]
+    agent.timer = FakeTimer  # never fired: the sleep stopped its clock
+    skew = _wall(agent)
+    events: list[dict[str, Any]] = []
+    asking = _asking(agent, sid, events)
+    assert model.entered.wait(5)
+    asking.join(0.1)
+    assert asking.is_alive()
+    skew[0] = A.MAX_SECONDS + 1  # woke up past the limit
+    asking.join(5)
+    assert not asking.is_alive() and model.closed.is_set()
+    kinds = [e["type"] for e in events]
+    assert kinds[-4:] == ["answer.card", "notice", "usage", "done"]
+    assert store.runs()[0]["error"] == "over_time"
+
+
+def test_an_end_whose_owner_is_stuck_is_written_by_the_backstop_and_the_slot_frees() -> None:
+    """Whoever claimed the end blocks in its own writes (here the store, after usage): at the limit plus
+    END_GRACE_S, ``ask`` takes the end over, writes what's missing (done), and returns, leaving that thread behind."""
+    FakeTimer.made.clear()
+    stuck, release = threading.Event(), threading.Event()
+
+    class SlowStore(Store):
+        def update_run(self, run: int, **kw: Any) -> None:
+            if "ended" in kw and threading.current_thread().name.startswith("research-run-"):
+                stuck.set()
+                release.wait(30)
+            super().update_run(run, **kw)
+
+    store = SlowStore(os.path.join(tempfile.mkdtemp(), "r.db"))
+    sid = store.new_session("u1")
+    agent = A.Agent(FakeReads(), store, _model(_answers("Observed: 3 trades.")))  # type: ignore[arg-type]
+    agent.timer = FakeTimer
+    skew = _wall(agent)
+    events: list[dict[str, Any]] = []
+    asking = _asking(agent, sid, events)
+    assert stuck.wait(5)
+    asking.join(0.1)
+    assert asking.is_alive() and "done" not in [e["type"] for e in events]
+    skew[0] = A.MAX_SECONDS + A.END_GRACE_S
+    asking.join(5)
+    assert not asking.is_alive() and not agent.live
+    kinds = [e["type"] for e in events]
+    assert kinds[-3:] == ["answer.card", "usage", "done"] and kinds.count("usage") == 1
+    run = store.runs()[0]
+    assert run["ended"] and run["error"] == "over_time"
+    release.set()  # the stuck write finishes: nothing more reaches the page
+    w = _worker(events[0]["run"])
+    if w:
+        w.join(5)
+    assert [e["type"] for e in events] == kinds
+
+
 def test_a_run_the_last_process_died_in_ends_as_interrupted_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
     """10 Nov ~17:00 UTC: a deploy replaced the container mid-run. At the next start the run gets its findings as a
     partial answer, the interrupted notice and done, so the page never stays "Working"."""
