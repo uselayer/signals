@@ -451,10 +451,14 @@ behind Vercel (see README, "Hosting").
 - Wording: "Research wording" below (confirmed by the owner, 10 Nov).
 - Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
   Layer's recordings.
-- Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC, politics and the Premier League (one
-  tile per market; politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it; the
-  Premier League = Gamma's EPL tag AND the market's own text naming the league, or a club's manager market, since
-  the tag is also on the Ballon d'Or, Euro 2024 and the FA Cup; neither has an outside line). The Premier League's
+- Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC, politics and soccer (one
+  tile per market; politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it;
+  soccer (owner, 16 Nov: "the Premier League is a league, soccer is the sport") = any league's match market (Gamma's
+  Soccer tag, id 100350, on all 185 of its soccer leagues and no other sport, AND a game), plus the Premier League's
+  other markets (Gamma's EPL tag AND the market's own text naming the league, or a club's manager market, since
+  the tag is also on the Ballon d'Or, Euro 2024 and the FA Cup). Other leagues' season markets aren't read yet:
+  counted in coverage with their dollars (`near_left_out`). Each tile and replay names its league. `premier-league`
+  and `epl` are Soccer's aliases, so saved plans and links still open; neither has an outside line). Soccer's
   match markets are tiled whatever `min_days` says and draw the match's live score (`scores.py`: Layer's recording
   of polymarket.com's sports feed, from 11 Nov 2026 18:26 UTC, joined by the Gamma event's `gameId`): goals,
   halves, gaps, and each fill's minute, score and time since the last goal, server-built. The feed can be late
@@ -472,7 +476,7 @@ behind Vercel (see README, "Hosting").
 - Choosing a wallet (owner, 16 Nov: someone with no wallet to reverse-engineer needs one to start from): the ask
   box's wallet field opens a list, "Pick one for me" first, then each market type's top 3 by trading profit over 30
   days on Signals' own Leaderboard (`suggest.py`, from the engine's `/api/leaderboard`, never Polymarket's board;
-  Crypto wallets sorted into BTC 15-minute and long-dated BTC, and Sports wallets into Premier League, by one read of
+  Crypto wallets sorted into BTC 15-minute and long-dated BTC, and Sports wallets into Soccer, by one read of
   their latest 500 trades; each list always holds its best Human-tagged wallet when one was found), kept 6 hours.
   Facts only: rank, profit, money traded, Bot or Human; never "recommended". Picking one sets Market. "Pick one for
   me" sends the best-ranked Human-tagged wallet for the Market chosen (owner, 16 Nov; a bot only when none of the

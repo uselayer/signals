@@ -501,7 +501,8 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
         coverage["outside_none"] = None
     return {
         "kind": "market", "window_id": read.get("slug"), "market_type": read.get("market_type"),
-        "market_label": read.get("market_label"), "title": read.get("question"), "condition_id": read.get("condition_id"),
+        "market_label": read.get("market_label"), "league": read.get("league"), "title": read.get("question"),
+        "condition_id": read.get("condition_id"),
         "event_slug": read.get("event_slug"), "event_title": read.get("event_title"),
         "group_item": read.get("group_item"), "neg_risk": read.get("neg_risk"),
         "start": span_from, "end": span_to, "axis": {"from": span_from, "to": span_to},
@@ -544,6 +545,7 @@ def market_summary(r: dict[str, Any]) -> dict[str, Any]:
     line = r["prices"].get(side) or [] if side else []
     return {
         "kind": "market", "window_id": r["window_id"], "market_type": r.get("market_type"), "title": r["title"],
+        "league": r.get("league"),
         "event_slug": r.get("event_slug"), "event_title": r.get("event_title"), "group_item": r.get("group_item"),
         "neg_risk": r.get("neg_risk"),
         "start": r["hold"]["from"] or r["start"], "end": r["hold"]["to"] or r["end"],
@@ -603,13 +605,14 @@ def _build_market(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, A
         lo = int(max(first - MARKET_PAD_S, min(facts.get("start") or first, first)))
         got = reads.market(slug, start=lo, end=hi, facts=facts)
         read = {**got, "kind": "market", "market_type": mt.id if mt else None, "market_label": mt.label if mt else None,
-                "rule": mt.rule(facts) if mt else None, "_read_at": now()}  # fmt: skip
+                "rule": mt.rule(facts) if mt else None, "league": mt.league(facts) if mt and mt.league else None,
+                "_read_at": now()}  # fmt: skip
         read["_outside"] = None
         if mt and mt.outside and mt.outside.get("source") == "binance":
             read["_outside"] = reads.outside_prices("binance", lo, hi, mt.outside.get("symbol") or "BTC")
         store.put_window(sid, slug, read=read)
     match = None
-    if mt and mt.score_line and markets.premier_league_is_match(facts):
+    if mt and mt.score_line and markets.soccer_is_match(facts):
         match = _match(reads, read, facts, fresh, trades)
         store.put_window(sid, slug, read=read)
     moves = read.get("_moves")
@@ -626,7 +629,7 @@ def _build_market(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, A
     return r
 
 
-# ---- a match market: the live score beside the prices (Premier League matches; any league's the same) ----
+# ---- a match market: the live score beside the prices (any soccer league's match) ----
 
 MATCH_BEFORE_S = 3_600  # the score is read from an hour before the scheduled kickoff (kickoffs run late)
 MATCH_AFTER_S = 4 * 3_600  # to four hours after it (stoppages, a late start, extra time)
@@ -767,8 +770,11 @@ def match_brief(m: dict[str, Any] | None) -> dict[str, Any] | None:
     """The match on a tile: the clubs, the final score, the goals' minutes and the counts."""
     if not m:
         return None
+    cov = m.get("coverage") or {}
+    # recorded with no update for this match (Polymarket didn't run it live): no clubs or score to show, so the tile
+    # says "No score recorded", as the replay does
     return {"home": m.get("home"), "away": m.get("away"), "side": m.get("side"), "kickoff": m.get("kickoff"),
-            "final": m.get("final"), "recorded": (m.get("coverage") or {}).get("recorded"),
+            "final": m.get("final"), "recorded": bool(cov.get("recorded") and cov.get("updates")),
             "goals": [{"t": g["t"], "minute": g["minute"], "score": g["score"], "by": g["by"], "kind": g["kind"],
                        "retracted": bool(g.get("retracted"))} for g in m.get("goals") or []],
             "counts": m.get("counts")}  # fmt: skip

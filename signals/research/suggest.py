@@ -13,9 +13,9 @@ three bots would leave it none; ``with_human``):
   ``RECENT`` trades read once (one SDK read each, on the research budget) and sorted by what they are: a fifth or
   more BTC 15-minute windows, or any long-dated BTC market that isn't a one-day one (``markets.btc_long_matches``).
   A wallet can be in both.
-- Premier League: the Sports category's first ``SPORTS_LOOKED_AT``, read the same way, with ``EPL_MIN`` or more of
-  their recent trades in Premier League markets (``markets.premier_league_hint``; its matches count: they're
-  listed about two weeks ahead, so they pass the 7 days a breakdown keeps, checked on ndb1 16 Nov: 60 of 60).
+- Soccer: the Sports category's first ``SPORTS_LOOKED_AT``, read the same way, with ``SOCCER_MIN`` or more of
+  their recent trades in soccer markets (``markets.soccer_hint``: any league's matches, or the Premier League's
+  markets; matches are let in whatever the 7 days a breakdown keeps say).
 
 Built in a background thread at most every ``TTL_S`` and kept in memory; a page asks while it builds and gets what
 was kept last (or nothing yet, ``ready`` false)."""
@@ -32,9 +32,9 @@ import httpx
 
 PER_TYPE = 3  # wallets shown per market type
 LOOKED_AT = 30  # the Politics and Crypto categories' first wallets looked at (Crypto's: their recent trades read)
-SPORTS_LOOKED_AT = 50  # Sports: most of its top traders trade other leagues (8 of 50 had Premier League, 16 Nov)
+SPORTS_LOOKED_AT = 50  # Sports: its top traders trade every sport (8 of 50 had Premier League, 16 Nov)
 RECENT = 500  # recent trades read per Crypto or Sports wallet
-EPL_MIN = 10  # a Premier League trader: at least this many of its recent trades in Premier League markets
+SOCCER_MIN = 10  # a soccer trader: at least this many of its recent trades in soccer markets
 # a BTC 15-minute trader: at least this share of its recent trades in those windows (16 Nov, the top 30 read: the
 # busiest window traders spread over many coins, so half was too strict; a breakdown reads only its BTC windows)
 WINDOWS_SHARE = 0.2
@@ -75,8 +75,8 @@ def with_human(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def kinds_of(slugs: list[str]) -> set[str]:
     """What a wallet's recent markets say it trades: "btc-updown-15m" when a fifth or more are BTC 15-minute
-    windows, "btc-long" when any is a long-dated BTC market (not a one-day one), "premier-league" when ``EPL_MIN`` or
-    more are Premier League markets."""
+    windows, "btc-long" when any is a long-dated BTC market (not a one-day one), "soccer" when ``SOCCER_MIN`` or
+    more are soccer markets."""
     from signals.research import markets as M
     from signals.research.data import BTC_15M
 
@@ -85,8 +85,8 @@ def kinds_of(slugs: list[str]) -> set[str]:
         out.add(M.BTC_15M.id)
     if any(not M.is_window(s) and M.btc_long_matches(s, {}) and not DAILY.search(s) for s in slugs):
         out.add(M.BTC_LONG.id)
-    if sum(M.premier_league_hint(s) for s in slugs) >= EPL_MIN:
-        out.add(M.PREMIER_LEAGUE.id)
+    if sum(M.soccer_hint(s) for s in slugs) >= SOCCER_MIN:
+        out.add(M.SOCCER.id)
     return out
 
 

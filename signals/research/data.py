@@ -233,7 +233,10 @@ def market_facts(m: dict[str, Any]) -> dict[str, Any]:
             # market's gameStartTime (its listed end is the kickoff too); sportsMarketType: moneyline, totals…
             "game_id": _game_id(m.get("gameId") or event.get("gameId")),
             "kickoff": _when(m.get("gameStartTime")) or (_when(event.get("startTime")) if event.get("gameId") else None),
-            "sports_market_type": m.get("sportsMarketType") or None}  # fmt: skip
+            "sports_market_type": m.get("sportsMarketType") or None,
+            # the event's series: a match's league or competition as Polymarket names it ("UEFA Nations League")
+            "series_title": next((s.get("title") for s in event.get("series") or [] if isinstance(s, dict)
+                                  and s.get("title")), None)}  # fmt: skip
 
 
 def _game_id(x: Any) -> int | None:
@@ -675,6 +678,7 @@ class Reads:
         # a batch of the busiest at a time; a type its slugs can't narrow (politics) reads on until `n` match
         looked: list[str] = []
         kept, skipped, not_type = [], [], 0
+        near_n, near_usd = 0, 0.0
         while len(looked) < min(len(ranked), mt.looks_at) and more(kept):
             batch = ranked[len(looked) : min(len(ranked), len(looked) + MARKETS_LOOKED_AT, mt.looks_at)]
             looked += batch
@@ -684,9 +688,11 @@ class Reads:
                 if not f or not mt.matches(f["slug"], f):
                     if f:
                         not_type += 1
-                        if mt.near and mt.near(f) and len(skipped) < 5:  # close to the type, but not it
-                            skipped.append({"question": f["question"], "category": f.get("category"),
-                                            "usd_in_range": round(by[c]["usd"], 2)})  # fmt: skip
+                        if mt.near and mt.near(f):  # close to the type, but not it
+                            near_n, near_usd = near_n + 1, near_usd + by[c]["usd"]
+                            if len(skipped) < 5:
+                                skipped.append({"question": f["question"], "category": f.get("category"),
+                                                "usd_in_range": round(by[c]["usd"], 2)})  # fmt: skip
                     continue
                 runs = (f["end"] - f["start"]) / 86_400 if f["end"] and f["start"] else None
                 if runs is not None and runs < days and not (mt.short_ok and mt.short_ok(f)):
@@ -700,12 +706,14 @@ class Reads:
                              "fills_in_range": m["fills"], "first_fill_in_range": m["first"],
                              "last_fill_in_range": m["last"],
                              "bought_in_range": {o: round(v, 2) for o, v in m["bought"].items()},
+                             **({"league": mt.league(f)} if mt.league else {}),
                              **({"game_id": f.get("game_id"), "kickoff_iso": iso(f["kickoff"]) if f.get("kickoff") else None,
                                  "sports_market_type": f.get("sports_market_type")} if mt.score_line else {})})  # fmt: skip
         if mt.hint:  # read hinted first: the tiles are still the most money traded
             kept.sort(key=lambda k: -k["usd_in_range"])
-        checked = (f"The {len(looked)} markets checked were those whose slugs name the league first, then the most "
-                   f"money traded; " if mt.hint else f"The {len(looked)} markets with the most money traded were checked; ")
+        checked = (f"The {len(looked)} markets checked were those whose slugs look like {mt.label} markets first, then the "
+                   f"most money traded; " if mt.hint else f"The {len(looked)} markets with the most money traded were checked; ")
+        left = (mt.near_says.format(n=f"{near_n:,}", usd=f"${near_usd:,.2f}") + " " if mt.near_says and near_n else "")
         out = {"wallet": w, "start": got["start"], "asked_from": a, "end": b, "market_type": mt.id, "label": mt.label,
                "min_days": days,
                "top": n, "trades_read": got["count"], "trades_complete": got["complete"],
@@ -713,10 +721,12 @@ class Reads:
                "markets_traded": len(by), "markets_looked_at": len(looked), "matched": len(kept),
                "markets": kept[:n], "source": got["source"],
                "note": (checked + f"{max(0, len(ranked) - len(looked))} "
-                        f"{'others' if mt.hint else 'smaller ones'} weren't. " + got["note"])}  # fmt: skip
+                        f"{'others' if mt.hint else 'smaller ones'} weren't. " + left + got["note"])}  # fmt: skip
         if mt.near:  # a type told apart by its tags, not its slugs: what it read but left out, and events held
             out["not_this_type"] = not_type
             out["skipped_near"] = skipped
+            if mt.near_says:
+                out["near_left_out"] = {"markets": near_n, "usd_in_range": round(near_usd, 2), "says": left.strip() or None}
             out["events"] = event_legs(kept, {m["condition_id"] for m in kept[:n]})
         return out
 

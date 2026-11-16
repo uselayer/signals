@@ -152,7 +152,7 @@ def test_a_match_replay_draws_the_score_and_puts_the_match_on_every_fill(monkeyp
     whales._poly = MatchPoly()
     reads = D.Reads(whales, Binance(), scores=lambda g, a, b: asked.append((g, a, b)) or _match_read())  # type: ignore[arg-type]
     r = workspace.build(store, reads, sid, SLUG)
-    assert r["market_type"] == "premier-league" and r["rule"]["kind"] == "match" and asked[0][0] == GAME
+    assert r["market_type"] == "soccer" and r["rule"]["kind"] == "match" and asked[0][0] == GAME
     m = r["match"]
     assert m["side"] == "home" and m["home"] == "Arsenal FC" and m["final"]["score"] == "1-2"
     assert m["axis"]["from"] == KO - 600 and m["axis"]["to"] == KO + 7300 + 600
@@ -195,7 +195,7 @@ def test_match_markets_are_tiled_whatever_min_days_says(monkeypatch: pytest.Monk
     got = reads.wallet_markets(W, KO - 30 * 86_400, KO + 86_400, "premier-league")
     assert [x["slug"] for x in got["markets"]] == [SLUG]  # the short future stays out; the match is in
     assert got["markets"][0]["game_id"] == GAME and got["markets"][0]["kickoff_iso"].startswith("2026-11-21T15:00")
-    assert M.PREMIER_LEAGUE.score_line and M.premier_league_is_match(D.market_facts(match))
+    assert M.SOCCER.score_line and M.premier_league_is_match(D.market_facts(match))
     assert workspace.match_side(SLUG) == "home" and workspace.match_side("epl-ars-che-2026-11-21-che") == "away"
     assert workspace.match_side("epl-ars-che-2026-11-21-draw") == "draw"
     assert workspace.match_side("epl-ars-che-2026-11-21-total-2pt5") is None
@@ -249,3 +249,111 @@ def test_a_wallet_too_busy_for_a_weeks_read_is_read_a_day_at_a_time_newest_first
     got = reads._newest_trades(W, KO - 3 * 86_400, KO)
     assert asked[0] == (KO - 3 * 86_400, KO) and asked[1] == (KO - 86_400, KO)  # the week, then a day from the end
     assert got["complete"] and got["count"] == 3 and got["start"] == KO - 3 * 86_400
+
+
+# ---- every soccer league (session 5, 16 Nov: "the Premier League is a league, soccer is the sport") ----
+
+UNL_GAME = 90_108_450
+UNL_SLUG = "unl-esp-eng-2026-11-15-eng"
+
+
+def _unl_market(**kw: Any) -> dict[str, Any]:
+    """England to win at Spain in the Nations League, as Gamma lists it: the Soccer tag and the league's own, no
+    EPL tag, the gameId on its event and the league in the event's series."""
+    return {"slug": UNL_SLUG, "conditionId": "0x" + "91" * 32, "question": "Will England win on 2026-11-15?",
+            "description": "In the upcoming game, scheduled for November 15, 2026 at 7:45 PM GMT: If England wins, "
+                           "this market will resolve to \"Yes\". Otherwise, this market will resolve to \"No\".",
+            "outcomes": '["Yes", "No"]', "clobTokenIds": '["uY", "uN"]', "closed": True, "negRisk": True,
+            "groupItemTitle": "England", "startDate": "2026-11-08T19:45:00Z", "endDate": "2026-11-15T19:45:00Z",
+            "gameStartTime": "2026-11-15 19:45:00+00", "sportsMarketType": "moneyline",
+            "tags": [{"label": "Sports"}, {"label": "Games"}, {"label": "Soccer"}, {"label": "UEFA Nations League"}],
+            "events": [{"slug": "unl-esp-eng-2026-11-15", "title": "Spain vs. England", "gameId": UNL_GAME,
+                        "series": [{"slug": "soccer-unl", "title": "UEFA Nations League"}]}]} | kw  # fmt: skip
+
+
+def test_any_leagues_soccer_match_is_soccer_and_names_its_league() -> None:
+    f = D.market_facts(_unl_market())
+    assert f["game_id"] == UNL_GAME and f["series_title"] == "UEFA Nations League"
+    assert M.of_market(UNL_SLUG, f) is M.SOCCER and M.soccer_is_match(f) and not M.premier_league_matches(UNL_SLUG, f)
+    assert M.soccer_league(f) == "UEFA Nations League" and M.SOCCER.rule(f)["kind"] == "match"
+    # the series' year is dropped; without a series, the league's own tag names it
+    assert M.soccer_league(f | {"series_title": "La Liga 2 2026"}) == "La Liga 2"
+    assert M.soccer_league(f | {"series_title": None}) == "UEFA Nations League"
+    # the Premier League's markets say so, whatever Gamma's series is called
+    assert M.soccer_league(D.market_facts(_match_market())) == "Premier League"
+    # its slug is read first in a busy wallet; another sport's game isn't
+    assert M.soccer_hint(UNL_SLUG) and M.soccer_hint("es2-leg-bur-2026-11-13-leg") and M.soccer_hint("epl-ars-che-2026-11-21")
+    assert not M.soccer_hint("nba-was-ind-2026-11-11") and not M.soccer_hint("ufc-ale14-die4-2026-01-31")
+
+
+def test_another_sports_game_or_a_soccer_season_market_isnt_a_soccer_tile() -> None:
+    nba = D.market_facts(_unl_market(slug="nba-was-ind-2026-11-11", tags=[{"label": "Sports"}, {"label": "NBA"},
+                                                                          {"label": "Basketball"}]))  # fmt: skip
+    esports = D.market_facts(_unl_market(slug="lol-t1-hle-2026-11-11", tags=[{"label": "Esports"}, {"label": "Games"}]))
+    assert nba["game_id"] and not M.soccer_matches(nba["slug"], nba) and not M.soccer_near(nba)
+    assert not M.soccer_matches(esports["slug"], esports) and M.of_market(nba["slug"], nba) is None
+    # another league's season market (no game): soccer, read and left out, never a tile
+    ucl = D.market_facts(_unl_market(slug="will-arsenal-win-the-2026-27-champions-league", events=[{"slug": "ucl-2027"}],
+                                     question="Will Arsenal win the 2026-27 Champions League?", gameStartTime=None,
+                                     tags=[{"label": "Soccer"}, {"label": "Sports"}, {"label": "UCL"}]))  # fmt: skip
+    assert not M.soccer_matches(ucl["slug"], ucl) and M.soccer_near(ucl)
+
+
+def test_a_saved_premier_league_breakdown_still_opens_as_soccer() -> None:
+    # plans, saved breakdowns and links from before soccer name premier-league: the same type, its markets all in it
+    for old in ("premier-league", "epl", "Premier-League"):
+        assert M.by_id(old) is M.SOCCER and M.of_scope({"market_type": old}) is M.SOCCER
+    t = next(x for x in M.described() if x["id"] == "soccer")
+    assert t["label"] == "Soccer" and "premier-league" in t["aliases"]  # the page opens ?market=premier-league as Soccer
+    assert "premier-league" not in [x["id"] for x in M.described()]  # one Market pill, not two
+
+
+def test_a_soccer_scope_tiles_every_leagues_matches_and_counts_the_season_markets_left_out(
+        monkeypatch: pytest.MonkeyPatch) -> None:  # fmt: skip
+    reads = D.Reads(Whales(), Binance())  # type: ignore[arg-type]
+    epl = _match_market()
+    unl = _unl_market()
+    nba = _unl_market(slug="nba-was-ind-2026-11-11", conditionId="0x" + "92" * 32,
+                      tags=[{"label": "Sports"}, {"label": "NBA"}])  # fmt: skip
+    ucl = _unl_market(slug="will-arsenal-win-the-2026-27-champions-league", conditionId="0x" + "93" * 32,
+                      events=[{"slug": "ucl-2027"}], gameStartTime=None, endDate="2027-06-01T00:00:00Z",
+                      tags=[{"label": "Soccer"}, {"label": "UCL"}])  # fmt: skip
+    usd = {epl["conditionId"]: 100.0, unl["conditionId"]: 400.0, nba["conditionId"]: 900.0, ucl["conditionId"]: 250.5}
+    gs = (epl, unl, nba, ucl)
+    rows = [{"ts": KO, "slug": g["slug"], "condition_id": g["conditionId"], "usd": usd[g["conditionId"]],
+             "action": "buy", "outcome": "Yes"} for g in gs]  # fmt: skip
+    monkeypatch.setattr(reads, "_newest_trades", lambda w, a, b: {"trades": rows, "count": len(rows), "start": a,
+                                                                   "complete": True, "read_to": b, "source": "s", "note": ""})
+    monkeypatch.setattr(reads, "markets_facts", lambda ids: {g["conditionId"]: D.market_facts(g) for g in gs})
+    got = reads.wallet_markets(W, KO - 30 * 86_400, KO + 86_400, "soccer")
+    assert [(x["slug"], x["league"]) for x in got["markets"]] == [(UNL_SLUG, "UEFA Nations League"),
+                                                                  (SLUG, "Premier League")]  # the most money first
+    assert all(x["game_id"] for x in got["markets"])
+    assert got["near_left_out"]["markets"] == 1 and got["near_left_out"]["usd_in_range"] == 250.5
+    assert "1 soccer markets read weren't matches or the Premier League's ($250.50 traded" in got["note"]
+    assert got["not_this_type"] == 2  # the NBA game and the Champions League winner
+
+
+def test_a_soccer_match_replay_and_tile_name_the_league() -> None:
+    reads = D.Reads(Whales(), Binance())  # type: ignore[arg-type]
+    poly = MatchPoly()
+    poly.market = _unl_market() | {"outcomePrices": '["1", "0"]', "closedTime": "2026-11-15 21:45:00+00"}
+    reads.whales._poly = poly
+    reads.scores = lambda g, a, b: None
+    store, sid = _store_with_wallet()
+    r = workspace.build(store, reads, sid, UNL_SLUG)
+    assert r["market_type"] == "soccer" and r["league"] == "UEFA Nations League" and r["rule"]["kind"] == "match"
+    assert store.summaries(sid)[0]["league"] == "UEFA Nations League"
+
+
+def test_a_tile_for_a_match_the_feed_never_sent_says_no_score() -> None:
+    # recorded, but no update for this match (an AFCON qualifier on 12 Nov): no clubs to show, so not "recorded"
+    m = {"home": None, "away": None, "coverage": {"recorded": True, "updates": 0}, "goals": []}
+    assert workspace.match_brief(m)["recorded"] is False
+    assert workspace.match_brief(m | {"home": "A", "away": "B", "coverage": {"recorded": True, "updates": 90}})["recorded"]
+
+
+def test_the_soccer_section_counts_leagues_from_the_tiles_league() -> None:
+    # a run said "6 competitions" over tiles naming 5 (review of #281): leagues are counted from `league` only
+    assert "count leagues and competitions only from it, never from names in questions" in M.SOCCER_PROMPT
+    assert "near_left_out" in M.SOCCER_PROMPT

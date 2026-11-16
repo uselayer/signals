@@ -84,8 +84,8 @@ def test_recent_markets_tell_15_minute_traders_from_long_dated_ones() -> None:
     assert S.kinds_of(["x", LONG]) == {"btc-long"}  # one long-dated BTC market is enough to study
     assert S.kinds_of([WINDOW] * 6 + [LONG] * 4) == {"btc-updown-15m", "btc-long"}
     assert S.kinds_of([]) == set()
-    assert S.kinds_of([EPL] * 10) == {"premier-league"}  # matches count: listed weeks ahead, they pass the 7 days
-    assert S.kinds_of(["will-arsenal-win-the-2026-27-english-premier-league"] * 9 + ["x"]) == set()  # under EPL_MIN
+    assert S.kinds_of([EPL] * 10) == {"soccer"}  # matches count: listed weeks ahead, they pass the 7 days
+    assert S.kinds_of(["will-arsenal-win-the-2026-27-english-premier-league"] * 9 + ["x"]) == set()  # under SOCCER_MIN
     assert S.kinds_of(["bitcoin-up-or-down-november-16-12pm-et"]) == set()  # an Up/Down market isn't long-dated
 
 
@@ -94,7 +94,7 @@ def test_each_market_type_gets_its_top_wallets_from_signals_leaderboard() -> Non
     web, seen = _web()
     types = S.build(whales, web, ENGINE)
     by = {t["id"]: t for t in types}
-    assert [t["id"] for t in types] == ["btc-updown-15m", "btc-long", "politics", "premier-league"]  # TYPES order
+    assert [t["id"] for t in types] == ["btc-updown-15m", "btc-long", "politics", "soccer"]  # TYPES order
     assert all(u.startswith(ENGINE + "/api/leaderboard") for u in seen)  # Signals' board, never Polymarket's
     pol = by["politics"]["wallets"]
     assert [w["name"] for w in pol] == ["pol-a", "pol-b", None]  # PER_TYPE, ranked by 30-day trading profit
@@ -105,7 +105,7 @@ def test_each_market_type_gets_its_top_wallets_from_signals_leaderboard() -> Non
     assert by["btc-long"]["wallets"][0]["rank"] == 2  # its rank in the Crypto category, as the Leaderboard shows it
     assert {w for _, w, _ in whales.asked} == {_w(n) for n in (10, 11, 12, 13, 20, 21, 22, 23, 24, 25)}  # Crypto, Sports
     # three bots trade the Premier League ahead of a person: the person takes the third place (owner, 16 Nov)
-    assert [(w["name"], w["rank"]) for w in by["premier-league"]["wallets"]] == [("epl-bot-a", 1), ("epl-bot-b", 2),
+    assert [(w["name"], w["rank"]) for w in by["soccer"]["wallets"]] == [("epl-bot-a", 1), ("epl-bot-b", 2),
                                                                                 ("epl-person", 5)]
     assert all(v == "polymarket" and n == S.RECENT for v, _, n in whales.asked)
 
@@ -161,7 +161,7 @@ def test_the_route_answers_at_once_and_builds_in_the_background(monkeypatch: pyt
         _wait_built()
         again = c.get("/api/research/suggestions").json()
         assert again["ready"] is True and [t["id"] for t in again["types"]] == ["btc-updown-15m", "btc-long", "politics",
-                                                                               "premier-league"]
+                                                                               "soccer"]
     finally:
         server.app.dependency_overrides.clear()
 

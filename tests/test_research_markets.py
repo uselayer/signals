@@ -646,8 +646,8 @@ def _epl(question: str, rules: str, tags: tuple[str, ...] = ("EPL", "Soccer", "S
 
 
 def test_a_premier_league_market_is_known_by_its_epl_tag_and_its_own_text() -> None:
-    assert M.by_id("premier-league") is M.PREMIER_LEAGUE and M.by_id("epl") is M.PREMIER_LEAGUE
-    assert M.PREMIER_LEAGUE.outside is None and M.PREMIER_LEAGUE.min_days == 7.0 and M.PREMIER_LEAGUE.looks_at == 180
+    assert M.by_id("premier-league") is M.SOCCER and M.by_id("epl") is M.SOCCER
+    assert M.SOCCER.outside is None and M.SOCCER.min_days == 7.0 and M.SOCCER.looks_at == 180
     pl = M.premier_league_matches
     assert pl(EPL_SLUG, {}) and not pl("btc-updown-15m-1794285000", {})  # no facts yet: not ruled out
     assert pl("x", _epl("Will Arsenal win the 2026-27 English Premier League (EPL) Championship?", CHAMP_RULES))
@@ -677,12 +677,12 @@ def test_a_premier_league_market_is_known_by_its_epl_tag_and_its_own_text() -> N
     f = D.market_facts({"slug": EPL_SLUG, "conditionId": EPL_CID, "question": "Will Arsenal win the 2026-27 English "
                         "Premier League (EPL) Championship?", "outcomes": '["Yes", "No"]', "clobTokenIds": '["a", "b"]',
                         "negRisk": True, "groupItemTitle": "Arsenal", "description": CHAMP_RULES, "tags": EPL_TAGS})
-    assert M.of_market(EPL_SLUG, f) is M.PREMIER_LEAGUE and f["category"] != "Politics"
+    assert M.of_market(EPL_SLUG, f) is M.SOCCER and f["category"] != "Politics"
     assert M.premier_league_hint(EPL_SLUG) and M.premier_league_hint("epl-bou-not-2026-11-21-bou")
     assert not M.premier_league_hint("will-arsenal-qualify-for-the-2027-28-uefa-champions-league")
     assert not M.premier_league_hint("will-the-sepl-ban-pass")  # a whole word, not a substring
     # the types before it have no hint, so their reads are as before
-    assert all(t.hint is None for t in M.TYPES if t is not M.PREMIER_LEAGUE)
+    assert all(t.hint is None for t in M.TYPES if t is not M.SOCCER)
 
 
 def test_what_resolves_a_premier_league_market_is_read_from_its_own_rules() -> None:
@@ -709,7 +709,7 @@ def test_what_resolves_a_premier_league_market_is_read_from_its_own_rules() -> N
     ko = r(_epl("Will AFC Bournemouth win on 2026-11-21?", MATCH_RULES, slug="epl-bou-not-2026-11-21-bou",
                 end_iso="2026-11-21T15:00:00Z"))  # fmt: skip
     assert ko["kickoff"] == "2026-11-21T15:00:00Z" and ko["says"].startswith("One match, kicking off 2026-11-21 15:00 UTC: “If")
-    assert champ["kickoff"] is None and "after kickoff" in M.PREMIER_LEAGUE_PROMPT
+    assert champ["kickoff"] is None and "after kickoff" in M.SOCCER_PROMPT
     score = r(_epl("Exact Score: Hull City AFC 0 - 0 Brighton & Hove Albion FC?", SCORE_RULES,
                    slug="epl-hul-bri-2026-11-22-exact-score-0-0"))  # fmt: skip
     assert score["kind"] == "match" and "Hull City AFC vs. Brighton & Hove Albion FC match" in score["quote"]  # not cut at "vs."
@@ -727,11 +727,11 @@ def test_what_resolves_a_premier_league_market_is_read_from_its_own_rules() -> N
 
     # no example numbers; only the score recording's start (11 Nov 2026 18:26 UTC), a match's 90 minutes and the
     # counts' own cut-offs (60 seconds, 5 minutes, the 75th minute)
-    assert M.PREMIER_LEAGUE_PROMPT in A.SYSTEM and set(re.findall(r"\d+", M.PREMIER_LEAGUE_PROMPT)) <= {
+    assert M.SOCCER_PROMPT in A.SYSTEM and set(re.findall(r"\d+", M.SOCCER_PROMPT)) <= {
         "0", "1", "11", "2026", "18", "26", "90", "60", "5", "75"}
     # season futures are never tied to a match; a match market's trades only to the goals the feed showed
-    assert "never tie a season future's trade to a match" in M.PREMIER_LEAGUE_PROMPT
-    assert "no league table" in M.PREMIER_LEAGUE_PROMPT and "never that the wallet saw the goal first" in M.PREMIER_LEAGUE_PROMPT
+    assert "never tie a season future's trade to a match" in M.SOCCER_PROMPT
+    assert "no league table" in M.SOCCER_PROMPT and "never that the wallet saw the goal first" in M.SOCCER_PROMPT
 
 
 class EplPoly(Poly):
@@ -759,12 +759,12 @@ def test_a_premier_league_replay_has_no_outside_line_and_is_open_at_todays_price
     reads = _reads()
     reads.whales._poly = EplPoly()
     r = workspace.build(store, reads, sid, EPL_SLUG)
-    assert r["market_type"] == "premier-league" and r["outside"] is None and r["rule"]["kind"] == "one_of"
+    assert r["market_type"] == "soccer" and r["outside"] is None and r["rule"]["kind"] == "one_of"
     assert r["group_item"] == "Arsenal" and r["neg_risk"] and r["rule"]["ends_early"]
     cov = r["coverage"]
     assert cov["outside"] is None and "tied to a match result or news" in " ".join(cov["notes"])
     assert r["value"]["profit_kind"] == "open" and r["value"]["exit"] == {"how": "open"}
-    assert store.summaries(sid)[0]["coverage"]["outside_none"].startswith("No outside series for Premier League")
+    assert store.summaries(sid)[0]["coverage"]["outside_none"].startswith("No outside series for soccer season markets")
 
 
 def test_a_premier_league_scope_reads_slugs_naming_the_league_first_and_tiles_the_most_money(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -809,12 +809,15 @@ def test_a_premier_league_scope_reads_slugs_naming_the_league_first_and_tiles_th
     # with 2 kept, it reads on while a bigger market could still outrank them, and finds the Champions League place
     # (its slug doesn't say): the tiles are the most money first, never the order read
     assert [m["slug"] for m in got["markets"]] == [ucl[1], clubs[0][1]] and got["matched"] == 4
-    assert got["markets_looked_at"] == M.PREMIER_LEAGUE.looks_at
+    assert got["markets_looked_at"] == M.SOCCER.looks_at
     assert [x["question"] for x in got["skipped_near"]] == ["Will Vinicius Jr win the Ballon D’Or?"]
     assert got["not_this_type"] == 176  # 180 read: 4 kept, the Ballon d'Or and 175 NBA markets left out
     e = got["events"][0]
     assert e["event_title"] == "English Premier League Winner" and e["markets"] == 3 and e["shown"] == 1
-    assert "whose slugs name the league first" in got["note"]
+    assert "whose slugs look like Soccer markets first" in got["note"]
+    # the Ballon d'Or is soccer but not a match or the league's: counted as left out, with its dollars
+    assert got["near_left_out"]["markets"] == 1 and got["near_left_out"]["usd_in_range"] == 30.0
+    assert "1 soccer markets read weren't matches or the Premier League's ($30.00 traded" in got["note"]
 
 
 def test_the_pages_premier_league_chips_say_end_of_the_season_and_one_match() -> None:
