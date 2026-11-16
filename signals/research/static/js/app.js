@@ -62,6 +62,8 @@ const SAMPLE_TRADERS = [
   { wallet: '0xbdaacd345fec209cd09d933e62f92e8b530afd60', name: 'the.prod.dt' },
   { wallet: '0x329df14a9e177b5bade2228b9062265697a5b047', name: 'HuskyTrade' },
 ];
+// An outlined (i), drawn in the text colour it sits in
+const INFO = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 11v6" /><circle cx="12" cy="7.6" r=".6" fill="currentColor" /></svg>`;
 // The ask box's Market choice when the service doesn't list its types (an older service): 15-minute windows only.
 const MARKET_TYPES = [{ id: 'btc-updown-15m', label: 'BTC Up or Down 15m', unit: 'window', min_days: 0 }];
 const EXAMPLES = [  // [sample trader, card (the goal), question]
@@ -231,6 +233,10 @@ function Home({ api, types }) {
   const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : linkedOk && !params.get('name') ? linked : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [chosen, setChosen] = useState(() => (linkedOk && params.get('name') ? { wallet: linked, name: params.get('name').slice(0, 60) } : null));
   const sugg = useSuggestions(api);
+  // what the choice covers, behind an (i) beside Time range (owner, 16 Nov: not a line of text under the pills);
+  // hover or focus shows it, a tap toggles it on a phone
+  const [tip, setTip] = useState(false);
+  const hint = type.unit === 'window' ? 'Every window it traded. For a month or two, pick a market type with longer markets.' : `Its 20 markets with the most money${type.min_days ? `, of those that run ${type.min_days}+ days` : ''}.`;
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
   // after a card: focus Break it down
   const go = useRef(), focusNext = useRef(null);
@@ -299,8 +305,8 @@ function Home({ api, types }) {
           : html`<${WalletField} wallet=${wallet} chosen=${chosen} sugg=${sugg} onText=${w => { setChosen(null); onWallet(w); }} onChoose=${onChoose} onClear=${onClear} />`}
         ${!SAMPLE && html`<div class="pickers" role="group" aria-label="What to study">
           <div class="prow"><span class="pl" id="market-l">Market</span><div class="seg" id="market" role="radiogroup" aria-labelledby="market-l">${types.map(t => html`<button type="button" role="radio" aria-checked=${t.id === type.id ? 'true' : 'false'} class=${t.id === type.id ? 'on' : ''} data-v=${t.id} onClick=${() => onMarket(t.id)}>${t.label.replace(' Up or Down ', ' ')}</button>`)}</div></div>
-          <div class="prow"><span class="pl" id="range-l">Time range</span><div class="seg" id="range" role="radiogroup" aria-labelledby="range-l">${ranges.map(([x, label]) => html`<button type="button" role="radio" aria-checked=${x === h ? 'true' : 'false'} class=${x === h ? 'on' : ''} data-v=${String(x)} onClick=${() => setHours(x)}>${label}</button>`)}</div></div>
-          <span class="muted small">${type.unit === 'window' ? 'Every window it traded. For a month or two, pick a market type with longer markets.' : `Its 20 markets with the most money${type.min_days ? `, of those that run ${type.min_days}+ days` : ''}.`}</span></div>`}
+          <div class="prow"><span class="pl" id="range-l">Time range</span><div class="seg" id="range" role="radiogroup" aria-labelledby="range-l">${ranges.map(([x, label]) => html`<button type="button" role="radio" aria-checked=${x === h ? 'true' : 'false'} class=${x === h ? 'on' : ''} data-v=${String(x)} onClick=${() => setHours(x)}>${label}</button>`)}</div>
+            <span class=${'info' + (tip ? ' open' : '')}><button type="button" class="ibtn" aria-label="What this covers" aria-describedby="range-tip" aria-expanded=${tip ? 'true' : 'false'} onClick=${() => setTip(!tip)} onBlur=${() => setTip(false)}>${INFO}</button><span class="tip" id="range-tip" role="tooltip">${hint}</span></span></div></div>`}
         <textarea id="q" rows="3" aria-label="Your question" placeholder=${type.unit === 'window' ? 'How does this wallet trade BTC 15-minute markets?' : `How does this wallet trade ${type.label} markets?`} value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">${chosen && chosen.pick ? `The top ${shortLabel(type)} wallet is picked and named on the plan. Nothing runs until you press Start.` : "You'll see the plan and what it costs before it runs."}</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">

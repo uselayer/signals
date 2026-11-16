@@ -509,3 +509,14 @@ def test_the_ask_box_says_which_market_and_how_far_back() -> None:
     assert out["pol"] == "Politics markets, 17 Aug 2026 to now (90 days), only markets that run 7 days or more"
     assert out["btc"] == "BTC Up or Down 15m windows, 15 Nov 2026 19:00 UTC to now (1 hour)"
     assert out["odd"] == "the start of its trading to now" and out["none"] == "as asked"
+
+
+def test_what_a_range_covers_sits_behind_an_info_icon() -> None:
+    """Owner, 16 Nov: the note under Market and Time range ("Every window it traded…") hides in an (i) beside Time
+    range, shown on hover, focus or a tap, never as a line of text under the pills."""
+    js = (STATIC / "js" / "app.js").read_text()
+    css = (STATIC / "research.css").read_text()
+    assert 'class="ibtn" aria-label="What this covers" aria-describedby="range-tip"' in js
+    assert '<span class="tip" id="range-tip" role="tooltip">${hint}</span>' in js
+    assert '<span class="muted small">${type.unit' not in js  # no longer a line under the pills
+    assert ".pickers .info:hover .tip, .pickers .info.open .tip" in css
