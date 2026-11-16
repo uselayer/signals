@@ -107,7 +107,7 @@ export function prepMarket(r, summary) {
   const out = r.outside ? { name: r.outside.name, unit: r.outside.unit, step: r.outside.step, pts: (r.outside.points || []).map(q => [q.t, q.p]), ranges: (r.outside.ranges || []).map(q => [q.t, q.h, q.l]), highest: r.outside.highest, lowest: r.outside.lowest } : null;
   const w = {
     kind: 'market', raw: r, id: r.window_id, title: r.title, from: r.axis.from, to: r.axis.to, start: r.axis.from, end: r.axis.to,
-    outcomes, prices, out, rule: r.rule || {}, rules: r.rules, result: r.result, closed: r.closed, marketEnd: r.closed_at || r.market_end,
+    outcomes, prices, out, rule: r.rule || {}, rules: r.rules, league: r.league || null, result: r.result, closed: r.closed, marketEnd: r.closed_at || r.market_end,
     marketStart: r.market_start, event: r.event_title, cov: r.coverage || {}, hold: r.hold || {}, value: r.value || {},
     moves: (r.moves || []).map((m, i) => ({ ...m, i })).sort((a, b) => a.t - b.t || a.i - b.i), exit: (r.value || {}).exit || null,
   };

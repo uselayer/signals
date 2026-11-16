@@ -49,6 +49,11 @@ class MarketType:
     short_ok: Callable[[dict[str, Any]], bool] | None = None
     # its match markets (a gameId and a kickoff) draw the match's live score: Layer's recording, scores.py
     score_line: bool = False
+    # the league or competition a market belongs to, said on its tile and replay ("UEFA Nations League"), or None
+    league: Callable[[dict[str, Any]], str | None] | None = None
+    # markets read and left out as ``near``, said in the wallet's coverage with how many and the dollars traded:
+    # "{n}" and "{usd}" are filled in; None says only a few by name (politics)
+    near_says: str | None = None
 
 
 # ---- BTC 15-minute Up/Down windows (the first Breakdowns; their path is unchanged) ----
@@ -451,11 +456,18 @@ def premier_league_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
             "kickoff": kickoff, "says": says}  # fmt: skip
 
 
-PREMIER_LEAGUE_PROMPT = """## The Premier League (market_type premier-league; the unit is a market)
-A Premier League market is one Polymarket tags EPL whose own question, event or rules name the league (or a \
-club's manager market): season futures ("Will Arsenal win the Premier League this season?", relegation, a top-four \
-finish, Champions League places, top goalscorer, last place), a club's next manager, a punishment or points deduction, and \
-match markets (one match: a club to win, the draw, totals, the exact score, first to score). Outcomes are Yes and No; a share pays $1 if its outcome wins, and its \
+SOCCER_PROMPT = """## Soccer (market_type soccer; the unit is a market)
+Soccer markets are two kinds. Match markets from any league or competition Polymarket runs (the Premier League, \
+the Champions League, La Liga, a Nations League, a second division, friendlies): one match, a game Polymarket tags \
+Soccer and lists with its live score (a club or country to win, the draw, totals, both teams to score, the exact \
+score, first to score, a half, corners). And the Premier League's other markets: ones Polymarket tags EPL whose own \
+question, event or rules name the league (or a club's manager market): season futures ("Will Arsenal win the \
+Premier League this season?", relegation, a top-four finish, Champions League places, top goalscorer, last place), a \
+club's next manager, a punishment or points deduction. Other leagues' season markets (the Champions League winner, \
+the La Liga title, World Cup qualification) aren't read yet: wallet_markets counts them as left out \
+(near_left_out, with the dollars traded), so say how many and how much where a wallet's totals would miss them, \
+never that the wallet doesn't trade them. Each market's league is named (league): say it when a finding spans \
+leagues, and count by league from it. Outcomes are Yes and No; a share pays $1 if its outcome wins, and its \
 price (0 to 1) is the market's chance. The unit is a market: one market's life for this wallet, from its first buy \
 to its last sell or merge, the resolution, or now. A tile or a market's replay (the market tool) holds every fill \
 over the market's whole life, its merges, splits and conversions (moves), its position after each, and the \
@@ -517,17 +529,94 @@ buys soon after a goal (how many seconds or minutes after, from since_goal_s); b
 (margin below 0); the draw bought late; selling before full time vs holding to the result; scaling in during the \
 match; several markets of one match (result, totals, exact score: its event)."""
 
-PREMIER_LEAGUE = MarketType(
-    id="premier-league", label="Premier League", unit="market", prompt=PREMIER_LEAGUE_PROMPT,
-    matches=premier_league_matches, rule=premier_league_rule, min_days=7.0, looks_at=180,
-    near=premier_league_near, hint=premier_league_hint, short_ok=premier_league_is_match, score_line=True,
-    no_outside=("No outside series for Premier League markets: the replay is the market's own price, the wallet's "
+# ---- soccer: every league's match markets, and the Premier League's season markets (session 5, 16 Nov) ----
+
+# Gamma's tag for the sport (id 100350, label "Soccer"): all 185 soccer leagues in its /sports list carry it, and no
+# other sport does (checked 16 Nov). A match market carries it and its league's own tag ("UEFA Nations League");
+# its event carries the gameId that joins it to the live score feed.
+SOCCER_TAG = "soccer"
+# the slug prefixes of Gamma's soccer leagues (its /sports list, 16 Nov): a match's slug is
+# <league>-<home>-<away>-<date>, so a wallet's match markets are read first (the tiles are still the most money)
+SOCCER_LEAGUES = frozenset("""
+acl2 acle afc afcl afcq afwq arg argcopa argpn asean aseanc aseanw aswq atc auc aus aut aze1 aze2 azec bel1 bel2 bl2
+bl3 blr1 bol1 bra bra2 bra3 brcm brco bul bun caf cafcl canch canpl ccc ccup cde cdr chfa chi chi1 chi2 chl2 clf cof
+col col1 col2 con conl copaam cwc cze1 den dfb ecs ecu1 efa efl egy1 el1 el2 elc enl epl ere es2 es3 est1 euc ewq fif
+fifaw fifwc fin1 fl1 fpd fr2 frtc fro1 geo1 grc gre1 gsc gtm hr1 hun icwq idn1 idn2 ire irl1 isc isl1 isp isr itc itsb
+j1100 j2100 ja2 ja3 jap kaz1 kor kor2 lal lec lib ltu1 lva1 mar1 mex mex2 mls nawq ncag ned2 nirl1 nlc nln nls nor nor2
+nwsl ofc owq par1 per1 pol por pt2 ptc ptsc qat1 rou1 rus saf1 sawq sclc scoc scop sea serc skc slo spl srb ssc sud sui
+svk1 swe swe2 tha1 tpe1 tpew trsk tur tur2 u20wwc uae1 ucl uef uel ueq ukr1 unl uru1 usc usl1 uslc usoc uwcl uwec uzb1
+ven1 weuc weuq wsl wsl2 wwcquefa""".split())
+_GAME_SLUG = re.compile(r"^([a-z0-9]+)-[a-z0-9]+-[a-z0-9]+-\d{4}-\d\d-\d\d")
+_GENERIC_TAGS = {"sports", "games", "soccer", "epl", "football"}
+_SERIES_YEAR = re.compile(r"\s+\d{4}(?:\s*[-/]\s*\d{2,4})?$")
+
+
+def _tags(facts: dict[str, Any]) -> set[str]:
+    return {str(t).strip().lower() for t in facts.get("tags") or []}
+
+
+def soccer_is_match(facts: dict[str, Any]) -> bool:
+    """One match's market (result, totals, exact score, first to score, corners…): a Gamma game (a gameId, any
+    league), an epl-<home>-<away>-<date> slug, or a Premier League match's rules."""
+    return premier_league_is_match(facts)
+
+
+def soccer_matches(slug: str | None, facts: dict[str, Any]) -> bool:
+    """A soccer market Breakdowns reads: any league's match market (Gamma's Soccer tag and a game), or one of the
+    Premier League's (its season futures, managers and punishments too: ``premier_league_matches``). Another
+    league's season market, the Ballon d'Or or another sport's game isn't. A slug alone can't say (no facts yet):
+    it isn't ruled out, except an Up/Down window."""
+    if UPDOWN.match(slug or ""):
+        return False
+    if not facts:
+        return True
+    if premier_league_matches(slug, facts):
+        return True
+    return SOCCER_TAG in _tags(facts) and bool(facts.get("game_id"))
+
+
+def soccer_near(facts: dict[str, Any]) -> bool:
+    """Read and left out, but soccer: another league's season market (the Champions League winner, La Liga's
+    title), the Ballon d'Or, a Euros or FA Cup winner. Counted in coverage with its dollars."""
+    return bool(_tags(facts) & {SOCCER_TAG, EPL_TAG}) and not soccer_matches(facts.get("slug"), facts)
+
+
+def soccer_hint(slug: str | None) -> bool:
+    """A slug that's likely a soccer market: a match (<league>-<home>-<away>-<date>, a soccer league's prefix) or
+    one that names the Premier League."""
+    m = _GAME_SLUG.match(slug or "")
+    return bool(m and m[1] in SOCCER_LEAGUES) or premier_league_hint(slug)
+
+
+def soccer_league(facts: dict[str, Any]) -> str | None:
+    """The league or competition a soccer market belongs to, as Polymarket names it: its event's series ("UEFA
+    Nations League", "La Liga 2", a year dropped), else its league's own tag; the Premier League's markets say
+    "Premier League"."""
+    if premier_league_matches(facts.get("slug"), facts):
+        return "Premier League"
+    series = _SERIES_YEAR.sub("", str(facts.get("series_title") or "")).strip()
+    if series:
+        return series
+    return next((str(t).strip() for t in facts.get("tags") or [] if str(t).strip().lower() not in _GENERIC_TAGS), None)
+
+
+SOCCER = MarketType(
+    id="soccer", label="Soccer", unit="market", prompt=SOCCER_PROMPT,
+    matches=soccer_matches, rule=premier_league_rule, min_days=7.0, looks_at=180,
+    near=soccer_near, hint=soccer_hint, short_ok=soccer_is_match, score_line=True, league=soccer_league,
+    near_says=("{n} soccer markets read weren't matches or the Premier League's ({usd} traded in the range: other "
+               "leagues' season markets, the Ballon d'Or and the like), so they're left out: outside the Premier "
+               "League only matches are read."),
+    no_outside=("No outside series for soccer season markets: the replay is the market's own price, the wallet's "
                 "fills and its position. There's no league table, results or news feed, so no trade here can be "
                 "tied to a match result or news."),
-    aliases=("epl", "english-premier-league", "premier-league-futures", "premierleague"),
+    # the Premier League's own names: a saved breakdown, a plan or a link from before soccer opens as soccer (its
+    # markets are all still in it)
+    aliases=("premier-league", "epl", "english-premier-league", "premier-league-futures", "premierleague", "football",
+             "futbol"),
 )  # fmt: skip
 
-TYPES: list[MarketType] = [BTC_15M, BTC_LONG, POLITICS, PREMIER_LEAGUE]
+TYPES: list[MarketType] = [BTC_15M, BTC_LONG, POLITICS, SOCCER]
 DEFAULT = BTC_15M
 
 
@@ -555,7 +644,8 @@ def is_window(slug: str | None) -> bool:
 
 def described() -> list[dict[str, Any]]:
     """The types as the plan tool lists them."""
-    return [{"id": t.id, "label": t.label, "unit": t.unit, "min_days": t.min_days} for t in TYPES]
+    return [{"id": t.id, "label": t.label, "unit": t.unit, "min_days": t.min_days, "aliases": list(t.aliases)}
+            for t in TYPES]  # fmt: skip
 
 
 def sections() -> str:

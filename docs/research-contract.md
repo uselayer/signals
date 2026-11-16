@@ -54,7 +54,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   label, unit}, steps: [{id, title, source, estimate_s}], scope_options: [{id, text}], estimate_usd, estimate_s,
   needs_approval: true}`. `market` is the market type studied (`signals/research/markets.py` `TYPES`): `unit` `window`
   (BTC 15-minute windows; `family` "btc-updown-15m", the scope as before) or `market` (`btc-long`, "Long-dated
-  BTC", `politics`, "Politics", or `premier-league`, "Premier League": one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
+  BTC", `politics`, "Politics", or `soccer`, "Soccer" (`premier-league` and `epl` are its aliases: older plans say them): one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
   many markets to tile, default 20). The page's header says `market.label`; a plan without `market` is BTC 15-minute. Every new investigation shows its plan and waits;
   a follow-up that widens the scope (more windows, a longer range, another wallet) does too. The run ends after it.
   `estimate_usd` is the server's, never the agent's: the median `cost_usd` of the latest 20 Starts that ran to their
@@ -121,7 +121,10 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     match, at most 180 (`MarketType.looks_at`); its `selection` adds `not_this_type`, `skipped_near` [{question,
     category, usd_in_range}] (left out, but with a politics tag) and `events` [{event_slug, event_title, neg_risk,
     markets, shown, legs: [{slug, name (group_item), bought_in_range: {Yes: $, No: $}, result, shown}]}]: every event
-    with 2+ of its markets, past the tiles shown. The Premier League is the same, told apart by Gamma's EPL tag (id
+    with 2+ of its markets, past the tiles shown. Soccer is the same: any league's match market (Gamma's Soccer tag,
+    id 100350, and a game; each market's `league` is its event's series or its league's tag), plus the Premier
+    League's other markets; other soccer markets read are counted in `near_left_out` {markets, usd_in_range, says}
+    and said in the note. The Premier League's are told apart by Gamma's EPL tag (id
     306) AND its own question, event or rules naming the league (or a club's manager market): Polymarket also put
     that tag on the Ballon d'Or, Euro 2024 and the FA Cup, which land in `skipped_near` (`category` "Sports"). Its
     slugs can't all say (a Champions League place market's doesn't), so markets whose slugs name the league
@@ -138,7 +141,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   - `window.ready` (a market replay) `{kind: "market", window_id, market_type, market_label, title, condition_id,
     event_slug, event_title, start, end, axis: {from, to}, market_start, market_end, closed, closed_at, result, rule:
     {kind: touch_high|touch_low|close_above|close_below|all_time_high|other (BTC) or result|one_of|by_date|other (politics,
-    with quote: the rules' own resolving sentence, and deadline) or one_of|season|match|by_date|other (Premier League,
+    with quote: the rules' own resolving sentence, and deadline) or one_of|season|match|by_date|other (soccer,
     with quote, deadline, ends_early: resolves No once impossible, tie: the rules' tie-break), strike, source, binance,
     says}, group_item,
     neg_risk, rules
@@ -157,9 +160,9 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     the first outcome's is read and the second is 1 minus it (`coverage.notes`). The outside line for BTC price
     markets is Binance BTCUSDT (what they resolve on): 1-minute closes to 2 days, else hourly (daily past 120 days)
     candles with each one's high and low, which hold every minute's, so "did it touch the strike" is exact.
-    Politics and the Premier League have none (`outside` null, `coverage.outside_none` says why: no news or polls
+    Politics and soccer have none (`outside` null, `coverage.outside_none` says why: no news or polls
     feed; no league table, results or news feed).
-  - **A match market** (the Premier League's `rule.kind` match: one match's result, the draw, totals, exact score…;
+  - **A match market** (soccer's `rule.kind` match, any league: one match's result, the draw, totals, exact score…;
     `MarketType.score_line`) is let in whatever `min_days` says (`MarketType.short_ok`; `selection.also_short`
     "match markets") and its replay adds `match` {game_id, league, home, away, side: home|away|draw|null (what this
     market is about, from its slug `<league>-<home>-<away>-<date>-<code>`), kickoff (Gamma's gameStartTime),

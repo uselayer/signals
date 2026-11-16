@@ -224,7 +224,9 @@ function PickedCard({ pick, plan, act }) {
 
 function Home({ api, types }) {
   // Market and Time range (store.js RANGES): what the plan will study, chosen before asking and sent with the question
-  const [mid, setMid] = useState(() => (types.find(t => t.id === params.get('market')) || types[0]).id), [hours, setHours] = useState(null);
+  // a link's ?market= may name a type by an older name (premier-league opens Soccer)
+  const asked = (params.get('market') || '').trim().toLowerCase();
+  const [mid, setMid] = useState(() => (types.find(t => t.id === asked || (t.aliases || []).includes(asked)) || types[0]).id), [hours, setHours] = useState(null);
   const type = types.find(t => t.id === mid) || types[0], ranges = RANGES[type.unit] || RANGES.window;
   const h = ranges.some(([x]) => x === hours) ? hours : defaultRange(type.unit);
   const onMarket = id => { setMid(id); setHours(null); };
