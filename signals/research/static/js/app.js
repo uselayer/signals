@@ -5,7 +5,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser, copyTradingOn } from './api.js';
 import { fixtureApi } from './fixtures.js';
-import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun, RANGES, defaultRange, askScope } from './store.js';
+import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun, RANGES, defaultRange, askScope, pickOrder } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
@@ -188,7 +188,7 @@ function WalletField({ wallet, chosen, sugg, onText, onChoose, onClear }) {
   const optId = n => `wopt-${n}`;
   const row = (o, n) => html`<li id=${optId(n)} role="option" aria-selected=${active === n ? 'true' : 'false'} class=${'wopt' + (active === n ? ' on' : '')}
       onMouseDown=${e => e.preventDefault()} onClick=${() => choose(o)} onMouseEnter=${() => setActive(n)}>${o.pick
-    ? html`<span class="wpick-ic" aria-hidden="true">${PICK_ICON}</span><span class="wmain"><b>Pick one for me</b><span class="muted small">Just ask your question. The top trader for the Market you choose is picked and named on the plan, before anything runs.</span></span>`
+    ? html`<span class="wpick-ic" aria-hidden="true">${PICK_ICON}</span><span class="wmain"><b>Pick one for me</b><span class="muted small">Just ask your question. The top human trader for the Market you choose is picked and named on the plan, before anything runs.</span></span>`
     : html`<span class="wmain"><span class="wname"><b>${traderName(o.w)}</b><${WhoTag} bot=${o.w.bot} /></span><span class="muted small">${whyOf(o.w)}</span></span>
       <span class="wnum"><b class=${(o.w.profit_30d || 0) >= 0 ? 'gain' : 'loss'}>${compactMoney(o.w.profit_30d, true)}</b><span class="muted small">${compactMoney(o.w.traded_30d)} traded</span></span>`}</li>`;
   return html`<div class="wfield">
@@ -254,6 +254,9 @@ function Home({ api, types }) {
     if (!listed && isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet);
     setQ(EXAMPLES[i][2](whoOf(typed, i))); if (mid !== MARKET_TYPES[0].id) onMarket(MARKET_TYPES[0].id); focusNext.current = go;
   };
+  // whom "Pick one for me" would study now, once the wallets to study have loaded: named on its card and the foot
+  const pickG = ((sugg && sugg.types) || []).find(x => x.id === type.id), pickNext = pickG ? pickOrder(pickG.wallets) : null;
+  const pickWho = pickNext && pickNext.first ? traderName(pickNext.first) : null;
   const pickForMe = () => { setChosen(PICK); setWallet(''); setQ(pickQuestion(type)); focusNext.current = go; };
   // a card's question follows the wallet field, so it never names one trader while the field holds another
   const onWallet = w => { setWallet(w); const i = EXAMPLES.findIndex(([, , question], j) => question(whoOf(wallet, j)) === q); if (i >= 0) setQ(EXAMPLES[i][2](whoOf(w, i))); };
@@ -275,13 +278,14 @@ function Home({ api, types }) {
   }, [anyRunning]);
   const start = async () => {
     if (!q.trim()) return;
-    // "Pick one for me": the top wallet suggested for the Market chosen; the others are offered on the plan
+    // "Pick one for me": the best-ranked Human wallet for the Market chosen (store.js pickOrder); the others are
+    // offered on the plan
     let w = wallet.trim(), named = null, picked = null, origin = 'pasted wallet';
     if (chosen && chosen.pick) {
       const g = ((sugg && sugg.types) || []).find(x => x.id === type.id);
       if (!g || !g.wallets.length) { setErr(sugg && sugg.ready ? `No wallets to pick from for ${shortLabel(type)} yet. Paste one, or choose another Market.` : 'Still finding wallets to pick from. Try again in a few seconds.'); return; }
-      const [first, ...rest] = g.wallets;
-      picked = { ...first, why: whyOf(first), others: rest.map(o => ({ ...o, why: whyOf(o) })) };
+      const { first, rest, human } = pickOrder(g.wallets);
+      picked = { ...first, human, why: (human ? `The top human ${shortLabel(type)} trader here · ` : '') + whyOf(first), others: rest.map(o => ({ ...o, why: whyOf(o) })) };
       w = first.wallet; named = first.name; origin = 'picked for you';
     } else if (listed) { w = listed.wallet; named = listed.name; origin = linkedOk && listed.wallet === linked ? 'trader page' : 'wallet list'; }
     else if (linkedOk && w === linked) origin = 'trader page';
@@ -289,7 +293,7 @@ function Home({ api, types }) {
     try {
       const text = picked ? q.trim().replace(/\bthis wallet\b/, traderName(picked)) : q.trim();
       const walletLine = w && !text.includes(w) ? `Wallet: ${w}${named ? ` (${named} on Polymarket)` : ''}` : null;
-      const lines = [walletLine, picked ? `Picked for the person asking, as the top ${type.label} wallet on Signals' Leaderboard: ${picked.why}.` : null, SAMPLE ? null : askScope(type, h)].filter(Boolean);
+      const lines = [walletLine, picked ? `Picked for the person asking, as the top ${picked.human ? 'Human-tagged ' : ''}${type.label} wallet on Signals' Leaderboard: ${whyOf(picked)}.` : null, SAMPLE ? null : askScope(type, h)].filter(Boolean);
       const question = lines.length ? `${text}\n\n${lines.join('\n')}` : text;
       const id = await api.create(text.length <= 120 ? text : text.slice(0, 119).replace(/\s+\S*$/, '').replace(/[\s,;:(\-'"]+$/, '') + '…');
       if (picked) savePick(id, picked);
@@ -308,11 +312,11 @@ function Home({ api, types }) {
           <div class="prow"><span class="pl" id="range-l">Time range</span><div class="seg" id="range" role="radiogroup" aria-labelledby="range-l">${ranges.map(([x, label]) => html`<button type="button" role="radio" aria-checked=${x === h ? 'true' : 'false'} class=${x === h ? 'on' : ''} data-v=${String(x)} onClick=${() => setHours(x)}>${label}</button>`)}</div>
             <span class=${'info' + (tip ? ' open' : '')}><button type="button" class="ibtn" aria-label="What this covers" aria-describedby="range-tip" aria-expanded=${tip ? 'true' : 'false'} onClick=${() => setTip(!tip)} onBlur=${() => setTip(false)}>${INFO}</button><span class="tip" id="range-tip" role="tooltip">${hint}</span></span></div></div>`}
         <textarea id="q" rows="3" aria-label="Your question" placeholder=${type.unit === 'window' ? 'How does this wallet trade BTC 15-minute markets?' : `How does this wallet trade ${type.label} markets?`} value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
-        <div class="foot"><span class="muted small">${chosen && chosen.pick ? `The top ${shortLabel(type)} wallet is picked and named on the plan. Nothing runs until you press Start.` : "You'll see the plan and what it costs before it runs."}</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
+        <div class="foot"><span class="muted small">${chosen && chosen.pick ? `${pickWho ? `${pickWho}, the top ${pickNext.human ? 'human ' : ''}${shortLabel(type)} trader,` : `The top human ${shortLabel(type)} trader`} is picked and named on the plan. Nothing runs until you press Start.` : "You'll see the plan and what it costs before it runs."}</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
         <p class="muted small">Try asking</p>
         <div class="ex-grid">${EXAMPLES.map(([, label, question], i) => html`<button type="button" class=${'ex' + (q === question(whoOf(typed, i)) ? ' on' : '')} onClick=${() => pick(i)}><span>${label()}</span><span class="who">uses ${whoOf(typed, i)}</span></button>`)}
-          <button type="button" class=${'ex' + (chosen && chosen.pick ? ' on' : '')} onClick=${pickForMe}><span>No wallet? Let us pick one</span><span class="who">the top ${shortLabel(type)} trader</span></button></div></div>`}
+          <button type="button" class=${'ex' + (chosen && chosen.pick ? ' on' : '')} onClick=${pickForMe}><span>No wallet? Let us pick one</span><span class="who">${pickWho ? `uses ${pickWho}, the top ${pickNext.human ? 'human ' : ''}trader` : `the top human ${shortLabel(type)} trader`}</span></button></div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
     ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`

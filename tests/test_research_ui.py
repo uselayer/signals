@@ -161,6 +161,27 @@ def _page_store(run_js_module: str) -> Any:
     return json.loads(r.stdout)
 
 
+def test_pick_one_for_me_studies_the_top_human_first() -> None:
+    """Owner, 16 Nov: a new person learns more from a person's choices than from a bot's, so "Pick one for me" takes the
+    best-ranked wallet tagged Human, then one not tagged yet, then a bot; the rest stay in rank order to swap to."""
+    got = _page_store("""
+      const w = (name, bot) => ({ name, bot });
+      const a = S.pickOrder([w('bot1', 1), w('human2', 0), w('human3', 0)]);
+      const b = S.pickOrder([w('bot1', 1), w('unknown2', null), w('bot3', true)]);
+      const c = S.pickOrder([w('bot1', 1), w('bot2', 1)]);
+      const d = S.pickOrder([]);
+      const names = r => [r.first && r.first.name, ...r.rest.map(x => x.name)];
+      console.log(JSON.stringify({ a: [names(a), a.human], b: [names(b), b.human], c: [names(c), c.human], d: [d.first, d.human] }));
+    """)
+    assert got["a"] == [["human2", "human3", "bot1"], True]
+    assert got["b"] == [["unknown2", "bot1", "bot3"], False]  # not tagged yet beats a bot, but isn't called human
+    assert got["c"] == [["bot1", "bot2"], False]  # all bots: the top one, in rank order
+    assert got["d"] == [None, False]
+    js = (STATIC / "js" / "app.js").read_text()
+    assert "const { first, rest, human } = pickOrder(g.wallets);" in js  # what Break it down sends
+    assert "pickNext = pickG ? pickOrder(pickG.wallets) : null" in js  # what the card and the foot name
+
+
 def test_the_activity_log_words_each_tools_summary_never_an_object() -> None:
     """10 Nov: the log read "finding: [object Object]" and "Read its trades: [object Object] (24.4 s)". A tool
     result's summary is the tool's figures as an object (contract, tool.result): the page words it."""

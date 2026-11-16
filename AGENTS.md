@@ -469,7 +469,8 @@ behind Vercel (see README, "Hosting").
   days on Signals' own Leaderboard (`suggest.py`, from the engine's `/api/leaderboard`, never Polymarket's board;
   Crypto wallets sorted into BTC 15-minute and long-dated BTC by one read of their latest 500 trades), kept 6 hours.
   Facts only: rank, profit, money traded, Bot or Human; never "recommended". Picking one sets Market. "Pick one for
-  me" sends the top wallet for the Market chosen, and the plan's page says which one and why, with the others to
+  me" sends the best-ranked Human-tagged wallet for the Market chosen (owner, 16 Nov; a bot only when none of the
+  three is Human; `store.js` `pickOrder`), and the plan's page says which one and why, with the others to
   study instead (a "Change the plan"), before Start. Traders' rows (on hover) and a trader's page carry "Break it
   down" for Politics and Crypto traders: `/breakdowns/?wallet=&name=&market=&q=`, nothing runs until Start.
 - Signed in only, and an investigation, its events and charts are only ever its owner's. Costs are capped per
