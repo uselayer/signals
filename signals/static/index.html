@@ -401,6 +401,10 @@
   .lb-head small { display: block; font-size: 11px; font-weight: 400; color: var(--muted); }
   .lb-row { border-top: 1px solid var(--line); color: inherit; }
   .lb-row:hover { background: var(--soft); }
+  .lb-rw { position: relative; }
+  .lb-rw .lb-bd { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); z-index: 1; opacity: 0; pointer-events: none; box-shadow: 0 0 0 6px var(--soft); }
+  .lb-rw:hover .lb-bd, .lb-rw:focus-within .lb-bd { opacity: 1; pointer-events: auto; }
+  @media (hover: none), (max-width: 700px) { .lb-rw .lb-bd { display: none; } } /* phones: on the trader's page */
   .lb-rank { color: var(--faint); font-size: 14px; }
   .lb-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .lb-who .nm { display: block; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -876,6 +880,20 @@ const VENUE = { kalshi: "Kalshi", polymarket: "Polymarket International", polyma
 // views (Top profit's venue choice, Kalshi trader pages, "Same person on Kalshi?") show only when it's on.
 let venuesOn = ["polymarket"];
 let exploreOn = false; // SIGNALS_EXPLORE: Traders' Explore tab (the directory)
+let researchOn = false; // SIGNALS_RESEARCH: Breakdowns is hosted, so a trader can be broken down from here
+// "Break it down" (owner, 16 Nov): Breakdowns opens with this wallet in its wallet field, by name, and for a
+// Politics or Crypto trader a market type and a starter question. Nothing runs there until its plan's Start.
+const BD_MARKET = { Politics: ["politics", "politics"], Crypto: ["", "BTC"] };
+function breakdownHref(wallet, name, category) {
+  const [market, words] = BD_MARKET[category] || ["", ""];
+  const q = new URLSearchParams({ wallet });
+  if (name) q.set("name", name);
+  if (market) q.set("market", market);
+  if (words) q.set("q", `How does ${name || "this wallet"} make money on ${words} markets?`);
+  return `/breakdowns/?${q}`;
+}
+const breakdownLink = (wallet, name, category, cls = "btn") =>
+  `<a class="${cls}" href="${esc(breakdownHref(wallet, name, category))}" data-research ${researchOn ? "" : "hidden"} aria-label="Break down ${esc(name || "this trader")}'s trades in Breakdowns">Break it down</a>`;
 const kalshiOn = () => venuesOn.includes("kalshi");
 const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? "" : "s"}`;
 
@@ -2376,7 +2394,8 @@ function renderBoard() {
   const row = (s, i) => {
     const p = s.periods?.[n] || {}, profit = p.trading_pnl ?? null, win = boardWin(s);
     const up = s.weeks_up, known = s.weeks_known;
-    return `<a class="lb-cols lb-hb lb-row" href="#/worth/${esc(s.wallet)}">
+    const bdl = BD_MARKET[s.category] ? breakdownLink(s.wallet, s.name, s.category, "btn small lb-bd") : "";
+    return `<div class="lb-rw"><a class="lb-cols lb-hb lb-row" href="#/worth/${esc(s.wallet)}">
       <span class="lb-rank">${offset + i + 1}</span>
       <span class="lb-who">${avatar(s.wallet, 40)}<span style="min-width:0"><span class="lb-nmrow"><span class="nm">${esc(displayName(s.name, s.wallet))}</span>${whoBadge(s)}</span><span class="lb-sub">${[s.category, s.last_buy ? `active ${ago(s.last_buy * 1000)}` : "", s.new_account ? "new account" : ""].filter(Boolean).map(esc).join(" · ")}</span></span></span>
       <span class="lb-hbcell">${whoBadge(s) || `<span class="lb-none">—</span>`}</span>
@@ -2386,7 +2405,7 @@ function renderBoard() {
       <span class="lb-won">${win.cell}</span>
       <span class="lb-usual">${s.typical_usd != null ? `<span class="lb-main">${usd(s.typical_usd)}</span><span class="lb-sub">${perDayText(s.markets_per_day)}</span>` : `<span class="lb-none">—</span>`}</span>
       <span class="lb-meta">${[win.meta, s.typical_usd != null ? `usually ${usd(s.typical_usd)}` : "", perDayText(s.markets_per_day)].filter(Boolean).join(" · ")}</span>
-    </a>`;
+    </a>${bdl}</div>`;
   };
   const head = (key, label) => `<button type="button" data-bdsort="${key}" aria-pressed="${bd.sort === key}">${label}</button>`;
   const q = bd.q.trim();
@@ -3275,6 +3294,7 @@ function renderProfile() {
     <div class="pf-head">${avatar(s.wallet, 64)}
       <div class="grow"><div class="pf-name"><h1>${esc(name)}</h1>${tier(s.segment, true)}${whoBadge(s)}</div><div class="pf-tag">${[cats[0]?.category, lastAt ? `active ${ago(lastAt)}` : null, checkedAt ? `${s.record ? "updated" : "checked"} ${ago(checkedAt * 1000)}` : null].filter(Boolean).map(esc).join(" · ")}<span id="pfrefresh" class="pf-refresh">${refreshNote() ? ` · ${refreshNote()}` : ""}</span>${cats[0] || lastAt || checkedAt ? " · " : ""}${profileLink(`https://polymarket.com/profile/${s.wallet}`)}</div></div>
       <div class="pf-cta"><div id="follow" class="pf-follow" data-wallet="${esc(s.wallet)}"></div>
+        ${BD_MARKET[cats[0]?.category || s.category] ? breakdownLink(s.wallet, s.name, cats[0]?.category || s.category) : ""}
         <a class="link" href="#/watch/${esc(s.wallet)}" style="font-size:14px">What they hold and every change they make →</a></div></div>
     <div class="pf-grid">
       <section class="pf-card pf-sum" aria-label="Their numbers">
@@ -4218,6 +4238,7 @@ window.addEventListener("hashchange", route);
 api("/api/config").then((c) => {
   venuesOn = c.venues; exploreOn = !!c.explore; boardOn = !!c.leaderboard; whyOn = !!c.why;
   // Breakdowns (the research service at /research) only once it's hosted: SIGNALS_RESEARCH on the engine
+  researchOn = !!c.research;
   if (c.research) document.querySelectorAll("[data-research]").forEach((el) => { el.hidden = false; });
   if (c.research) bdStart();
   if (c.clerk_key) startAuth(c.clerk_key, c.alerts);

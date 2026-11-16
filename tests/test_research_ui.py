@@ -115,30 +115,34 @@ def test_sample_findings_have_the_contracts_fields() -> None:
 
 
 def test_example_questions_teach_without_running_anything() -> None:
-    """The cards under the ask box (owner, 10 Nov): four, each naming its wallet (one of two sample traders, mixed across
-    the cards, or the wallet typed above), each a different kind of answer (explain, chart, replay, compare), BTC
-    15-minute only, research wording, and a click only fills the form: Break it down still shows the plan first. A
-    sample trader's full address is never on a card."""
+    """The cards under the ask box (owner, 10 Nov; 16 Nov: the goal first, the wallet it uses under it): four, three
+    naming their wallet (one of two sample traders, mixed across the cards, or the wallet in the field above), each a
+    different kind of answer (explain, replay, compare), BTC 15-minute only, and a fourth that picks a wallet for
+    someone who has none. Research wording, and a click only fills the form: Break it down still shows the plan
+    first. A sample trader's full address is never on a card."""
     js = (STATIC / "js" / "app.js").read_text()
     traders = re.search(r"const SAMPLE_TRADERS = \[(.*?)\n\];", js, re.S).group(1)
     assert len(re.findall(r"wallet: '0x[0-9a-f]{40}', name: '[^']+'", traders)) == 2
     block = re.search(r"const EXAMPLES = \[.*?\n(.*?)\n\];", js, re.S).group(1)
-    cards = re.findall(r"\[([01]), w => `([^`]+)`, w => `([^`]+)`\]", block)
-    assert len(cards) == 4
+    cards = re.findall(r"\[([01]), \(\) => `([^`]+)`, w => `([^`]+)`\]", block)
+    assert len(cards) == 3
     assert {t for t, _, _ in cards} == {"0", "1"}  # both traders appear
     kinds = [label.split()[0] for _, label, _ in cards]
-    assert kinds == ["How", "Chart", "Replay", "Compare"], kinds  # explain, chart, replay, compare
-    pairs = [(label, question) for _, label, question in cards]
-    for label, question in pairs:
-        assert "${w}" in label and "${w}" in question and "BTC 15-minute" in question, (label, question)
+    assert kinds == ["Learn", "Replay", "Compare"], kinds  # explain, replay, compare
+    for _, label, question in cards:
+        assert "${w}" in question and "BTC 15-minute" in question, (label, question)
         for text in (label, question):
             low = text.lower()
             assert not re.search(r"this wallet|0x[0-9a-f]{6}|\bbets?\b|you could|worth following|\broi\b|\bedge\b", low), text
-    assert "SAMPLE_TRADERS[EXAMPLES[i][0]].name : shortWallets(w.trim())" in js  # a name or a short wallet, never a full one
-    assert "onInput=${e => onWallet(e.target.value)}" in js  # a picked question follows the wallet field
-    pick = re.search(r"const pick = (.*?);\n", js).group(1)
-    assert "start" not in pick and "ask(" not in pick and "create(" not in pick
-    assert "if (isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet)" in pick  # a typed wallet is kept
+    assert '<span class="who">uses ${whoOf(typed, i)}</span>' in js  # each card says which wallet it uses
+    assert "onClick=${pickForMe}><span>No wallet? Let us pick one</span>" in js  # the fourth card
+    # a name or a short wallet, never a full one
+    assert "SAMPLE_TRADERS[EXAMPLES[i][0]].name : listed && w === listed.wallet ? traderName(listed) : shortWallets(w.trim())" in js
+    assert "onText=${w => { setChosen(null); onWallet(w); }}" in js  # a picked question follows the wallet field
+    pick = re.search(r"const pick = i => \{(.*?)\n  \};", js, re.S).group(1)
+    for fill in (pick, re.search(r"const pickForMe = (.*?);\n", js).group(1)):
+        assert "start" not in fill and "ask(" not in fill and "create(" not in fill
+    assert "if (!listed && isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet)" in pick  # a typed wallet is kept
     assert "!w.trim() || SAMPLE_TRADERS.some(" in js  # only an empty field or a sample wallet is swapped for a card's trader
     assert "${!SAMPLE && html`<div class=\"examples\"" in js  # the locked sample plays one recorded question only
 
