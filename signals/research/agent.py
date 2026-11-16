@@ -73,7 +73,17 @@ PREBUILD_MARKETS_NOTE = ("\n\n(The server is already putting the approved scope'
                          "wallet_markets' list for the scope, each market built with every fill over its whole life. "
                          "You don't need show_windows for them; the market tool returns each one's replay at once.)")  # fmt: skip
 REQUEST_TIMEOUT_S = 300.0  # no bytes for this long ends a model request (streams send pings while it thinks)
+REQUEST_RETRIES = 2  # the SDK's retries of a request that failed or timed out
+MIN_REQUEST_S = 10.0  # the shortest no-bytes timeout a request gets near the limit
+RETRY_MIN_S = 60.0  # a retry is kept only while each try still gets this long
 SLOW_REQUEST_S = 120.0
+# The time limit is final (15 Nov: a run sat 13 minutes past it). Work after a run claims its end (the tile sweep) may
+# go on until the limit plus FINAL_GRACE_S; at the limit plus END_GRACE_S ``ask`` writes the end itself if no one has
+# and returns, freeing the run's slot, and a worker still blocked is left behind (a daemon thread, its writes dropped).
+FINAL_GRACE_S = 15.0
+END_GRACE_S = 30.0
+TILE_SWEEP_S = 60.0  # the tile sweep's own limit, however early the run ends
+WATCH_TICK_S = 5.0  # how often ``ask`` looks at the wall clock (a sleeping Mac's timers don't count its sleep)
 CHECK_NOTE = "Signals' number check:"  # starts the note sent back for an untraced number; never itself a source
 # The case file draws everything from data; Vega-Lite charts wait for the later "+ New view" (make_chart stays built).
 DATA_TOOLS = [t for t in T.TOOLS if t["name"] != "make_chart"]
@@ -251,12 +261,15 @@ class _Run:
     it writes the end (answer card, usage, done); from then on events from the run's other threads are dropped, and
     its worker writes nothing more to the conversation."""
 
-    def __init__(self) -> None:
+    def __init__(self, deadline: float | None = None) -> None:
         self.lock = threading.Lock()
         self.owner: int | None = None  # the thread that claimed the end
         self.ended = threading.Event()
         self.stream: Any = None  # the model request in flight, closed when the run is stopped from outside
         self.stop: Callable[[str, str | None, str], None] = lambda why, notice, kind: None
+        self.deadline = deadline  # the wall-clock time (time.time()) the run's limit is reached
+        self.helper: int | None = None  # a thread working for the owner after the claim (the tile sweep)
+        self.said: set[str] = set()  # the end's events written (usage, done), so a taken-over end isn't written twice
 
     def claim(self) -> bool:
         with self.lock:
@@ -265,10 +278,25 @@ class _Run:
             self.owner = threading.get_ident()
             return True
 
+    def take_over(self) -> None:
+        """The backstop: the end's owner didn't finish in time, so this thread becomes the owner (the stuck one's
+        writes are dropped from now on)."""
+        with self.lock:
+            self.owner, self.helper = threading.get_ident(), None
+
     @property
     def taken(self) -> bool:
         """Ended (or being ended) by another thread than this one."""
         return self.owner is not None and self.owner != threading.get_ident()
+
+
+def request_limits(left: float) -> tuple[float, int]:
+    """A model request's no-bytes timeout and retries for ``left`` seconds to the limit: every try together ends by
+    the limit plus END_GRACE_S. Retries are kept while each try still gets RETRY_MIN_S (a quick 529 or dropped
+    connection is worth trying again); the timeout is the room shared between the tries, at most REQUEST_TIMEOUT_S."""
+    room = max(0.0, left) + END_GRACE_S
+    retries = next((r for r in range(REQUEST_RETRIES, 0, -1) if room / (r + 1) >= RETRY_MIN_S), 0)
+    return max(MIN_REQUEST_S, min(REQUEST_TIMEOUT_S, room / (retries + 1))), retries
 
 
 def partial_card(store: Store, sid: str, run: int) -> dict[str, Any] | None:
@@ -319,10 +347,14 @@ class Agent:
         if client is None:
             import anthropic
 
-            client = anthropic.Anthropic(max_retries=2, timeout=REQUEST_TIMEOUT_S)
+            client = anthropic.Anthropic(max_retries=REQUEST_RETRIES, timeout=REQUEST_TIMEOUT_S)
         self.reads, self.store, self.client, self.model = reads, store, client, model
         self.pool = ThreadPoolExecutor(max_workers=6, thread_name_prefix="research-tool")
-        self.timer: Callable[..., Any] = threading.Timer  # the wall-clock watchdog (tests fake it)
+        self.timer: Callable[..., Any] = threading.Timer  # the watchdog at the limit (tests fake it)
+        # threading.Timer waits on the monotonic clock, which on macOS stops while the machine sleeps (15 Nov: a run
+        # slept through its limit), so ``ask`` also looks at the wall clock every ``tick_s``. Tests fake both.
+        self.clock: Callable[[], float] = time.time
+        self.tick_s = WATCH_TICK_S
         self.live: dict[int, _Run] = {}  # run -> its control, while it runs
         self._live_lock = threading.Lock()
 
@@ -347,9 +379,15 @@ class Agent:
         )  # fmt: skip
         if container:
             kw["container"] = container
+        client = self.client
+        if ctl is not None and ctl.deadline is not None and hasattr(client, "with_options"):
+            # A request can't be closed from outside until its first bytes arrive (``stream`` is only handed over
+            # then), so its timeout and retries fit in the time left: it can't outlive the limit by more than the grace.
+            timeout, retries = request_limits(ctl.deadline - self.clock())
+            client = client.with_options(timeout=timeout, max_retries=retries)
         t0 = time.monotonic()
         try:
-            with self.client.beta.messages.stream(**kw) as stream:
+            with client.beta.messages.stream(**kw) as stream:
                 if ctl is not None:
                     ctl.stream = stream  # a stop from outside closes it, so a blocked request ends with the run
                     if ctl.taken:
@@ -390,12 +428,15 @@ class Agent:
         out = emit
         t0 = time.time()
         phases: dict[str, float] = {}  # seconds from the start to each phase (PHASES), for the usage event and logs
-        ctl = _Run()
+        ctl = _Run(deadline=t0 + MAX_SECONDS)
 
         def emit(e: dict[str, Any]) -> None:  # noqa: F811 - each event stamped, its phase timed
             with ctl.lock:
-                if ctl.owner is not None and ctl.owner != threading.get_ident():
+                me = threading.get_ident()
+                if ctl.owner is not None and me not in (ctl.owner, ctl.helper):
                     return  # the run was ended by another thread (time, a shutdown): nothing more from this one
+                if e.get("type") in ("usage", "done"):
+                    ctl.said.add(e["type"])
                 at = round(time.time() - t0, 1)
                 phase = PHASES.get(e.get("type", ""))
                 if phase and phase not in phases:
@@ -413,6 +454,11 @@ class Agent:
             """The run's end, written once by whoever claimed it: for a stop from outside, where it got to (an answer
             card from the findings, then the notice; an error when there's nothing to show), then usage and done."""
             try:
+                if "usage" in ctl.said:  # a taken-over end: only what the stuck owner didn't write
+                    if "done" not in ctl.said:
+                        emit({"type": "done"})
+                    self.store.update_run(run, ended=time.time(), error=kind)
+                    return
                 if stopped is not None:
                     if not self._fallback_answer(sid, run, stopped, phases, emit, notice=notice):
                         if notice:
@@ -505,25 +551,78 @@ class Agent:
                 if ctl.claim():
                     try:
                         if pre is None or not pre.is_alive():  # every window the agent read where it traded: a tile
-                            try:
-                                n = fill_tiles(self.store, self.reads, sid, emit)
-                                if n:
-                                    print(f"research: run {run} added {n} tiles the run hadn't shown", flush=True)
-                            except Exception as e:  # noqa: BLE001 - the answer stands without them
-                                print(f"research: run {run} tile sweep failed: {type(e).__name__}: {e}", flush=True)
+                            sweep()
                     finally:
-                        finish()
+                        if not ctl.taken:
+                            finish()
+
+        def sweep() -> None:
+            """The tile sweep, after the worker claimed the end: out of the watchdog's reach, so it has its own limit
+            (TILE_SWEEP_S, and never past the run's limit plus FINAL_GRACE_S). One that doesn't finish in time is left
+            in its daemon thread, its tiles dropped, and the run ends without them."""
+
+            late = threading.Event()  # set when its time is up: from then on its tiles are dropped
+
+            def go() -> None:
+                with ctl.lock:
+                    if not late.is_set():
+                        ctl.helper = threading.get_ident()  # its tiles are this run's, written for the owner
+                try:
+                    n = fill_tiles(self.store, self.reads, sid, emit)
+                    if n:
+                        print(f"research: run {run} added {n} tiles the run hadn't shown", flush=True)
+                except Exception as e:  # noqa: BLE001 - the answer stands without them
+                    print(f"research: run {run} tile sweep failed: {type(e).__name__}: {e}", flush=True)
+
+            t = threading.Thread(target=go, name=f"research-tiles-{run}", daemon=True)
+            t.start()
+            until = min(self.clock() + TILE_SWEEP_S, ctl.deadline + FINAL_GRACE_S)  # type: ignore[operator]
+            while t.is_alive() and self.clock() < until:  # on the wall clock, in ticks, as the watchdog
+                t.join(self.tick_s)
+            with ctl.lock:
+                late.set()
+                ctl.helper = None  # none of its tiles after done
+            if t.is_alive():
+                print(f"research: run {run} tile sweep didn't finish in time; the run ends without it", flush=True)
+
+        over_time = (f"The breakdown reached its {MAX_SECONDS // 60}-minute limit.", None, "over_time")
+
+        def backstop() -> None:
+            """The limit plus END_GRACE_S and the run still hasn't ended: whoever owns its end is stuck (a write, a
+            sweep), so this thread takes it over and writes what's missing of it. The stuck thread is left behind."""
+            print(f"research: run {run} session {sid} didn't end by its limit; ending it without its worker", flush=True)
+
+            def end() -> None:
+                ctl.take_over()
+                stream = ctl.stream
+                if stream is not None and hasattr(stream, "close"):
+                    try:
+                        stream.close()
+                    except Exception:  # noqa: BLE001, S110 - the run ends either way
+                        pass
+                finish(*over_time)
+
+            t = threading.Thread(target=end, name=f"research-end-{run}", daemon=True)
+            t.start()
+            t.join(STOP_WAIT_S)  # a write that blocks here too doesn't hold the slot: ask returns regardless
 
         with self._live_lock:
             self.live[run] = ctl
         try:
             threading.Thread(target=work, name=f"research-run-{run}", daemon=True).start()
             left = max(0.0, MAX_SECONDS - (time.time() - t0))
-            watchdog = self.timer(left, stop, args=(f"The breakdown reached its {MAX_SECONDS // 60}-minute limit.",
-                                                    None, "over_time"))  # fmt: skip
+            watchdog = self.timer(left, stop, args=over_time)
             watchdog.daemon = True
             watchdog.start()
-            ctl.ended.wait()
+            # The limit is wall-clock time: also looked at here, every tick_s, since the timer misses a machine's
+            # sleep. Past it plus END_GRACE_S, the run ends whatever its threads are blocked on, and the slot frees.
+            while not ctl.ended.wait(self.tick_s):
+                over = self.clock() - ctl.deadline  # type: ignore[operator]
+                if over >= END_GRACE_S:
+                    backstop()
+                    break
+                if over >= 0:
+                    stop(*over_time)
             watchdog.cancel()
         finally:
             with self._live_lock:

@@ -196,7 +196,10 @@ dates, wallet addresses and slugs aren't checked.
   answer ends on an `answer.card` built from the findings that counted, with `partial: true`, then a `notice` saying
   why, never on an `error`. An `error` means there was nothing to show.
 - The time budget is a wall clock (a watchdog in the service), not only checked between model rounds: a model
-  request or a read that's blocked or slow still ends the run at the limit, the same way.
+  request or a read that's blocked or slow still ends the run at the limit, the same way. The limit is final: work
+  after the run's end is decided (the tile sweep) stops at the limit plus 15 s, a model request's timeout and retries
+  fit in the time left, and at the limit plus 30 s the service writes the end itself and frees the run's slot,
+  whatever its threads are still blocked on. It also counts time a machine slept (a laptop running it locally).
 - A run the service stops (a deploy: SIGTERM) ends the same way, its findings kept, with the `notice` "This breakdown
   was interrupted by an update. Ask again to finish it." (also when there are no findings, then without a card), then
   `done`. A run the process died in before it could (killed, crashed) gets those events when the service next
