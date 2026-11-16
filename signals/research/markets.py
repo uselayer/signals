@@ -467,7 +467,7 @@ club's next manager, a punishment or points deduction. Other leagues' season mar
 the La Liga title, World Cup qualification) aren't read yet: wallet_markets counts them as left out \
 (near_left_out, with the dollars traded), so say how many and how much where a wallet's totals would miss them, \
 never that the wallet doesn't trade them. Each market's league is named (league): say it when a finding spans \
-leagues, and count by league from it. Outcomes are Yes and No; a share pays $1 if its outcome wins, and its \
+leagues, and count leagues and competitions only from it, never from names in questions or event titles. Outcomes are Yes and No; a share pays $1 if its outcome wins, and its \
 price (0 to 1) is the market's chance. The unit is a market: one market's life for this wallet, from its first buy \
 to its last sell or merge, the resolution, or now. A tile or a market's replay (the market tool) holds every fill \
 over the market's whole life, its merges, splits and conversions (moves), its position after each, and the \

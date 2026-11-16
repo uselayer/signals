@@ -351,3 +351,9 @@ def test_a_tile_for_a_match_the_feed_never_sent_says_no_score() -> None:
     m = {"home": None, "away": None, "coverage": {"recorded": True, "updates": 0}, "goals": []}
     assert workspace.match_brief(m)["recorded"] is False
     assert workspace.match_brief(m | {"home": "A", "away": "B", "coverage": {"recorded": True, "updates": 90}})["recorded"]
+
+
+def test_the_soccer_section_counts_leagues_from_the_tiles_league() -> None:
+    # a run said "6 competitions" over tiles naming 5 (review of #281): leagues are counted from `league` only
+    assert "count leagues and competitions only from it, never from names in questions" in M.SOCCER_PROMPT
+    assert "near_left_out" in M.SOCCER_PROMPT
