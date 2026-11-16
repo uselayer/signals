@@ -227,7 +227,19 @@ def market_facts(m: dict[str, Any]) -> dict[str, Any]:
             # what kind of market it is, from Gamma's own tags (the SDK's rule, as Signals' market chips count it)
             "tags": [str(t.get("label")) for t in m.get("tags") or [] if t.get("label")], "category": category_of(m),
             # one market of a multi-outcome event ("Who will win…?": one market per candidate, often negRisk)
-            "neg_risk": bool(m.get("negRisk")), "group_item": m.get("groupItemTitle") or None}  # fmt: skip
+            "neg_risk": bool(m.get("negRisk")), "group_item": m.get("groupItemTitle") or None,
+            # a game's market (a match): its event's gameId joins it to the live score feed; the kickoff is the
+            # market's gameStartTime (its listed end is the kickoff too); sportsMarketType: moneyline, totals…
+            "game_id": _game_id(m.get("gameId") or event.get("gameId")),
+            "kickoff": _when(m.get("gameStartTime")) or (_when(event.get("startTime")) if event.get("gameId") else None),
+            "sports_market_type": m.get("sportsMarketType") or None}  # fmt: skip
+
+
+def _game_id(x: Any) -> int | None:
+    try:
+        return int(x) if x not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
 
 
 def event_legs(markets: list[dict[str, Any]], shown: set[str]) -> list[dict[str, Any]]:
@@ -264,13 +276,16 @@ class Reads:
 
     def __init__(self, whales: Any, web: httpx.Client | None = None, *, engine: str = ENGINE,
                  recorded_window: Callable[[str], dict[str, Any] | None] | None = None,
-                 chainlink: Callable[[str, int, int], list[list[float]] | None] | None = None) -> None:  # fmt: skip
+                 chainlink: Callable[[str, int, int], list[list[float]] | None] | None = None,
+                 scores: Callable[[int, float, float], dict[str, Any] | None] | None = None) -> None:  # fmt: skip
         self.whales = whales
         self.web = web or httpx.Client(timeout=15.0, headers={"user-agent": "signals-research"})
         self.engine = engine
         # Layer's window reader and Chainlink recordings, once readable (the recorder session's PRs): None = not yet.
         self.recorded_window = recorded_window or (lambda slug: None)
         self.chainlink = chainlink or (lambda symbol, start, end: None)
+        # a match's recorded live score (scores.py): None = no recording token here
+        self.scores = scores or (lambda game_id, start, end: None)
         # reads two callers may ask for at once (Start's tiles and the agent's code): the second waits for the first
         self._memo: dict[Any, tuple[float, Any]] = {}
         self._memo_lock = threading.Lock()
@@ -503,12 +518,12 @@ class Reads:
         return {"wallet": w, "condition_id": condition_id, "moves": rows, "complete": len(raw) < MARKET_MOVES,
                 "source": "Polymarket activity for this market: merges, splits, conversions (uselayer)"}  # fmt: skip
 
-    def price_series(self, token: str, start: int, end: int) -> tuple[list[list[float]], int]:
+    def price_series(self, token: str, start: int, end: int, step: int | None = None) -> tuple[list[list[float]], int]:
         """An outcome's price from ``start`` to ``end`` at one step for the span (PRICE_STEPS: 1 minute to 2 days,
-        15 minutes to 15 days, an hour to 120 days, 4 hours beyond), read in PRICE_CHUNK_S pieces: the last price in
-        each step, at the second Polymarket took it. Returns (points, step in seconds)."""
+        15 minutes to 15 days, an hour to 120 days, 4 hours beyond; or ``step``), read in PRICE_CHUNK_S pieces: the
+        last price in each step, at the second Polymarket took it. Returns (points, step in seconds)."""
         a, b = int(start), int(min(end, now()))
-        step = next(s for lim, s in PRICE_STEPS if lim is None or b - a <= lim)
+        step = step or next(s for lim, s in PRICE_STEPS if lim is None or b - a <= lim)
         seen: dict[int, float] = {}
         at = a
         while at <= b:
@@ -556,6 +571,28 @@ class Reads:
             "largest_price_gap_s": max(gaps) if gaps else None,
             "price_note": (f"{names[1]}'s price is 1 minus {names[0]}'s: only {names[0]}'s history is read."
                            if len(names) == 2 else None)}}  # fmt: skip
+
+    def match_prices(self, facts: dict[str, Any], start: int, end: int) -> dict[str, list[list[float]]]:
+        """A match market's prices over the match itself at Polymarket's finest step (1 minute), whatever the
+        replay's span: the first outcome read, the second 1 minus it (as ``market``)."""
+        names = list(facts.get("tokens") or {})
+        if not names:
+            return {}
+        pts, _ = self.price_series(facts["tokens"][names[0]], start, end, step=60)
+        out = {names[0]: pts}
+        if len(names) == 2:
+            out[names[1]] = [[t, round(1 - p, 6)] for t, p in pts]
+        return out
+
+    def event_game_id(self, event_slug: str) -> int | None:
+        """The gameId of a match's main event (``<league>-<home>-<away>-<date>``), for its side events Gamma lists
+        without one (total corners)."""
+        poly = self.whales._poly
+        try:
+            got = poly._list(poly._profiles + "/events", {"slug": event_slug})
+        except Exception:  # noqa: BLE001 - no game id: the replay says the score wasn't joined
+            return None
+        return next((_game_id(e.get("gameId")) for e in got or [] if e.get("gameId")), None)
 
     def wallet_markets(self, wallet: str, start: Any, end: Any, market_type: str, min_days: float | None = None,
                        top: int | None = None) -> dict[str, Any]:  # fmt: skip
@@ -645,8 +682,8 @@ class Reads:
                                             "usd_in_range": round(by[c]["usd"], 2)})  # fmt: skip
                     continue
                 runs = (f["end"] - f["start"]) / 86_400 if f["end"] and f["start"] else None
-                if runs is not None and runs < days:
-                    continue
+                if runs is not None and runs < days and not (mt.short_ok and mt.short_ok(f)):
+                    continue  # shorter than the timeframe asked, unless the type lets it in (a match market)
                 m = by[c]
                 kept.append({"slug": f["slug"], "condition_id": c, "question": f["question"], "event_slug": f["event_slug"],
                              "event_title": f["event_title"], "group_item": f.get("group_item"),
@@ -655,7 +692,9 @@ class Reads:
                              "result": f["result"], "rule": mt.rule(f), "usd_in_range": round(m["usd"], 2),
                              "fills_in_range": m["fills"], "first_fill_in_range": m["first"],
                              "last_fill_in_range": m["last"],
-                             "bought_in_range": {o: round(v, 2) for o, v in m["bought"].items()}})  # fmt: skip
+                             "bought_in_range": {o: round(v, 2) for o, v in m["bought"].items()},
+                             **({"game_id": f.get("game_id"), "kickoff_iso": iso(f["kickoff"]) if f.get("kickoff") else None,
+                                 "sports_market_type": f.get("sports_market_type")} if mt.score_line else {})})  # fmt: skip
         if mt.hint:  # read hinted first: the tiles are still the most money traded
             kept.sort(key=lambda k: -k["usd_in_range"])
         checked = (f"The {len(looked)} markets checked were those whose slugs name the league first, then the most "
@@ -778,14 +817,15 @@ def reads() -> Reads:
     from uselayer.whales import Whales
 
     from signals.budget import BackgroundHttp, Budget
-    from signals.research import recorded
+    from signals.research import recorded, scores
 
     client = Client()
     rate = float(os.environ.get("RESEARCH_READ_RATE", "4"))
     whales = Whales(BackgroundHttp(client._http, Budget(rate, name="research")), client._layer, client)  # type: ignore[arg-type]
     r2 = recorded.R2.from_env()
     # Layer's built windows first; Chainlink from its raw recording when a window isn't built yet.
-    return Reads(whales, recorded_window=recorded.reader(r2), chainlink=recorded.raw_crypto(r2))
+    return Reads(whales, recorded_window=recorded.reader(r2), chainlink=recorded.raw_crypto(r2),
+                 scores=scores.reader(r2))
 
 
 def now() -> float:

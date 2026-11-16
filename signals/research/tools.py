@@ -124,7 +124,8 @@ TOOLS: list[dict[str, Any]] = [
             "No: [...]} (p 0-1, one point per coverage.price_step_s), outside {name 'Binance BTCUSDT', unit, step, "
             "points [{t, p}] (closes), ranges [{t, h, l}] (each candle's high and low), highest {t, high}, lowest "
             "{t, low}} or null (always null for politics and premier-league: no outside series), trades [{trade_id, t, side (the "
-            "outcome), action, shares, price, usd, outside (the outside line's close at or before the fill)}] "
+            "outcome), action, shares, price, usd, outside (the outside line's close at or before the fill), and in a "
+            "match market match {phase, minute, period, score, since_goal_s, last_goal_by, in_gap, backs, margin}}] "
             "(every fill over the market's whole life), moves [{t, kind (merge: pairs of Yes and No turned into $1 "
             "each | split: dollars into pairs | conversion: negRisk No shares swapped across the event, sides not "
             "listed), shares (pairs), usd, tx}], position [{t, held: {Yes, No}}] (after fills, merges and splits), "
@@ -135,7 +136,14 @@ TOOLS: list[dict[str, Any]] = [
             "read: never say it held to the result), t, merged_pairs, merged_usd}}, coverage {price_step_s, "
             "fills_complete, shares_not_from_fills (true: it sold shares no fill or split shows it buying, so "
             "profit is null; not missing fills), moves_read, moves, converted (true: profit null), outside, "
-            "outside_step, outside_none (why there's no outside line), notes}}. Times are unix seconds."
+            "outside_step, outside_none (why there's no outside line), score (a match: recorded, why, updates, gaps, "
+            "gap_s, goals, corrections), match_price_step_s (the match itself, at 1 minute), notes}, match (a "
+            "premier-league match market, else null: home, away, side (home | away | draw: what this market is about; "
+            "null for totals and others), kickoff, first_live_update, goals [{t, minute, score, by, kind (goal | "
+            "correction), retracted, reinstated, first_said}], periods [{period, word, from, to}], clock [{t, minute, "
+            "period, score}], final {score, t}, axis {from, to} (the match view), counts (its fills against the "
+            "score), coverage {recorded, why, gaps [{from, to, why}], gap_s, updates, goals, corrections}}}. Times "
+            "are unix seconds."
         ),
         "input_schema": {
             "type": "object",

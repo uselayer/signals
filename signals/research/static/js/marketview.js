@@ -4,7 +4,7 @@
 import { html, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { money, signedMoney, cents, shares, plural } from './format.js';
 import { flagsFor, splitFlagged } from './store.js';
-import { MARKET_FILTERS, filterMarkets, marketTally, eventGroups, eventLegs, legsText, buyDots, ruleChip, statusText, profitWord, exitWord, moveText, dateOf, shortDate, dateTime, days, heldText, usdt, marketFacts } from './marketdata.js';
+import { MARKET_FILTERS, filterMarkets, marketTally, eventGroups, eventLegs, legsText, buyDots, ruleChip, statusText, profitWord, exitWord, moveText, dateOf, shortDate, dateTime, days, heldText, usdt, marketFacts, marketBursts, matchText, goalLabel, scoreText } from './marketdata.js';
 
 // a text with the numbers the check flagged struck where they stand (as views.js `flagged`)
 const flagged = (text, flags) => splitFlagged(text, flags).map(p => (p.flag ? html`<span class="flagnum" title="Didn't match the data">${p.text}</span>` : p.text));
@@ -49,7 +49,7 @@ export function MarketsStage({ inv, ui, act, plan, live, borrowed }) {
   const fl = MARKET_FILTERS.find(f => f[0] === ui.wf), cnt = k => all.filter(s => marketFacts(s)[k]).length;
   return html`<div class="ov">
     ${borrowed && html`<p class="muted small">${borrowed.named ? 'The markets its findings read, from your earlier question.' : 'Markets from your earlier question: this one read none of its own.'}</p>`}
-    ${sel && html`<p class="muted small">${sel.label}: its ${plural(sel.shown, 'market')} with the most money traded from ${shortDate(sel.from)} to ${shortDate(sel.to)}${sel.matched > sel.shown ? `, of ${sel.matched} that match` : ''}${sel.markets_traded > sel.markets_looked_at ? ` (the ${sel.markets_looked_at} markets it traded most were checked, of ${sel.markets_traded})` : ''}; only markets that run ${sel.min_days} days or more.${sel.trades_complete === false ? ` It trades so often that only ${shortDate(sel.from)} onward was read (newest first, up to 30,000 trades), not all ${Math.round((sel.to - (sel.asked_from || sel.from)) / 86400)} days asked for.` : ''}</p>`}
+    ${sel && html`<p class="muted small">${sel.label}: its ${plural(sel.shown, 'market')} with the most money traded from ${shortDate(sel.from)} to ${shortDate(sel.to)}${sel.matched > sel.shown ? `, of ${sel.matched} that match` : ''}${sel.markets_traded > sel.markets_looked_at ? ` (the ${sel.markets_looked_at} markets it traded most were checked, of ${sel.markets_traded})` : ''}; only markets that run ${sel.min_days} days or more${sel.also_short ? `, and ${sel.also_short} whatever their length` : ''}.${sel.trades_complete === false ? ` It trades so often that only ${shortDate(sel.from)} onward was read (newest first, up to 30,000 trades), not all ${Math.round((sel.to - (sel.asked_from || sel.from)) / 86400)} days asked for.` : ''}</p>`}
     <p class="tally">${n.decided > 0 ? html`Made money in <b>${n.made} of ${plural(n.decided, 'market')}</b> that ended or it sold out of (<span class="gain">${signedMoney(n.profitMade)}</span>) and lost money in <b>${n.lostMoney}</b> (<span class="loss">${signedMoney(n.profitLost)}</span>).` : 'No market here has ended or been sold out of yet.'}
       ${n.open > 0 && html` <b>${plural(n.open, 'market')}</b> still open: <b class=${n.profitOpen >= 0 ? 'gain' : 'loss'}>${signedMoney(n.profitOpen)}</b> at today's prices, not a result.`}
       ${n.uncounted > 0 && html` ${plural(n.uncounted, 'market')} not counted: it sold shares its fills don't show it buying.`}</p>
@@ -67,6 +67,7 @@ export function MarketsStage({ inv, ui, act, plan, live, borrowed }) {
       const c = s.coverage || {}, rc = ruleChip(s.rule);
       return html`<button class=${'tile mtile ' + cls} key=${s.window_id} onClick=${() => act.openWin(s.window_id)} aria-label=${s.title}>
         <div class="mt">${s.title}</div>
+        ${s.match && html`<div class="mscore">${s.match.recorded ? html`${s.match.home} <b>${s.match.final ? scoreText(s.match.final.score) : 'v'}</b> ${s.match.away}${(s.match.counts || {}).buys ? html` · <span title="Buys while the match was being played, by the recorded score">${plural((s.match.counts.buys_in_play || {}).fills || 0, 'buy')} in play</span>` : ''}` : html`<span class="muted">No score recorded</span>`}</div>`}
         <div class="tt"><span>${shortDate(s.start)} → ${s.open ? 'now' : shortDate(s.end)}</span><span class=${s.open ? 'open' : 'res'}>${statusText(s)}</span></div>
         <${MarketSpark} s=${s} />
         <div class="tf"><span>${plural((s.entries || []).length, 'fill')} · held ${s.held_days == null ? '–' : days(s.held_days * 86400)}</span><span class=${s.profit == null ? 'muted' : s.profit >= 0 ? 'gain' : 'loss'}>${s.profit == null ? 'not counted' : signedMoney(s.profit)}${s.open && s.profit != null ? ' open' : ''}</span></div>
@@ -111,7 +112,7 @@ function EveryBuyChart({ tiles, act }) {
 
 // ---------- one market's replay
 function chartGeom(w, W, compact) {
-  const ml = compact ? 8 : 74, mr = compact ? 8 : 112, top = 10;
+  const ml = compact ? 8 : 74, mr = compact ? 8 : 112, top = w.matchView ? (compact ? 34 : 40) : 10;
   // no outside line (politics): no empty panel for it, the market's own price comes first
   const hB = !w.out ? 0 : compact ? 120 : 180, hP = compact ? 90 : 120, hQ = compact ? 50 : 70, g = compact ? 10 : 18, ax = 26;
   const yB0 = top, yP0 = yB0 + hB + (w.out ? g : 6), yQ0 = yP0 + hP + g, H = yQ0 + hQ + ax;
@@ -131,8 +132,44 @@ function chartGeom(w, W, compact) {
 }
 
 function dateTicks(w, n) {
+  if (w.to - w.from < 2 * 86400) {  // the match view: times of day, every 15 minutes to 6 hours
+    const span = w.to - w.from, st = [900, 1800, 3600, 7200, 21600].find(s => span / s <= n) || 43200, out = [];
+    for (let t = Math.ceil(w.from / st) * st; t <= w.to; t += st) out.push(t);
+    return out;
+  }
   const span = w.to - w.from, stepD = [1, 2, 7, 14, 30, 60].find(d => span / (d * 86400) <= n) || 90, out = [];
   for (let t = Math.ceil(w.from / 86400 / stepD) * stepD * 86400; t <= w.to; t += stepD * 86400) out.push(t);
+  return out;
+}
+
+// The match on the chart: in the match view its halves and half-time, kick-off, full time, each goal (when the feed
+// said so; one it took back dashed) and the recording's gaps (hatched); in the whole market's view a band for it.
+function matchMarks(w, G) {
+  const m = w.match, y0 = G.yP0, y1 = G.yQ0 + G.hQ, out = [], vis = t => t >= w.from && t <= w.to, cx = t => Math.max(G.ml, Math.min(G.W - G.mr, G.X(t)));
+  if (!w.matchView) {
+    const a = m.axis.from, b = m.axis.to;
+    if (b < w.from || a > w.to) return out;
+    out.push(html`<rect x=${cx(a)} y=${y0} width=${Math.max(2, cx(b) - cx(a))} height=${y1 - y0} fill="var(--accent)" opacity=".08"><title>The match: open “The match” to see it minute by minute</title></rect>`);
+    return out;
+  }
+  for (const p of m.periods) {
+    const a = p.from, b = p.to || w.to;
+    if (b < w.from || a > w.to) continue;
+    const brk = p.period === 'HT' || p.period === 'ETHT';
+    if (brk) out.push(html`<rect x=${cx(a)} y=${y0} width=${Math.max(1, cx(b) - cx(a))} height=${y1 - y0} fill="var(--soft)" />`);
+    if (['1H', '2H', 'HT', 'ET1', 'ET2'].includes(p.period) && cx(b) - cx(a) > (G.compact ? 26 : 40)) out.push(html`<text class="axs" x=${(cx(a) + cx(b)) / 2} y=${G.yQ0 - 5} text-anchor="middle">${{ '1H': '1st half', '2H': '2nd half', HT: 'Half-time', ET1: 'Extra time', ET2: 'Extra time' }[p.period]}</text>`);
+  }
+  for (const g of m.gaps) if (g.to > w.from && g.from < w.to) out.push(html`<rect x=${cx(g.from)} y=${y0} width=${Math.max(2, cx(g.to) - cx(g.from))} height=${y1 - y0} fill="url(#rhatch)"><title>${`${g.why}: ${dateTime(g.from)} to ${new Date(g.to * 1000).toISOString().slice(11, 19)} UTC. The score here is only known from the next update.`}</title></rect>`);
+  const line = (t, dash, label, row, strong) => html`<g><line x1=${G.X(t)} x2=${G.X(t)} y1=${y0 - (row ? 16 : 4)} y2=${y1} stroke="var(--fg)" stroke-width=${strong ? 1.3 : 1} stroke-dasharray=${dash ? '4 3' : null} opacity=${strong ? 0.75 : 0.45} />
+    <text class="axs goal" x=${G.X(t) + 3} y=${y0 - (row ? 20 : 8)}>${label}</text></g>`;
+  if (m.kickoff && vis(m.kickoff) && (!m.firstLive || Math.abs(m.firstLive - m.kickoff) > 120)) out.push(line(m.kickoff, true, G.compact ? 'KO' : 'Kick-off (scheduled)', 1, false));
+  if (m.final && vis(m.final.t)) out.push(line(m.final.t, false, `FT ${scoreText(m.final.score)}`, 1, false));
+  let lastX = -1e9, row = 0;
+  for (const g of m.goals) {
+    if (g.kind === 'correction' || !vis(g.t)) continue;
+    row = G.X(g.t) - lastX < (G.compact ? 40 : 58) ? 1 - row : 0; lastX = G.X(g.t);
+    out.push(html`<g><title>${`${dateTime(g.t)}: the feed showed ${scoreText(g.score)}${g.minute != null ? ` in the ${g.minute}th minute` : ''}${g.retracted ? ', then took it back' : ''}${g.reinstated ? ' again, after taking it back' : ''}${g.after_gap ? '. It came after a recording gap, so it may have happened earlier' : ''}.`}</title>${line(g.t, g.retracted, goalLabel(g), row, !g.retracted)}</g>`);
+  }
   return out;
 }
 
@@ -165,7 +202,9 @@ function MarketChart({ w, width, compact, ph, sel, onBurst, onHover }) {
     if (w.out && w.out.pts.length) { const last = w.out.pts[w.out.pts.length - 1]; ax.push(html`<text class="endl" x=${G.W - G.mr + 8} y=${G.YB(last[1]) + (k && Math.abs(G.YB(last[1]) - G.YB(k)) < 13 ? 16 : 4)} fill="var(--binance)">Binance ${usdt(last[1])}</text>`); }
     for (const o of w.outcomes) { const p = (w.prices[o] || []).slice(-1)[0]; if (p) ax.push(html`<text class="endl" x=${G.W - G.mr + 8} y=${G.YP(p[1]) + 4} fill=${sideColor(w, o)}>${o} ${cents(p[1])}</text>`); }
   }
-  for (const t of dateTicks(w, compact ? 4 : 8)) ax.push(html`<text class="ax" x=${G.X(t)} y=${G.yQ0 + G.hQ + 18} text-anchor="middle">${shortDate(t)}</text>`);
+  const hhmm = t => new Date(t * 1000).toISOString().slice(11, 16);
+  for (const t of dateTicks(w, compact ? 4 : 8)) ax.push(html`<text class="ax" x=${G.X(t)} y=${G.yQ0 + G.hQ + 18} text-anchor="middle">${w.to - w.from < 2 * 86400 ? hhmm(t) : shortDate(t)}</text>`);
+  if (w.match) f.unshift(...matchMarks(w, G));
   if (w.marketEnd && w.marketEnd <= w.to) ax.push(html`<line x1=${G.X(w.marketEnd)} x2=${G.X(w.marketEnd)} y1=${G.yB0} y2=${G.yQ0 + G.hQ} stroke="var(--faint)" stroke-dasharray="3 3" /><text class="axs" x=${G.X(w.marketEnd) - 4} y=${G.yB0 + 10} text-anchor="end">${w.result ? `resolved ${w.result}` : 'ended'}</text>`);
   const marks = w.bursts.map(b => {
     const x = G.X(b.t0), y = G.YP(b.avg), col = sideColor(w, b.side), s = Math.min(compact ? 4.5 : 6.5, 3 + Math.sqrt(b.shares) / 15), on = sel === b.id;
@@ -188,20 +227,35 @@ function MarketChart({ w, width, compact, ph, sel, onBurst, onHover }) {
     ${ph != null && html`<line x1=${G.X(ph)} x2=${G.X(ph)} y1=${G.yB0} y2=${G.yQ0 + G.hQ} stroke="var(--accent)" stroke-width="1.4" />`}</svg>`;
 }
 
+// A match market seen over the match only: its prices, position and fills from ten minutes before to ten after.
+function matchView(w) {
+  const { from, to } = w.match.axis, inV = t => t >= from && t <= to;
+  const cut = rows => { const i = rows.findIndex(r => r[0] >= from); const before = i > 0 ? rows[i - 1] : i < 0 && rows.length ? rows[rows.length - 1] : null; return [...(before ? [[from, ...before.slice(1)]] : []), ...rows.filter(r => inV(r[0]))]; };
+  const prices = Object.fromEntries(Object.entries(w.prices).map(([o, r]) => [o, cut(r)]));
+  const pos = [[from, w.posAt(from)], ...w.pos.filter(p => inV(p[0]))];
+  return { ...w, from, to, prices, pos, matchView: true, moves: (w.moves || []).filter(m => inV(m.t)), bursts: w.bursts.filter(b => inV(b.t0)) };
+}
+
 export function MarketReplay({ inv, ui, act, w, steps }) {
   const [box, width] = useWidth();
   const [hover, setHover] = useState(null);
+  const [span, setSpan] = useState(null);  // null: the match unless the step being read is outside it
   if (w === 'loading') return html`<div class="ghostbox">Loading this market…</div>`;
   if (!w || w.error) return html`<div class="ghostbox">${w && w.error ? `This market couldn't be loaded: ${w.error}` : 'Pick a market from Markets.'}</div>`;
   const compact = width < 620;
   const step = steps[Math.min(ui.step, steps.length - 1)] || steps[0];
+  const M = w.match, canMatch = !!(M && M.axis);
+  const inMatch = t => canMatch && t >= M.axis.from && t <= M.axis.to;
+  const view = !canMatch ? 'whole' : span || (step && !ui.full && !inMatch(step.t) ? 'whole' : 'match');
+  const full = w;
+  w = view === 'match' ? matchView(w) : w;
   const ph = hover ?? (ui.full || !step ? null : step.t);
   const T = w.totals, cov = w.cov || {}, ws = inv.summaries, wi = ws.findIndex(s => s.window_id === w.id);
   const go = i => act.setStep(Math.max(0, Math.min(steps.length - 1, i)));
   // a step reads where its own fills end, so "Holding" counts every fill the step describes
   const stepEnd = s => { const ids = new Set(s.trade_ids || []); return w.trades.reduce((m, x) => (ids.has(x.trade_id) ? Math.max(m, x.t) : m), s.t); };
   const ro = Math.round(hover ?? (ph != null && step ? stepEnd(step) : ph) ?? w.to), ob = w.outAt(ro);
-  const pop = ui.pop && w.bursts.find(b => b.id === ui.pop);
+  const pop = ui.pop && full.bursts.find(b => b.id === ui.pop);
   const covLine = [cov.price_step_s ? `the market's price every ${stepWord(cov.price_step_s)}` : null,
     w.out ? `${w.out.name} in ${w.out.step} candles (their highs and lows shaded)` : cov.outside_none ? null : 'no outside price for this market',
     ...(cov.notes || [])].filter(Boolean);
@@ -209,25 +263,29 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
     <div class="wv-head"><h3>${w.title}${/[?!.]$/.test(w.title || '') ? '' : ':'} ${w.out ? `${w.out.name}, ` : ''}${w.outcomes.join(' and ')} on Polymarket, its fills</h3>
       <span class="tag observed">${statusText({ profit_kind: T.kind, result: w.result, exit: T.exit })}</span>
       <div class="nav"><button class="icon" aria-label="Previous market" disabled=${wi <= 0} onClick=${() => act.openWin(ws[wi - 1].window_id)}>‹</button>${wi >= 0 ? `Market ${wi + 1} of ${ws.length}` : ''}<button class="icon" aria-label="Next market" disabled=${wi < 0 || wi >= ws.length - 1} onClick=${() => act.openWin(ws[wi + 1].window_id)}>›</button></div></div>
-    <div class="sum"><span><b>${plural(w.trades.length, 'fill')}</b> from ${w.hold.from ? dateOf(w.hold.from) : '–'}, held ${w.hold.days == null ? '–' : days(w.hold.days * 86400)}</span>
+    <div class="sum"><span><b>${plural(full.trades.length, 'fill')}</b> from ${w.hold.from ? dateOf(w.hold.from) : '–'}, held ${w.hold.days == null ? '–' : days(w.hold.days * 86400)}</span>
       <span>Spent <b>${money(T.cost)}</b>${T.sold ? html`, ${(w.moves || []).some(m => m.kind === 'merge') ? 'got back' : 'sold for'} <b>${money(T.sold)}</b>` : ''}</span>
       <span>${T.profit == null ? html`<b class="muted">Profit not counted</b>` : html`<b class=${T.profit >= 0 ? 'gain' : 'loss'}>${signedMoney(T.profit)}</b>`} ${profitWord({ profit_kind: T.kind })}</span>
       ${w.rule && w.rule.says && html`<span class="rule"><b>What resolves it:</b> ${w.rule.says}.</span>`}
       <span class="cov">${covLine.join(' · ')}</span></div>
+    ${canMatch && html`<div class="spanpick"><div class="seg" role="radiogroup" aria-label="Chart span">${[['match', 'The match'], ['whole', 'Whole market']].map(([k, label]) => html`<button type="button" role="radio" aria-checked=${view === k ? 'true' : 'false'} class=${view === k ? 'on' : ''} onClick=${() => setSpan(k)}>${label}</button>`)}</div>
+      <span class="muted small">${M.recorded ? `${M.home} ${M.final ? scoreText(M.final.score) : 'v'} ${M.away}${M.final ? '' : ' (not finished when read)'}: the score as polymarket.com's live feed said it, recorded by Layer${M.gaps.length ? `; ${M.gaps.length} recording gap${M.gaps.length > 1 ? 's' : ''} hatched` : ''}` : M.why || 'No score was recorded for this match.'}</span></div>`}
     <div class="legend">
       ${w.out && html`<span><i class="sw" style="border-color:var(--binance)"></i>${w.out.name} (${w.out.unit || 'USDT'}): what these markets resolve on</span>`}
+      ${view === 'match' && M.recorded && html`<span><svg width="12" height="12"><line x1="6" x2="6" y1="0" y2="12" stroke="var(--fg)" stroke-width="1.3" /></svg>Goals, when the feed showed them${M.corrections ? ' (dashed: one it took back)' : ''}</span><span><i class="sw" style="border-color:var(--soft);border-top-width:8px"></i>Half-time</span>`}
       ${w.rule && w.rule.strike && html`<span><i class="sw" style="border-color:var(--fg);border-top-style:dashed"></i>${usdt(w.rule.strike)}, the price in the question</span>`}
       ${w.outcomes.map(o => html`<span><i class="sw" style=${`border-color:${sideColor(w, o)}`}></i>${o}</span>`)}
       ${(w.moves || []).length > 0 && html`<span><svg width="12" height="12"><path d="M6 1L11 6L6 11L1 6Z" fill="none" stroke="var(--fg)" stroke-width="1.4" /></svg>Merges and splits (on the position)</span>`}
-      <span><svg width="12" height="10"><path d="M6 1 L1 9 H11Z" fill="var(--up)" /></svg>Buys <svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="var(--up)" stroke-width="1.6" /></svg>Sells, at the price paid (${w.trades.length > 400 ? 'fills within a day' : w.trades.length > 150 ? 'fills within six hours' : 'fills within an hour'} drawn as one)</span></div>
+      <span><svg width="12" height="10"><path d="M6 1 L1 9 H11Z" fill="var(--up)" /></svg>Buys <svg width="10" height="10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="var(--up)" stroke-width="1.6" /></svg>Sells, at the price paid (${view === 'match' ? 'fills within a minute' : w.trades.length > 400 ? 'fills within a day' : w.trades.length > 150 ? 'fills within six hours' : 'fills within an hour'} drawn as one)</span></div>
     <div class="readout" aria-live="off"><b>${dateTime(ro)}</b>
       ${w.out && html`<span><span class="k">${w.out.name}</span> ${ob == null ? 'not read' : usdt(ob)}</span>`}
       ${w.outcomes.map(o => html`<span><span class="k">${o}</span> ${w.priceAt(o, ro) == null ? '–' : cents(w.priceAt(o, ro))}</span>`)}
-      <span><span class="k">Holding</span> ${heldText(w, ro)}</span>${hover == null && html`<span class="k">· Hover to read any day; click a fill to ask about it</span>`}</div>
+      ${M && html`<span><span class="k">Match</span> ${(() => { const s = w.scoreAt(ro); return !M.recorded ? 'no score recorded' : !s ? (M.kickoff && ro < M.kickoff ? 'before kick-off' : 'not started') : `${s.minute != null && ['1H', '2H', 'ET1', 'ET2'].includes(s.period) ? `${s.minute}' ` : s.period === 'HT' ? 'half-time ' : ['FT', 'VFT', 'AET', 'PEN'].includes(s.period) ? 'full time ' : ''}${scoreText(s.score)}`; })()}</span>`}
+      <span><span class="k">Holding</span> ${heldText(w, ro)}</span>${hover == null && html`<span class="k">· Hover to read any ${view === 'match' ? 'minute' : 'day'}; click a fill to ask about it</span>`}</div>
     <div class="chartbox" ref=${box}><${MarketChart} w=${w} width=${width} compact=${compact} ph=${ph} sel=${ui.pop} onBurst=${b => act.pop(b.id)} onHover=${setHover} />
       ${pop && html`<div class="pop" style="left:8px;top:16px" role="dialog" aria-label="Fills"><h4>${pop.action === 'buy' ? 'Bought' : 'Sold'} ${shares(pop.shares)} ${pop.side} in ${plural(pop.fills.length, 'fill')}</h4>
         <p class="muted small">${dateTime(pop.t0)} · ${money(pop.usd)}${w.outAt(pop.t0) != null ? ` · ${w.out.name} ${usdt(w.outAt(pop.t0))}` : ''}</p>
-        <div class="rows"><table><thead><tr><th>Time (UTC)</th><th>Shares</th><th>Price</th></tr></thead><tbody>${pop.fills.map(x => html`<tr><td>${dateTime(x.t)}</td><td>${shares(x.shares)}</td><td>${cents(x.price)}</td></tr>`)}</tbody></table></div>
+        <div class="rows"><table><thead><tr><th>Time (UTC)</th><th>Shares</th><th>Price</th>${M && html`<th>The match then</th>`}</tr></thead><tbody>${pop.fills.map(x => html`<tr><td>${M ? new Date(x.t * 1000).toISOString().slice(11, 19) : dateTime(x.t)}</td><td>${shares(x.shares)}</td><td>${cents(x.price)}</td>${M && html`<td>${matchText(x)}</td>`}</tr>`)}</tbody></table></div>
         <div class="acts"><button class="btn sm primary" onClick=${() => act.askMarketBurst(w, pop)}>Why here?</button><button class="btn sm" onClick=${() => act.pop(null)}>Close</button></div></div>`}</div>
     ${step && html`<div class="stepbar">
       <button class="icon" aria-label="Previous step" onClick=${() => go(ui.step - 1)}>◀</button>
@@ -247,9 +305,9 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
 export function MarketTrades({ w, act }) {
   if (!w || w === 'loading' || w.error) return html`<div class="ghostbox">Open a market to see its fills.</div>`;
   return html`<div class="ov"><p class="muted small">This market's ${plural(w.trades.length, 'fill')} over its whole life, from the wallet's own trade history. Click one to see it on the chart.</p>
-    <div class="tablewrap"><table class="tr"><thead><tr><th>Time (UTC)</th><th>Trade</th><th>Price</th><th>Paid</th><th>${w.out ? w.out.name : 'Outside price'}</th><th>Holding after</th></tr></thead><tbody>
+    <div class="tablewrap"><table class="tr"><thead><tr><th>Time (UTC)</th><th>Trade</th><th>Price</th><th>Paid</th><th>${w.match ? 'The match then' : w.out ? w.out.name : 'Outside price'}</th><th>Holding after</th></tr></thead><tbody>
     ${w.trades.map(x => html`<tr class="click" onClick=${() => act.openAt(w.id, x.t)}><td>${dateTime(x.t)}</td>
       <td>${x.action === 'buy' ? 'Bought' : 'Sold'} ${shares(x.shares)} <span style=${`color:${sideColor(w, x.side)};font-weight:600`}>${x.side}</span></td><td>${cents(x.price)}</td><td>${money(x.usd || 0)}</td>
-      <td>${x.outside == null ? '–' : usdt(x.outside)}</td><td>${heldText(w, x.t)}</td></tr>`)}
+      <td>${w.match ? matchText(x) : x.outside == null ? '–' : usdt(x.outside)}</td><td>${heldText(w, x.t)}</td></tr>`)}
     </tbody></table></div></div>`;
 }

@@ -117,20 +117,24 @@ export function prepMarket(r, summary) {
   w.trades = (r.trades || []).map((x, i) => ({ ...x, i, price: x.price * 100, liq: null })).sort((a, b) => a.t - b.t || a.i - b.i);
   w.pos = (r.position || []).map(p => [p.t, p.held || {}]);
   w.posAt = t => { let h = {}; for (const [tt, v] of w.pos) { if (tt <= t) h = v; else break; } return h; };
-  w.bursts = marketBursts(w.trades);
+  w.match = prepMatch(r.match);
+  // fills during the match draw a mark per minute, not per hour (a match is decided in 90 minutes)
+  const ax = w.match && w.match.axis;
+  w.bursts = marketBursts(w.trades, ax ? x => (x.t >= ax.from && x.t <= ax.to ? MATCH_BURST_GAP : null) : null);
+  w.scoreAt = t => scoreAt(w.match, t);
   const v = r.value || {};
   w.totals = { cost: v.cost || 0, sold: v.sold_for || 0, payout: v.payout, valueNow: v.value_now, profit: v.profit, kind: v.profit_kind, note: summary && summary.profit_note, exit: v.exit || null };
   w.side = (summary && summary.spark_side) || outcomes[0];
   return w;
 }
 
-export function marketBursts(trades) {
+export function marketBursts(trades, gapFor = null) {
   const out = [], open = {};
   // a busy market (hundreds of fills over months) draws a mark per day or per six hours, not per hour
   const gap = trades.length > 400 ? 86400 : trades.length > 150 ? 6 * 3600 : BURST_GAP;
   for (const x of trades) {
-    const k = x.side + x.action, b = open[k];
-    if (b && x.t - b.t1 <= gap) { b.fills.push(x); b.t1 = x.t; continue; }
+    const own = gapFor && gapFor(x), k = x.side + x.action + (own ? 'm' : ''), b = open[k];
+    if (b && x.t - b.t1 <= (own || gap)) { b.fills.push(x); b.t1 = x.t; continue; }
     open[k] = { side: x.side, action: x.action, t0: x.t, t1: x.t, fills: [x] };
     out.push(open[k]);
   }
@@ -141,6 +145,45 @@ export function marketBursts(trades) {
   }
   return out.sort((a, b) => a.t0 - b.t0);
 }
+
+// ---------- a match market's score line (r.match: Layer's recording of polymarket.com's live sports feed)
+const MATCH_BURST_GAP = 60;
+export const scoreText = s => String(s || '').replace('-', '–');
+
+// The match as the replay draws it: goals (each score change, when the feed said so), periods, the clock, the
+// final score and the match view's span. Null for any other market.
+export function prepMatch(m) {
+  if (!m) return null;
+  const cov = m.coverage || {};
+  return {
+    home: m.home, away: m.away, side: m.side, kickoff: m.kickoff, firstLive: m.first_live_update, final: m.final,
+    goals: m.goals || [], periods: m.periods || [], clock: (m.clock || []).map(c => [c.t, c.minute, c.period, c.score]),
+    axis: m.axis, counts: m.counts || {}, recorded: !!cov.recorded && (cov.updates || 0) > 0, why: cov.why,
+    gaps: cov.gaps || [], gapS: cov.gap_s || 0, updates: cov.updates || 0, corrections: cov.corrections || 0,
+  };
+}
+
+// The match at t as the feed had it: {minute, period, score}, null before its first update.
+export function scoreAt(m, t) {
+  if (!m || !m.clock.length || t < m.clock[0][0]) return null;
+  let lo = 0, hi = m.clock.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (m.clock[mid][0] <= t) lo = mid; else hi = mid - 1; }
+  const [, minute, period, score] = m.clock[lo];
+  return { minute, period, score };
+}
+
+const PHASE = { pre_kickoff: 'before kick-off', half_time: 'at half-time', after_full_time: 'after full time', unknown: 'before the feed said the match had started' };
+// One fill's match context in a few words: "54' · 0–2 · 31 s after a goal" (x.match is server-built).
+export function matchText(x) {
+  const m = x && x.match;
+  if (!m) return '–';
+  if (m.phase !== 'in_play') return PHASE[m.phase] ? `${PHASE[m.phase][0].toUpperCase()}${PHASE[m.phase].slice(1)}${m.phase === 'half_time' && m.score ? ` · ${scoreText(m.score)}` : ''}` : '–';
+  const after = m.since_goal_s == null ? '' : m.since_goal_s < 90 ? ` · ${Math.round(m.since_goal_s)} s after a goal` : m.since_goal_s < 600 ? ` · ${Math.round(m.since_goal_s / 60)} min after a goal` : '';
+  return `${m.minute != null ? `${m.minute}' · ` : ''}${scoreText(m.score)}${after}${m.in_gap ? ' · in a recording gap' : ''}`;
+}
+
+// A goal's label on the chart: "0–1 45'", a goal the feed took back "1–3 66', taken back".
+export const goalLabel = g => `${scoreText(g.score)}${g.minute != null ? ` ${g.minute}'` : ''}${g.retracted ? ', taken back' : ''}`;
 
 // A merge, split or conversion in words ("Merges 3,200 pairs of Yes and No into $3,200").
 export function moveText(w, m) {
@@ -160,6 +203,7 @@ export function marketBurstText(w, b) {
   const verb = b.action === 'buy' ? 'Buys' : 'Sells';
   return `${verb} ${shares(b.shares)} ${b.side} in ${plural(b.fills.length, 'fill')}${b.t1 > b.t0 ? ` over ${days(b.t1 - b.t0)}` : ''}, at ${range(b)} (${money(b.usd)}). `
     + (o != null ? `${w.out.name} was ${usdt(o)}${k ? `, ${Math.abs(Math.round(1000 * (k - o) / o) / 10)}% ${k >= o ? 'below' : 'above'} the ${usdt(k)} in the question` : ''}. ` : '')
+    + (w.match && b.fills[0].match ? `The match: ${matchText(b.fills[0])}. ` : '')
     + `Holding ${heldText(w, b.t1)}.`;
 }
 
