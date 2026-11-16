@@ -93,6 +93,47 @@ export function scopeSlots(scope) {
   return out.length ? out : null;
 }
 // A run's name: the breakdown's title for the first, else its plan's title, else what was asked.
+// The ask box's Market and Time range (George West, 13 Nov: no filter by market or time frame; the default is the
+// 15-minute view, and he wants a month or two; and traders keep different timelines, so short ones too, such as an
+// hour). The ranges each unit can build, in hours: every 15-minute window the wallet traded is built, so an hour to
+// three days; one tile per market (its 20 with the most money), so 30 to 90 days, 90 the plan's own default
+// (case.MARKET_DAYS).
+export const RANGES = {
+  window: [[1, 'Last hour'], [6, 'Last 6 hours'], [24, 'Last 24 hours'], [72, 'Last 3 days']],
+  market: [[720, 'Last 30 days'], [1440, 'Last 60 days'], [2160, 'Last 90 days']],
+};
+export const defaultRange = unit => (unit === 'window' ? 24 : 2160);
+const isoAt = t => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+const hoursWord = h => (h === 1 ? 'hour' : h < 48 ? `${h} hours` : `${Math.round(h / 24)} days`);
+// The lines sent with the question, beside "Wallet: …": the agent picks the plan's scope from the question, so the
+// market type's id and the exact start go in words it can't misread.
+export function askScope(type, hours, now = Date.now() / 1000) {
+  const step = type.unit === 'window' ? 900 : 3600;
+  const from = isoAt(Math.floor((now - hours * 3600) / step) * step);
+  return `Market: ${type.label} (market_type ${type.id})\nTime range: the last ${hoursWord(hours)}, from ${from} to now`;
+}
+// A plan's scope in words, for the plan card: "Politics markets, 17 Aug 2026 to now (90 days), only markets that
+// run 7 days or more". A time it can't read is shown as written.
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export function scopeText(p, now = Date.now() / 1000) {
+  const sc = (p && p.scope) || {};
+  if (!sc.from) return 'as asked';
+  const m = p.market || {}, win = (m.unit || (sc.market_type && sc.market_type !== 'btc-updown-15m' ? 'market' : 'window')) === 'window';
+  const isNow = v => String(v).trim().toLowerCase() === 'now';
+  const at = v => { if (isNow(v)) return now; const t = Date.parse(v); return isNaN(t) ? null : t / 1000; };
+  const word = (v, t) => {
+    if (isNow(v)) return 'now';
+    if (t == null) return String(v);
+    const d = new Date(t * 1000), date = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    return win ? `${date} ${d.toISOString().slice(11, 16)} UTC` : date;
+  };
+  const to = sc.to || 'now', a = at(sc.from), b = at(to), span = a != null && b != null && b > a ? (b - a) / 86400 : null;
+  const hrs = span == null ? 0 : Math.max(1, Math.round(span * 24));
+  const len = span == null ? '' : span < 1.5 ? ` (${hrs} hour${hrs === 1 ? '' : 's'})` : ` (${Math.round(span)} days)`;
+  const what = m.label ? `${m.label} ${win ? 'windows' : 'markets'}, ` : '';
+  const min = !win && sc.min_days ? `, only markets that run ${sc.min_days} days or more` : '';
+  return `${what}${word(sc.from, a)} to ${word(to, b)}${len}${min}`;
+}
 export function runTitle(s, r, i) {
   const planIt = r.groups.flatMap(g => g.items).find(x => x.type === 'plan');
   const t = i === 0 ? (s.title || (r.groups[0].ask || {}).text) : (planIt && s.plans[planIt.plan_id] ? s.plans[planIt.plan_id].title : (r.groups[0].ask || {}).text);

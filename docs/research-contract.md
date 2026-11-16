@@ -12,7 +12,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 
 | Route | |
 |---|---|
-| `GET /api/research/config` | `{clerk_key, event_version}` |
+| `GET /api/research/config` | `{clerk_key, event_version, market_types: [{id, label, unit, min_days}]}` (the ask box's Market choice, from `markets.TYPES`) |
 | `POST /api/research/sessions` `{title?}` | a new investigation → `{id}` |
 | `GET /api/research/sessions` | yours → `{sessions: [{id, created, title, running?, progress?}]}`; a running one has `running: true` and `progress {started_at, typical_s, limit_s, steps?, done?, step?}` (steps only for a Started plan, counted from `step.status`); one that isn't has its latest run's `ended` and, when that run stopped on an error, `stopped` (its kind). The pages call an `ended` after you last opened it Ready. A Start waiting its turn has `queued: true` |
 | `GET /api/research/sessions/{id}` | `{id, title, created, running, events}` (every event so far) |

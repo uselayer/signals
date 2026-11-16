@@ -143,11 +143,12 @@ def health() -> dict[str, Any]:
 
 @app.get("/api/research/config")
 def config() -> dict[str, Any]:
-    """What the research page needs before it draws: Clerk's publishable key (the engine's, same domain) and the
-    event version it speaks."""
+    """What the research page needs before it draws: Clerk's publishable key (the engine's, same domain), the
+    event version it speaks and the market types a breakdown can study (the ask box's Market choice)."""
+    from signals.research import markets
     from signals.research.agent import EVENT_VERSION
 
-    return {"clerk_key": auth.CLERK_KEY or None, "event_version": EVENT_VERSION}
+    return {"clerk_key": auth.CLERK_KEY or None, "event_version": EVENT_VERSION, "market_types": markets.described()}
 
 
 @app.post("/api/research/sessions")

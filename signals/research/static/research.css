@@ -100,6 +100,10 @@ p { margin: 0; }
 .compose-big { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
 .compose-big input, .compose-big textarea { border: 0; background: transparent; font: 16px/1.5 var(--font); color: var(--fg); outline: none; width: 100%; resize: none; }
 .compose-big input { font-size: 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.compose-big .pickers { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.pickers label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+.pickers select { font: 500 14px var(--font); color: var(--fg); background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+.pickers .small { flex-basis: 100%; }
 .compose-big .foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .compose-big .foot .btn { flex: none; white-space: nowrap; }
 .list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }

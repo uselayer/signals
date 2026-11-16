@@ -5,7 +5,7 @@
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser } from './api.js';
 import { fixtureApi } from './fixtures.js';
-import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun } from './store.js';
+import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun, RANGES, defaultRange, askScope } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
 import { PlanStage, WindowsStage, ReplayStage, TradesStage } from './views.js';
 import { AgentColumn } from './agent.js';
@@ -30,13 +30,14 @@ function Top({ fixtures }) {
 }
 
 function App() {
-  const [api, setApi] = useState(null), [r, setR] = useState(route()), [gate, setGate] = useState(null), [err, setErr] = useState(null);
+  const [api, setApi] = useState(null), [r, setR] = useState(route()), [gate, setGate] = useState(null), [err, setErr] = useState(null), [types, setTypes] = useState(null);
   useEffect(() => { const f = () => setR(route()); addEventListener('hashchange', f); return () => removeEventListener('hashchange', f); }, []);
   useEffect(() => { (async () => {
     try {
       const a = FIXTURES ? await fixtureApi() : live;
       const cfg = await a.config();
       if (cfg.event_version > 2) setErr('This page is older than the research service. Reload to get the new one.');
+      setTypes(cfg.market_types && cfg.market_types.length ? cfg.market_types : null);
       const au = FIXTURES ? { signedIn: true } : await startAuth(cfg.clerk_key);
       if (!au.signedIn) { setGate('signin'); if (params.has('signin')) openSignIn(); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) setGate(null); }); }
       setApi(a);
@@ -46,7 +47,7 @@ function App() {
     ${err && html`<div class="home"><div class="banner err"><div><p>${err}</p><p class="small muted" style="margin-top:4px">To see the page with recorded data, open <a class="link" href="?fixtures#/">fixtures mode</a>.</p></div></div></div>`}
     ${!err && !api && html`<div class="home"><p class="muted">Loading…</p></div>`}
     ${api && gate === 'signin' && html`<${Teaser} />`}
-    ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} />`)}`;
+    ${api && !gate && (r.inv ? html`<${Investigation} key=${r.inv} api=${api} id=${r.inv} />` : html`<${Home} api=${api} types=${types || MARKET_TYPES} />`)}`;
 }
 
 // Example questions under the ask box (owner, 10 Nov: four, small, one row, and each must say WHICH wallet). Each card
@@ -59,6 +60,8 @@ const SAMPLE_TRADERS = [
   { wallet: '0xbdaacd345fec209cd09d933e62f92e8b530afd60', name: 'the.prod.dt' },
   { wallet: '0x329df14a9e177b5bade2228b9062265697a5b047', name: 'HuskyTrade' },
 ];
+// The ask box's Market choice when the service doesn't list its types (an older service): 15-minute windows only.
+const MARKET_TYPES = [{ id: 'btc-updown-15m', label: 'BTC Up or Down 15m', unit: 'window', min_days: 0 }];
 const EXAMPLES = [  // [sample trader, card, question]
   [0, w => `How does ${w} make money?`, w => `How does ${w} make money on BTC 15-minute markets?`],
   [1, w => `Chart ${w}'s buys against the BTC price`, w => `In BTC 15-minute markets, chart ${w}'s buys against the BTC price over its latest windows.`],
@@ -125,7 +128,12 @@ function rowLabel(s) {
   return html`<span class="r">${st === 'stopped' ? 'Stopped' : 'Saved'}</span>`;
 }
 
-function Home({ api }) {
+function Home({ api, types }) {
+  // Market and Time range (store.js RANGES): what the plan will study, chosen before asking and sent with the question
+  const [mid, setMid] = useState(() => (types.find(t => t.id === params.get('market')) || types[0]).id), [hours, setHours] = useState(null);
+  const type = types.find(t => t.id === mid) || types[0], ranges = RANGES[type.unit] || RANGES.window;
+  const h = ranges.some(([x]) => x === hours) ? hours : defaultRange(type.unit);
+  const onMarket = id => { setMid(id); setHours(null); };
   const [list, setList] = useState(null), [wallet, setWallet] = useState(FIXTURES ? '0xb945…db68' : ''), [q, setQ] = useState(params.get('q') || (FIXTURES ? "Analyze this wallet's BTC 15-minute trades. Plot its entries against Binance and Polymarket prices, show how its positions change over time, and help me understand its trading strategy." : ''));
   const [busy, setBusy] = useState(false), [err, setErr] = useState(null);
   // after a card: focus Break it down
@@ -134,7 +142,8 @@ function Home({ api }) {
   // whom card i names: its own sample trader by name (also once a card filled a sample address in), else the wallet typed
   const isSample = w => !w.trim() || SAMPLE_TRADERS.some(t => t.wallet === w.trim().toLowerCase());
   const whoOf = (w, i) => (isSample(w) ? SAMPLE_TRADERS[EXAMPLES[i][0]].name : shortWallets(w.trim()));
-  const pick = i => { if (isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet); setQ(EXAMPLES[i][2](whoOf(wallet, i))); focusNext.current = go; };
+  // the cards are BTC 15-minute questions, so a card also sets Market to it
+  const pick = i => { if (isSample(wallet)) setWallet(SAMPLE_TRADERS[EXAMPLES[i][0]].wallet); setQ(EXAMPLES[i][2](whoOf(wallet, i))); if (mid !== MARKET_TYPES[0].id) onMarket(MARKET_TYPES[0].id); focusNext.current = go; };
   // a card's question follows the wallet field, so it never names one trader while the field holds another
   const onWallet = w => { setWallet(w); const i = EXAMPLES.findIndex(([, , question], j) => question(whoOf(wallet, j)) === q); if (i >= 0) setQ(EXAMPLES[i][2](whoOf(w, i))); };
   useEffect(() => { if (!SAMPLE) api.sessions().then(setList, e => setErr(e.message)); }, []);
@@ -148,7 +157,8 @@ function Home({ api }) {
   const start = async () => {
     if (!q.trim()) return; setBusy(true); setErr(null);
     try {
-      const question = wallet.trim() && !q.includes(wallet.trim()) ? `${q.trim()}\n\nWallet: ${wallet.trim()}` : q.trim();
+      const lines = [wallet.trim() && !q.includes(wallet.trim()) ? `Wallet: ${wallet.trim()}` : null, SAMPLE ? null : askScope(type, h)].filter(Boolean);
+      const question = lines.length ? `${q.trim()}\n\n${lines.join('\n')}` : q.trim();
       const t = q.trim(), id = await api.create(t.length <= 120 ? t : t.slice(0, 119).replace(/\s+\S*$/, '').replace(/[\s,;:(\-'"]+$/, '') + '…');
       await api.ask(id, question, null, 'pasted wallet');
       location.hash = `#/i/${id}`;
@@ -159,7 +169,11 @@ function Home({ api }) {
       <p class="muted">${SAMPLE ? 'This is a sample: a breakdown recorded from a real run, with its question filled in. Press Break it down to watch it plan, read and chart the trades. Sign in to ask your own.' : 'Polymarket only. Research, no trading.'}</p>
       <div class="compose-big">
         <input id="wallet" aria-label="Wallet" placeholder="Wallet address or Polymarket name" value=${wallet} readOnly=${SAMPLE} onInput=${e => onWallet(e.target.value)} />
-        <textarea id="q" rows="3" aria-label="Your question" placeholder="How does this wallet trade BTC 15-minute markets?" value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
+        ${!SAMPLE && html`<div class="pickers" role="group" aria-label="What to study">
+          <label>Market <select id="market" value=${type.id} onChange=${e => onMarket(e.target.value)}>${types.map(t => html`<option value=${t.id}>${t.label}</option>`)}</select></label>
+          <label>Time range <select id="range" value=${String(h)} onChange=${e => setHours(Number(e.target.value))}>${ranges.map(([x, label]) => html`<option value=${String(x)}>${label}</option>`)}</select></label>
+          <span class="muted small">${type.unit === 'window' ? 'Every window it traded. For a month or two, pick a market type with longer markets.' : `Its 20 markets with the most money${type.min_days ? `, of those that run ${type.min_days}+ days` : ''}.`}</span></div>`}
+        <textarea id="q" rows="3" aria-label="Your question" placeholder=${type.unit === 'window' ? 'How does this wallet trade BTC 15-minute markets?' : `How does this wallet trade ${type.label} markets?`} value=${q} readOnly=${SAMPLE} onInput=${e => setQ(e.target.value)}></textarea>
         <div class="foot"><span class="muted small">You'll see the plan and what it costs before it runs.</span><button ref=${go} class="btn primary" disabled=${busy || !q.trim()} onClick=${start}>${busy ? 'Starting…' : 'Break it down'}</button></div></div>
       ${!SAMPLE && html`<div class="examples" aria-label="Example questions">
         <p class="muted small">Try asking</p>

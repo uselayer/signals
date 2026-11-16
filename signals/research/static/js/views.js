@@ -3,7 +3,7 @@ import { html, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact
 import { Chart, Spark } from './chart.js';
 import { money, signedMoney, cents, shares, btc, signedBtc, mmss, clock, windowLabel, hm, day, plural } from './format.js';
 import { posText, fmtWhen } from './windowdata.js';
-import { splitFlagged, flagsFor, rowProgress, currentPlan, scopeSlots } from './store.js';
+import { splitFlagged, flagsFor, rowProgress, currentPlan, scopeSlots, scopeText } from './store.js';
 import { RunProgress } from './clock.js';
 import { FILTERS, filterTiles, tally, buyPoints, pct, leanLine } from './allwindows.js';
 
@@ -34,7 +34,7 @@ export function PlanStage({ inv, act, plan, past }) {
       ${s.progress && s.status === 'running' && html`<div class="bar"><i style=${`width:${Math.round(100 * s.progress.done / Math.max(1, s.progress.total))}%`}></i></div>`}
       ${(s.warnings || []).map(w => html`<div class="warn">${w.text}</div>`)}</div></li>`)}</ol>
     ${p.status !== 'proposed' && p.status !== 'signin' && !queued && html`<${DayStrip} sums=${inv.summaries} plan=${p} live=${!!working} act=${act} />`}
-    ${p.scope && html`<div class="scope"><div><b>Scope:</b> ${p.scope.from ? `${p.scope.from} to ${p.scope.to}` : 'as asked'}.</div>
+    ${p.scope && html`<div class="scope"><div><b>Scope:</b> ${scopeText(p)}.</div>
       ${(p.scope_options || []).map(o => html`<label><input type="checkbox" id=${'so-' + o.id} disabled=${p.status !== 'proposed'} checked=${act.scopeOpts.has(o.id)} onChange=${e => act.toggleScope(o.id, e.target.checked)} /> ${o.text}</label>`)}</div>`}
     ${other && html`<div class="waitnote"><span class="dot live"></span><p>Your other breakdown is still running (${rowProgress(other.progress).replace(/^Running( · )?/, '') || 'working'}). This one starts as soon as it finishes.</p></div>`}
     ${p.status === 'signin' && html`<${SigninCard} p=${p} />`}
