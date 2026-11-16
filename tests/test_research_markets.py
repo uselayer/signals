@@ -705,6 +705,11 @@ def test_what_resolves_a_premier_league_market_is_read_from_its_own_rules() -> N
     win = r(_epl("Will AFC Bournemouth win on 2026-11-21?", MATCH_RULES, slug="epl-bou-not-2026-11-21-bou",
                  group_item="AFC Bournemouth", neg_risk=True))  # fmt: skip
     assert win["kind"] == "match" and win["quote"] == "If AFC Bournemouth wins, this market will resolve to \"Yes\"."
+    # a match market's listed end is its kickoff (Gamma's endDate): fills after it came during or after the match
+    ko = r(_epl("Will AFC Bournemouth win on 2026-11-21?", MATCH_RULES, slug="epl-bou-not-2026-11-21-bou",
+                end_iso="2026-11-21T15:00:00Z"))  # fmt: skip
+    assert ko["kickoff"] == "2026-11-21T15:00:00Z" and ko["says"].startswith("One match, kicking off 2026-11-21 15:00 UTC: “If")
+    assert champ["kickoff"] is None and "after kickoff" in M.PREMIER_LEAGUE_PROMPT
     score = r(_epl("Exact Score: Hull City AFC 0 - 0 Brighton & Hove Albion FC?", SCORE_RULES,
                    slug="epl-hul-bri-2026-11-22-exact-score-0-0"))  # fmt: skip
     assert score["kind"] == "match" and "Hull City AFC vs. Brighton & Hove Albion FC match" in score["quote"]  # not cut at "vs."

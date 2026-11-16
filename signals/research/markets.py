@@ -422,15 +422,19 @@ def premier_league_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
         source = url[0].rstrip(".") if url else (facts.get("resolution_source") or None)
     tie = next((x for x in sentences if _TIE.search(x) and _RESOLVES.search(x)), None)
     deadline = facts.get("end_iso")
+    # a match market's listed end is its kickoff (Gamma's endDate = the game's start), not when it settles: a fill
+    # after it came during or after the match
+    kickoff = deadline if kind == "match" else None
     # a club or a player names the leg; a bucket ("0", "1-5") reads better as the question itself
     leg = item if re.search(r"[A-Za-z]{3}", item) else f"“{q}”"
     lead = {"one_of": f"Whether {leg} is the one of its event's outcomes",
-            "season": "At the end of the season", "match": "One match",
+            "season": "At the end of the season",
+            "match": f"One match, kicking off {kickoff[:16].replace('T', ' ')} UTC" if kickoff else "One match",
             "by_date": "Whether it happens by the date in its rules", "other": "Its rules say"}[kind]
     says = f"{lead}: “{quote}”" if quote else f"{lead}."
     return {"kind": kind, "strike": None, "source": source, "deadline": deadline, "quote": quote or None,
             "ends_early": bool(_EARLY.search(rules)), "tie": _clip_words(tie, 200) if tie else None,
-            "says": says}  # fmt: skip
+            "kickoff": kickoff, "says": says}  # fmt: skip
 
 
 PREMIER_LEAGUE_PROMPT = """## The Premier League (market_type premier-league; the unit is a market)
@@ -449,6 +453,8 @@ manager); season: Yes or No for one club at the end of the season, and several c
 finish, Champions League places); match: one match; by_date: whether it happens by the date in its rules; other: quote \
 the rules. rule.ends_early true means the rules resolve it No as soon as it's impossible (a club mathematically \
 out), so it can close before the season ends; rule.tie is the rules' own tie-break (top goalscorer: alphabetical). \
+A match market's listed end (market_end, rule.kickoff) is its kickoff, not when it settles: a fill after it came \
+during or after the match (say "after kickoff", never "after the market ended"); the match itself isn't in the data. \
 Most season markets resolve when the season ends: until then they're open.
 There is no outside line: no league table, no results, no fixtures, no injuries, no transfers and no news. So \
 never say a trade followed a match, a goal, a result, an injury, a sacking or a signing, never that it "knew" or \
