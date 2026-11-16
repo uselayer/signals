@@ -934,7 +934,9 @@ def test_a_plan_keeps_its_scope_as_times_start_can_read() -> None:
     assert sent["is_error"] and "ISO time" in sent["content"]
 
 
-def test_start_builds_the_tiles_of_a_scope_written_in_words() -> None:
+def test_start_builds_the_tiles_of_a_scope_written_in_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    # "today" is the day of the recorded window (10 Nov): with the real clock this passed on 10 Nov only
+    monkeypatch.setattr(time, "time", lambda: LATE + 3_600)  # 10 Nov 07:00 UTC
     plan = {"title": "t", "scope": {"wallet": W, "family": "btc-updown-15m", "from": "today 05:30 UTC", "to": "now"},
             "steps": [{"id": "s", "title": "x", "source": "y"}]}  # fmt: skip
     store = Store(os.path.join(tempfile.mkdtemp(), "r.db"))
