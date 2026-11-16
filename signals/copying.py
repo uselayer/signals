@@ -162,9 +162,23 @@ def finish(con: sqlite3.Connection, uid: str, wallet: str) -> None:
     con.execute("UPDATE copy_wallets SET wallet = ?, state = 'ready', at = ? WHERE uid = ?", (wallet, time.time(), uid))
 
 
-def offer(con: sqlite3.Connection, alert_id: str, uid: str, token: str, price: float) -> None:
-    """Keep what a "Copy" button under an alert buys: the outcome and the price the alert showed."""
-    con.execute("INSERT OR REPLACE INTO copy_offers VALUES (?, ?, ?, ?, ?)", (alert_id, uid, token, price, time.time()))
+_OFFER_ADDED = (("label", "TEXT"), ("title", "TEXT"), ("trader", "TEXT"), ("url", "TEXT"))
+
+
+def migrate(con: sqlite3.Connection) -> None:
+    """An alerts.db from before an offer kept its names (for the page's Copies view): add those columns, once."""
+    have = {r[1] for r in con.execute("PRAGMA table_info(copy_offers)")}
+    for col, kind in _OFFER_ADDED:
+        if col not in have:
+            con.execute(f"ALTER TABLE copy_offers ADD COLUMN {col} {kind}")
+
+
+def offer(con: sqlite3.Connection, alert_id: str, uid: str, token: str, price: float, *, label: str | None = None,
+          title: str | None = None, trader: str | None = None, url: str | None = None) -> None:
+    """Keep what a "Copy" button under an alert buys: the outcome and the price the alert showed, with the names the
+    page's Copies view shows it by (the outcome, the market, the trader, its Polymarket page)."""
+    con.execute("INSERT OR REPLACE INTO copy_offers (alert_id, uid, token, price, at, label, title, trader, url)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (alert_id, uid, token, price, time.time(), label, title, trader, url))  # fmt: skip
 
 
 def claim(con: sqlite3.Connection, alert_id: str, uid: str, now: float | None = None) -> dict[str, Any]:

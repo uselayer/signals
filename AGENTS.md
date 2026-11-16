@@ -102,6 +102,20 @@ behind Vercel (see README, "Hosting").
   `SIGNALS_COPY_USD` (default $25) at most `COLLAR` (3¢) above the price the alert showed, kept as "placing" first
   so a second tap never buys twice; the reply says what was bought or plainly why nothing was. Never a sell, never
   without a tap, never a size the follower didn't choose.
+- Your copies (`signals/copies.py`, `#/copies`, owner 15 Nov 2026: "can I see like a list of all my copy trades"):
+  a Copies tab, shown only when `/api/me/copies/on` says the account can copy either way (one-tap copy or the owner's
+  own account); `/api/me/copies` is 404 for everyone else and only ever lists the asker's own taps. Every tap in
+  `copy_orders`, whichever way it went: what it bought (price, dollars, contracts) or why it didn't, in one plain
+  sentence (`copies.reason`); a limit order waiting; the trader's own buy beside it (`buys`: their price and dollars,
+  "They paid": context, never a target); the price now (the best bid: what it sells for) or how it ended (won, lost,
+  voided). Prices come from one `client.pnl` read per exchange for the owner's own account (`own_trading.marks`) and
+  the one-tap wallet's Polymarket positions, with the cash on each exchange, at most once a minute
+  (`COPIES_TTL_S`); an exchange that couldn't be read is named and its copies show no price, never a guess. Four
+  tiles (put in, worth now, profit, price vs the trader), then By trade (Open / Settled / Missed / All, a trader
+  picker; a row opens its story in the sheet: their buy, the alert, the tap, the fill, how it ended) or By trader
+  (your profit beside the same dollars at the trader's own price: what being second cost). Deposits happen on each
+  exchange ("Deposit on Kalshi ↗"); the one-tap wallet's "Add funds" is /copy. Nothing on it buys or sells. On a
+  phone a trade row is the market, profit and status; the rest is in its sheet.
 - The owner's own copy on Kalshi and Polymarket US (`signals/own_trading.py`, owner 11 Nov 2026): only the account in
   `SIGNALS_OWN_UID`, with the owner's own exchange keys, so Signals' software trades its owner's own account (Kalshi's
   Developer Agreement allows "a member's own trading"). Never anyone else's exchange keys: Kalshi (Developer Agreement
@@ -263,7 +277,8 @@ behind Vercel (see README, "Hosting").
 - The page is a consumer app, not an analyst's spreadsheet. It helps people find traders worth following and
   understand why: who they are, how they trade, and what the evidence does and doesn't show. Before anyone buys,
   show what it would really cost them now (above): what their amount fills at, the fee, the slippage, what's for
-  sale. Nothing on the page may imply that copying makes money. Three tabs (Feed, Watchlist, Traders).
+  sale. Nothing on the page may imply that copying makes money. Three tabs (Feed, Watchlist, Traders), and a
+  fourth, Copies, only for an account with copying on (below).
   - The Watchlist (`#/watchlist`, signed in) is the follow list (one list: Follow on a trader's page, "+ Follow a
     trader" there, alerts and the Feed's Following all use follows.json), a card per trader, read from what's kept
     (`/api/me/watchlist` reads nothing). A trader's watch page (`#/watch/<wallet>`, no account) is `/api/watch`: their
@@ -314,7 +329,9 @@ behind Vercel (see README, "Hosting").
     from the SDK's `copyable`, but nothing anyone sees shows it or follows it: no copy status, figure, range,
     column, sort, filter, "Copying is paused" callout, How-we-pick tab, copy line in an alert, the SDK's
     "Copyable" check on a trader page, or colour (an open trade reads the same for every trader). A guard test
-    keeps the page's words free of "Copy", "Copyable" and "Copying". Bringing it back is the owner's call.
+    keeps the page's words free of "Copy", "Copyable" and "Copying". Bringing it back is the owner's call. One
+    exception (owner, 15 Nov 2026): the Copies view ("Your copies" below), the copies a person made, never an
+    estimate; the guard skips its block in the page and its header links (`data-copies`) and holds everything else.
   - Traders is the Leaderboard (above): facts only, no tier, chip, "Sharp", "Recommended" or "Why they're here".
     Only with the skill test on (`SIGNALS_SKILL_TEST=1`), the old way back: Traders lists the traders we recommend
     in one section, **Sharps** (the engine's `section_of`: every recommended tier), with its ranks and "Show more" in the sort picked (by default Recommended's tier order); "See all checked

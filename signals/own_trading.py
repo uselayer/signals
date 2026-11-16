@@ -359,6 +359,18 @@ def balance(code: str, store_dir: Path) -> float | None:
         return None
 
 
+def marks(code: str, store_dir: Path) -> dict[tuple[str, str], dict[str, Any]] | None:
+    """What the owner's account on this exchange says about each of its positions, by (market, side): the best bid
+    now (``mark``: what it would sell for), and whether its market settled and how (``outcome``: yes, no or void).
+    One read (the SDK's ``client.pnl``), for the page's Copies view. None when it couldn't be read."""
+    try:
+        with _lock, _client(code, store_dir) as client:
+            rows = client.pnl().rows
+    except Exception:  # noqa: BLE001  (the page says the prices couldn't be read)
+        return None
+    return {(str(r.market), str(r.side)): {"mark": r.mark, "settled": bool(r.settled), "outcome": r.outcome} for r in rows}
+
+
 def choose(order: dict[str, Any], store_dir: Path) -> dict[str, Any]:
     """Which exchange a tap buys on, when the outcome is on both: the one with the cheaper seller right now, leaving
     out one whose balance can't cover the amount. With one exchange there's nothing to read: it's that one."""

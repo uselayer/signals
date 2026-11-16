@@ -769,6 +769,59 @@
       padding: 22px 18px calc(22px + env(safe-area-inset-bottom)); animation: up .22s ease; }
     #sheet .panel::before { content: ""; position: absolute; top: 8px; left: 50%; width: 36px; height: 4px; margin-left: -18px; border-radius: 4px; background: var(--line); }
   }
+
+  /* Your copies (#/copies): the taps an account with copying on made, as the owner's mock (15 Nov). Tiles, then By
+     trade (a table, the picked row's story beside it) or By trader. The free-text Market column keeps a width; the
+     table scrolls sideways in its box on a narrow screen instead of squeezing it. */
+  [data-copies][hidden] { display: none !important; } /* the tab, until /api/me/copies/on says yes */
+  .cp-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; margin-bottom: 18px; }
+  .cp-top h1 { font-size: 26px; line-height: 1.15; }
+  .cp-top .lede { margin: 6px 0 0; }
+  .cp-cash { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .cp-cash .chip { display: inline-flex; gap: 6px; align-items: center; }
+  .cp-cash .link { font-size: 12.5px; }
+  .cp-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .cp-tiles .tile b { font-size: 20px; }
+  .cp-bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .cp-bar .seg { margin-bottom: 0; }
+  .seg button { border: 0; background: none; font: inherit; padding: 7px 14px; border-radius: 999px; font-size: 14px; font-weight: 500; color: var(--muted); white-space: nowrap; cursor: pointer; }
+  .seg button.on { background: var(--raised); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+  .seg button .n { color: var(--faint); margin-left: 4px; }
+  .cp-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .cp-filters select { font: inherit; font-size: 14px; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 7px 12px; }
+  .cp-scroll { overflow-x: auto; }
+  .cp-tbl { min-width: 1000px; }
+  .cp-tbl th, .cp-tbl td { padding-left: 12px; }
+  .cp-tbl td { padding-top: 12px; padding-bottom: 12px; }
+  .cp-tbl tr:last-child td { border-bottom: 0; }
+  .cp-tbl td.mkt { min-width: 260px; width: 30%; }
+  .cp-tbl tr.pick { cursor: pointer; }
+  .cp-tbl tr.pick:hover td { background: color-mix(in srgb, var(--fg) 3%, var(--card)); }
+  .cp-tbl .rowbtn { all: unset; cursor: pointer; font-weight: 500; overflow-wrap: anywhere; }
+  .cp-tbl .rowbtn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; border-radius: 4px; }
+  .cp-who { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+  .cp-pill { --c: var(--muted); display: inline-flex; font-size: 12px; font-weight: 500; padding: 2px 8px; border-radius: 999px; white-space: nowrap; line-height: 1.35;
+    background: color-mix(in srgb, var(--c) 13%, var(--card)); color: color-mix(in srgb, var(--c) 85%, var(--fg)); }
+  .cp-pill.open { --c: var(--blue); } .cp-pill.won { --c: var(--gain); } .cp-pill.lost { --c: var(--loss); } .cp-pill.missed, .cp-pill.unknown { --c: var(--amber); }
+  .cp-pill.waiting, .cp-pill.matching, .cp-pill.buying, .cp-pill.void { background: transparent; color: var(--muted); border: 1px dashed var(--line); padding: 1px 7px; }
+  .cp-why { color: var(--muted); font-size: 12.5px; margin-top: 2px; max-width: 190px; }
+  .cp-side { display: flex; flex-direction: column; gap: 16px; }
+  .cp-side h2 { font-size: 18px; line-height: 1.3; margin-top: 8px; padding-right: 28px; }
+  .cp-side .tiles { margin-top: 0; }
+  .cp-steps { display: flex; flex-direction: column; gap: 14px; }
+  .cp-step { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 10px; font-size: 14px; }
+  .cp-step i { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--faint); }
+  .cp-step i.buy { background: var(--blue); } .cp-step i.miss { background: var(--amber); } .cp-step i.won { background: var(--gain); } .cp-step i.lost { background: var(--loss); }
+  .cp-step b { font-weight: 500; display: block; } .cp-step small { color: var(--muted); font-size: 12.5px; }
+  /* a phone: the market, the profit and the status (a tap opens the rest); By trader keeps the comparison */
+  @media (max-width: 700px) {
+    .cp-tbl { min-width: 0; }
+    .cp-tbl .w { display: none; }
+    .cp-tbl td.mkt { min-width: 0; width: auto; }
+    .cp-tbl th, .cp-tbl th.n { white-space: normal; }
+    .cp-tbl .cp-who { white-space: normal; overflow-wrap: anywhere; }
+    .cp-why { max-width: 120px; }
+  }
 </style>
 <script>
   // The theme, set before the first paint so nothing flashes: dark unless this browser chose light with the header's
@@ -791,7 +844,7 @@
   <div class="wrap">
     <a class="brand" href="#/traders"><span class="logo"><svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1"/><rect x="8.5" y="7" width="3" height="10" rx="1"/><rect x="14" y="3" width="3" height="14" rx="1"/></svg></span>Signals</a>
     <nav class="tabs" aria-label="Main">
-      <a href="/breakdowns/" class="new" data-research hidden>Breakdowns</a><a href="#/" data-tab="feed">Feed</a><a href="#/watchlist" data-tab="watch">Watchlist</a><a href="#/traders" data-tab="traders">Traders</a>
+      <a href="/breakdowns/" class="new" data-research hidden>Breakdowns</a><a href="#/" data-tab="feed">Feed</a><a href="#/watchlist" data-tab="watch">Watchlist</a><a href="#/traders" data-tab="traders">Traders</a><a href="#/copies" data-tab="copies" data-copies hidden>Copies</a>
     </nav>
     <a class="bdpill" id="bdpill" hidden></a>
     <form class="askbar" data-research hidden action="/breakdowns/" method="get" role="search"><input type="search" name="q" placeholder="Ask about a trader or wallet" aria-label="Ask in Breakdowns"></form>
@@ -806,6 +859,7 @@
   <a href="#/" data-tab="feed"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13h3l2.5-6 4 11 2.5-5H20"/></svg>Feed</a>
   <a href="#/watchlist" data-tab="watch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>Watchlist</a>
   <a href="#/traders" data-tab="traders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.7-3.2 2.9-5 5.5-5s4.8 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.4c1.6.7 2.6 2.3 3 4.6"/></svg>Traders</a>
+  <a href="#/copies" data-tab="copies" data-copies hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>Copies</a>
 </nav>
 <div id="sheet"></div>
 <div id="toast" role="status"></div>
@@ -1641,6 +1695,7 @@ async function readMe() {
   // the browser's time zone rides along: the weekly email goes out at 9 AM in it (signals/weekly.py)
   let tz = ""; try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { /* no zone: Eastern */ }
   try { auth.me = await api("/api/me", tz ? { headers: { "x-time-zone": tz } } : {}); auth.meErr = null; } catch (e) { auth.me = null; auth.meErr = e.message || "Couldn't read your account."; }
+  api("/api/me/copies/on").then((d) => showCopies(!!d.on), () => showCopies(false)); // the Copies tab: accounts with copying on
 }
 
 // Which markets the Feed shows, in one line: "Your markets: Politics, Sports · Change".
@@ -3974,12 +4029,152 @@ function analyticsAccount(uid, was) {
   else if (was) window.posthog.reset();
 }
 
+// ---- copies view (#/copies, /api/me/copies): BEGIN ----
+// Your copies (owner, 15 Nov 2026: "can I see like a list of all my copy trades"), for an account with copying on:
+// every Copy tap, what it bought or why it didn't, the trader's own price beside yours, the price now or how it ended,
+// and By trader: your result beside what the same dollars made at the trader's price. Read again every minute.
+// Facts about copies the person made, never an estimate of copying: test_the_page_never_says_copy skips this block
+// (between BEGIN and END) and the header's data-copies links, and keeps every other word on the page free of "copy".
+const cp = { d: null, err: null, view: "trades", filter: null, trader: "all", timer: null };
+const CP_STATUS = {
+  open: "Open", won: "Won", lost: "Lost", void: "Voided", missed: "Missed", waiting: "Limit waiting",
+  matching: "Still matching", unknown: "May have gone through", buying: "Buying…",
+};
+const CP_FILTERS = [["open", "Open"], ["settled", "Settled"], ["missed", "Missed"], ["all", "All"]];
+const cpIn = (r, f) => f === "all" || (f === "open" && ["open", "buying", "matching", "unknown"].includes(r.status))
+  || (f === "settled" && ["won", "lost", "void"].includes(r.status)) || (f === "missed" && ["missed", "waiting"].includes(r.status));
+const cpUsd = (x, signed = false) => x == null ? "—" : `${x < 0 ? "−" : signed && x > 0 ? "+" : ""}$${Math.abs(x).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const cpPct = (x, of) => !of ? "" : `${x < 0 ? "−" : x > 0 ? "+" : ""}${Math.abs(x / of * 100).toFixed(1)}%`;
+const cpWhen = (t) => new Date(t * 1000).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const cpLater = (a, b) => { if (a == null || b == null) return ""; const s = Math.max(0, Math.round(b - a)); return s < 90 ? `${s} s later` : s < 5400 ? `${Math.round(s / 60)} min later` : `${Math.round(s / 3600)} h later`; };
+const cpName = (r) => displayName(r.trader_name || r.name, r.trader);
+function showCopies(on) {
+  $$("[data-copies]").forEach((el) => { el.hidden = !on; });
+}
+async function copiesPage() {
+  $("#app").innerHTML = `<div class="cp-top"><div><h1>Your copies</h1><p class="lede">Every trade you copied from Telegram. Prices update every minute.</p></div>
+    <div class="cp-cash" id="cpcash"></div></div><div id="cpbody">${skelRows(5)}</div>`;
+  await loadCopies();
+}
+async function loadCopies() {
+  clearTimeout(cp.timer);
+  if (routeName() !== "copies") return;
+  try { cp.d = await api("/api/me/copies"); cp.err = null; } catch (e) { cp.err = e.status === 404 ? "Copying isn't on for your account." : e.message; }
+  if (routeName() !== "copies") return;
+  renderCopies();
+  cp.timer = setTimeout(loadCopies, 60000);
+}
+function renderCopies() {
+  const box = $("#cpbody");
+  if (!box) return;
+  if (cp.err && !cp.d) { box.innerHTML = errorState(cp.err); bindActions(box); return; }
+  const d = cp.d;
+  $("#cpcash").innerHTML = d.cash.length ? `<span class="muted" style="font-size:13px">Cash to copy with</span>${d.cash.map((c) => `<span class="chip">${esc(c.exchange)}${c.usd != null ? ` ${cpUsd(c.usd)}` : ""}
+    <a class="link" href="${esc(c.url)}"${c.own ? ' target="_blank" rel="noopener"' : ""}>${c.own ? `Deposit on ${esc(c.exchange)} ↗` : "Add funds"}</a></span>`).join("")}` : "";
+  if (!d.rows.length) {
+    box.innerHTML = emptyState("No copies yet", "Tap Copy under an alert in Telegram and it shows up here: what you bought, what it's worth now and how it ended.");
+    return;
+  }
+  if (cp.filter === null) cp.filter = d.rows.some((r) => cpIn(r, "open")) ? "open" : "all";
+  const t = d.totals;
+  const failed = d.failed.length ? `<p class="foot-note" style="margin:0 0 12px">Couldn't read ${esc(d.failed.join(" and "))} just now: those copies show no price until the next try.</p>` : "";
+  const tiles = `<div class="cp-tiles">
+    <div class="tile"><span>You put in</span><b>${cpUsd(t.put_in)}</b><small>${plural(t.bought, "trade")} bought</small></div>
+    <div class="tile"><span>Worth now</span><b>${cpUsd(t.worth)}</b><small>${cpUsd(t.open_worth)} still open · ${cpUsd(t.paid_out)} paid out${t.unvalued ? ` · ${t.unvalued} not priced` : ""}</small></div>
+    <div class="tile"><span>Profit</span><b>${pl(t.profit, cpUsd(t.profit, true))}</b><small>${t.valued_put_in ? `${cpPct(t.profit, t.valued_put_in)} on what you put in` : "Shows once a copy has a price"}</small></div>
+    <div class="tile"><span>Price vs the trader</span><b>${t.gap == null ? "—" : `${Math.abs(t.gap * 100).toFixed(1)}¢ ${t.gap > 0 ? "worse" : t.gap < 0 ? "better" : ""}`}</b><small>Average gap between their price and yours</small></div></div>`;
+  const views = `<div class="seg" role="tablist" aria-label="View">${[["trades", "By trade"], ["traders", "By trader"]]
+    .map(([k, l]) => `<button type="button" role="tab" aria-selected="${cp.view === k}" class="${cp.view === k ? "on" : ""}" data-cpview="${k}">${l}</button>`).join("")}</div>`;
+  const inTrader = d.rows.filter((r) => cp.trader === "all" || (r.trader || r.trader_name) === cp.trader);
+  const names = [...new Map(d.rows.map((r) => [r.trader || r.trader_name, cpName(r)])).entries()].filter(([k]) => k);
+  const filters = cp.view !== "trades" ? "" : `<div class="cp-filters"><div class="seg" role="tablist" aria-label="Which copies">${CP_FILTERS.map(([k, l]) =>
+      `<button type="button" role="tab" aria-selected="${cp.filter === k}" class="${cp.filter === k ? "on" : ""}" data-cpfilter="${k}">${l}<span class="n">${inTrader.filter((r) => cpIn(r, k)).length}</span></button>`).join("")}</div>
+    <label class="muted" style="font-size:13px;display:flex;gap:8px;align-items:center">Trader <select id="cptrader"><option value="all">All traders</option>${names.map(([k, n]) =>
+      `<option value="${esc(k)}"${cp.trader === k ? " selected" : ""}>${esc(n)}</option>`).join("")}</select></label></div>`;
+  box.innerHTML = `${failed}${tiles}<div class="cp-bar">${views}${filters}</div>${cp.view === "trades" ? cpTrades(inTrader.filter((r) => cpIn(r, cp.filter))) : cpTraders(d.traders)}
+    <p class="foot-note">Prices read ${ago(d.read_at * 1000)}. "Now" is what a contract sells for right now (the best bid). Signals never sells for you.</p>`;
+  $$("[data-cpview]", box).forEach((b) => (b.onclick = () => { cp.view = b.dataset.cpview; renderCopies(); }));
+  $$("[data-cpfilter]", box).forEach((b) => (b.onclick = () => { cp.filter = b.dataset.cpfilter; renderCopies(); }));
+  const sel = $("#cptrader", box); if (sel) sel.onchange = () => { cp.trader = sel.value; renderCopies(); };
+  $$("[data-cprow]", box).forEach((el) => (el.onclick = (e) => {
+    e.stopPropagation(); // the row's button and the row: one sheet
+    const r = d.rows.find((x) => x.id === el.dataset.cprow);
+    if (r) sheet(cpSide(r));
+  }));
+  bindActions(box);
+}
+function cpTrades(rows) {
+  if (!rows.length) return `<div class="list">${emptyState("Nothing here", "Pick another of Open, Settled, Missed or All.")}</div>`;
+  const line = (r) => {
+    const sinceThem = r.now != null && r.their_price != null && r.status === "open" ? `${centsSigned(r.now - r.their_price)} since them` : r.status === "open" ? "" : r.bought ? "Settled" : "";
+    return `<tr class="pick" data-cprow="${esc(r.id)}">
+    <td class="mkt"><button type="button" class="rowbtn" data-cprow="${esc(r.id)}">${esc(r.title || "A market")}</button><div class="s">${esc(r.label || r.side || "")} · ${ago(r.tapped_at * 1000)}</div></td>
+    <td class="w"><div class="cp-who">${avatar(r.trader || r.trader_name, 26)}<span>${esc(cpName(r))}</span></div></td>
+    <td class="w" style="white-space:nowrap">${esc(r.exchange)}</td>
+    <td class="n w">${r.bought ? cents(r.paid) : "—"}<div class="s">${r.bought ? cpUsd(r.spent) : "Nothing spent"}</div></td>
+    <td class="n w">${cents(r.their_price)}<div class="s">${r.their_usd != null ? usd(r.their_usd) : ""}</div></td>
+    <td class="n w">${r.status === "won" ? "100¢" : r.status === "lost" ? "0¢" : cents(r.now)}<div class="s">${sinceThem}</div></td>
+    <td class="n">${r.pnl == null ? "—" : pl(r.pnl, cpUsd(r.pnl, true))}<div class="s">${r.pnl == null ? "" : cpPct(r.pnl, r.spent)}</div></td>
+    <td><span class="cp-pill ${r.status}">${CP_STATUS[r.status] || esc(r.status)}</span>${r.why ? `<div class="cp-why">${esc(r.why)}</div>` : ""}${r.status === "waiting" && r.limit_until ? `<div class="cp-why">Until ${cpWhen(r.limit_until).split(", ").pop()}</div>` : ""}</td></tr>`;
+  };
+  return `<div class="list"><div class="cp-scroll"><table class="tbl cp-tbl">
+    <thead><tr><th>Market</th><th class="w">Copied from</th><th class="w">Exchange</th><th class="n w">You paid</th><th class="n w">They paid</th><th class="n w">Now</th><th class="n">Profit</th><th>Status</th></tr></thead>
+    <tbody>${rows.map(line).join("")}</tbody></table></div></div>`;
+}
+// A row, tapped: the copy's story in the page's sheet (beside the table there's no room at the page's width).
+function cpSide(r) {
+  const steps = [];
+  if (r.trade_at) steps.push(["", `${cpName(r)} bought${r.their_usd != null ? ` ${usd(r.their_usd)}` : ""}${r.their_price != null ? ` at ${cents(r.their_price)}` : ""}`, cpWhen(r.trade_at)]);
+  if (r.sent_at) steps.push(["", "Alert reached you", `${cpWhen(r.sent_at)}${r.trade_at ? ` · ${cpLater(r.trade_at, r.sent_at)}` : ""}`]);
+  steps.push(["", `You tapped Copy ${cpUsd(r.usd)}`, `${cpWhen(r.tapped_at)}${r.sent_at ? ` · ${cpLater(r.sent_at, r.tapped_at)}` : ""}`]);
+  if (r.bought) {
+    const gap = r.their_price != null ? Math.round((r.paid - r.their_price) * 100) : null;
+    steps.push(["buy", `Bought ${cpUsd(r.spent)} at ${cents(r.paid)} · ${(+r.shares).toLocaleString("en-US", { maximumFractionDigits: 1 })} contracts`,
+      `On ${r.exchange}${gap == null ? "" : gap === 0 ? ", the trader's price" : `, ${Math.abs(gap)}¢ ${gap > 0 ? "above" : "below"} the trader`}`]);
+  } else if (r.status === "waiting") steps.push(["miss", `Limit order waiting at ${cents(r.max_price)}`, r.limit_until ? `Until ${cpWhen(r.limit_until)}` : ""]);
+  else if (r.status === "missed") steps.push(["miss", "Not bought", `${r.why} Nothing was spent.`]);
+  else steps.push(["miss", CP_STATUS[r.status] || r.status, r.status === "unknown" ? "The exchange didn't answer in time. Check your account there before copying it again." : ""]);
+  if (r.status === "won") steps.push(["won", `Settled your way · paid ${cpUsd(r.worth)}`, ""]);
+  if (r.status === "lost") steps.push(["lost", "Settled against you · paid $0.00", ""]);
+  if (r.status === "void") steps.push(["", `Voided · ${cpUsd(r.worth)} back`, ""]);
+  const second = r.bought ? [r.status === "open" ? "Worth now" : "Paid out", r.worth == null ? "—" : cpUsd(r.worth), r.pnl == null ? "No price just now" : `${cpUsd(r.pnl, true)} · ${cpPct(r.pnl, r.spent)}`]
+    : ["Price now", "—", r.their_price != null ? `They paid ${cents(r.their_price)} · your cap ${cents(r.max_price)}` : `Your cap ${cents(r.max_price)}`];
+  return `<div class="cp-side">
+    <div><span class="cp-pill ${r.status}">${CP_STATUS[r.status] || esc(r.status)}</span> <span class="muted" style="font-size:13px">${esc(r.exchange)}</span>
+      <h2>${esc(r.title || "A market")}</h2><div class="muted" style="font-size:14px;margin-top:4px">${esc(r.label || r.side || "")}</div></div>
+    <div class="tiles"><div class="tile"><span>You paid</span><b>${r.bought ? cents(r.paid) : "—"}</b><small>${r.bought ? cpUsd(r.spent) : "Nothing spent"}</small></div>
+      <div class="tile"><span>${second[0]}</span><b>${second[1]}</b><small>${second[2]}</small></div></div>
+    <div><h3 class="muted" style="font-size:13px;font-weight:500;margin:0 0 12px">What happened</h3><div class="cp-steps">${steps.map(([k, b, s]) =>
+      `<div class="cp-step"><i class="${k}"></i><div><b>${esc(b)}</b>${s ? `<small>${esc(s)}</small>` : ""}</div></div>`).join("")}</div></div>
+    ${r.url ? `<a class="btn ghost" href="${esc(r.url)}" target="_blank" rel="noopener">Open on ${esc(r.exchange)} ↗</a>` : ""}
+  </div>`;
+}
+function cpTraders(traders) {
+  const line = (t) => {
+    const cost = t.same_put_in ? (t.same_them - t.same_you) / t.same_put_in * 100 : null;
+    const who = `<div class="cp-who">${avatar(t.trader || t.name, 26)}<span class="name">${esc(displayName(t.name, t.trader))}</span></div>`;
+    return `<tr><td class="mkt">${t.trader ? `<a href="#/worth/${esc(t.trader)}">${who}</a>` : who}</td>
+      <td class="n w">${t.bought}<div class="s">${t.open ? `${t.open} open` : ""}</div></td>
+      <td class="n w">${cpUsd(t.put_in)}</td>
+      <td class="n">${pl(t.profit, cpUsd(t.profit, true))}<div class="s">${cpPct(t.profit, t.valued_put_in)}</div></td>
+      <td class="n">${t.same_put_in ? pl(t.same_them, cpUsd(t.same_them, true)) : "—"}<div class="s">${t.same_put_in ? cpPct(t.same_them, t.same_put_in) : ""}</div></td>
+      <td class="n w">${cost == null ? "—" : Math.abs(cost) < 0.05 ? "Nothing" : `${cost.toFixed(1)} pts`}<div class="s">${cost == null ? "" : cpUsd(t.same_them - t.same_you)}</div></td>
+      <td class="w">${t.missed}${t.waiting ? `<div class="cp-why">${t.waiting} limit waiting</div>` : ""}</td></tr>`;
+  };
+  return `<div class="list"><div class="cp-scroll"><table class="tbl cp-tbl">
+    <thead><tr><th>Trader</th><th class="n w">Bought</th><th class="n w">You put in</th><th class="n">Your profit</th><th class="n">Same trades, their price</th><th class="n w">Copying cost you</th><th class="w">Missed</th></tr></thead>
+    <tbody>${traders.map(line).join("")}</tbody></table></div></div>
+    <p class="foot-note">"Same trades, their price" puts your dollars in at the price the trader got. The gap is what being second cost: the spread, the seconds before the alert, and the time before you tapped.</p>`;
+}
+// ---- copies view: END ----
+
 function routeName() {
   const h = location.hash || "#/traders"; // landing on the site: Traders, which needs no account
   if (h === "#/" || h === "#") return "feed";
   if (h === "#/big") return "feed:big";
   if (h === "#/recommended") return "feed:rec";
   if (h === "#/watchlist") return "watchlist";
+  if (h === "#/copies") return "copies";
   if (h === "#/traders") return "traders:worth";
   if (h === "#/traders/top") return "traders:top";
   if (h === "#/traders/explore") return exploreOn && !boardOn ? "traders:explore" : "traders:worth"; // the Leaderboard replaces both
@@ -3992,24 +4187,25 @@ function venueOffPage(venue) {
 }
 function route() {
   if (OLD[location.hash]) { location.replace(OLD[location.hash]); return; }
-  closeSheet(); clearTimeout(feedTimer); clearTimeout(worthTimer); clearTimeout(watchTimer);
+  closeSheet(); clearTimeout(feedTimer); clearTimeout(worthTimer); clearTimeout(watchTimer); clearTimeout(cp.timer);
   const name = routeName();
   const w = location.hash.match(/^#\/worth\/(0x[0-9a-fA-F]{40})$/);
   const check = location.hash.match(/^#\/check\/(0x[0-9a-fA-F]{40})\/([^/]+)$/);
   const t = location.hash.match(/^#\/t\/(kalshi|polymarket)\/(.+)$/);
   const watching = location.hash.match(/^#\/watch\/(0x[0-9a-fA-F]{40})$/);
-  const tab = name.startsWith("feed") || check ? "feed" : name === "watchlist" || watching ? "watch" : "traders";
+  const tab = name.startsWith("feed") || check ? "feed" : name === "watchlist" || watching ? "watch" : name === "copies" ? "copies" : "traders";
   $$("[data-tab]").forEach((a) => a.classList.toggle("on", a.dataset.tab === tab));
   $("#app").classList.toggle("narrow", name === "traders:top" || !!t); // one width everywhere else, header included
   window.scrollTo(0, 0);
   // the Feed's pages and the Watchlist: signed in only; the rest needs no account, an alert's trade included (Telegram
   // opens it in its own browser, signed out, and some who follow from Telegram have no account)
-  const gated = name.startsWith("feed") || name === "watchlist";
+  const gated = name.startsWith("feed") || name === "watchlist" || name === "copies";
   drawnGate = gated ? gateState() : null;
   if (gated && drawnGate !== "open") signInPage();
   else if (needsOnboarding(name)) onboardingPage();
   else if (name.startsWith("feed")) feedPage(feedView());
   else if (name === "watchlist") watchlistPage();
+  else if (name === "copies") copiesPage();
   else if (watching) watchPage(watching[1].toLowerCase());
   else if (name.startsWith("traders:")) tradersPage(name.split(":")[1]);
   else if (w) worthTraderPage(w[1].toLowerCase());

@@ -56,7 +56,7 @@ from uselayer.whale_scores import (
     segment_of,
 )
 
-from signals import basket, copying, monitoring, own_trading, owner_alerts, records, us_match, watch, weekly, welcome, why
+from signals import basket, copies, copying, monitoring, own_trading, owner_alerts, records, us_match, watch, weekly, welcome, why
 from signals.budget import POLYMARKET_HOSTS, BackgroundHttp, Budget
 from signals.directory import (
     BOARD_PERIODS,
@@ -4192,6 +4192,66 @@ def copy_finish(req: CopyFinish, response: Response, uid: str = Depends(copy_use
     return {"state": "ready"}
 
 
+# ---- your copies: the page's Copies view (signals/copies.py) ----
+
+COPIES_TTL_S = 60.0  # its prices, settlements and balances: read at most once a minute per account
+DEPOSIT = {"k": "https://kalshi.com/portfolio", "u": "https://polymarket.us"}  # deposits happen on the exchange
+
+
+def copies_on(uid: str) -> bool:
+    """Whether this account can copy, either way: one-tap copy (SIGNALS_COPY_USERS) or the owner's own account."""
+    return copying.on_for(uid) or own_trading.on_for(uid)
+
+
+def copies_user(request: Request) -> str:
+    """Signed in, with copying on for this account; else 404, as /api/me/copy."""
+    uid = _session(request, "Sign in to see your copies.")
+    if not copies_on(uid):
+        raise HTTPException(404, detail="Not found.")
+    return uid
+
+
+@app.get("/api/me/copies/on")
+def my_copies_on(response: Response, uid: str = Depends(signed_in)) -> dict[str, bool]:
+    """Whether the page shows the Copies tab to this account: no reads, nothing else about it."""
+    _private(response)
+    return {"on": copies_on(uid)}
+
+
+def _copies_reads(uid: str, rows: list[dict[str, Any]], wallet: str | None) -> dict[str, Any]:
+    """The reads behind the Copies view: each exchange's positions (own_trading.marks, one read each, only the
+    exchanges a bought copy is on), the one-tap wallet's Polymarket positions, and the cash on each exchange."""
+    codes = sorted({r["code"] for r in rows if r["code"] and r["state"] == "filled"})
+    own = {c: own_trading.marks(c, STORE_DIR) for c in codes}
+    failed = [own_trading.VENUES[c][1] for c, m in own.items() if m is None]
+    poly: dict[tuple[str, str], float] = {}
+    if wallet and any(not r["code"] and r["state"] == "filled" for r in rows):
+        try:
+            poly = {(p.title or "", p.outcome or ""): float(p.current_price)
+                    for p in reads.whales.positions("polymarket", wallet, limit=100) if p.current_price is not None}  # fmt: skip
+        except Exception:  # noqa: BLE001  (said on the page: these copies show no price now)
+            failed.append(copies.POLY[1])
+    cash = [{"exchange": name, "usd": own_trading.balance(code, STORE_DIR), "url": DEPOSIT[code], "own": True}
+            for code, (_, name) in own_trading.VENUES.items() if own_trading.on_for(uid) and own_trading.has(code)]  # fmt: skip
+    if wallet:
+        cash.append({"exchange": copies.POLY[1], "usd": None, "url": "/copy", "own": False})
+    return {"own": own, "poly": poly, "failed": failed, "cash": cash, "read_at": time.time()}
+
+
+@app.get("/api/me/copies")
+def my_copies(response: Response, uid: str = Depends(copies_user)) -> dict[str, Any]:
+    """Every Copy tap of this account (copies.kept): what it bought or why it didn't, the trader's own price, the
+    price now or how it ended, the totals and one line per trader copied (copies.view). Prices and balances are read
+    at most once a minute (COPIES_TTL_S); ``failed`` names an exchange that couldn't be read just now."""
+    _private(response)
+    with _db() as con:
+        rows = copies.kept(con, uid)
+        w = copying.wallet_of(con, uid) if copying.on_for(uid) else None
+    wallet = w["wallet"] if w and w.get("state") == "ready" else None
+    got = cached(f"copies:{uid}:{len(rows)}", COPIES_TTL_S, lambda: _copies_reads(uid, rows, wallet))
+    return copies.view(rows, got["own"], got["poly"]) | {k: got[k] for k in ("failed", "cash", "read_at")}
+
+
 @app.post("/api/copy/builder-sign")
 def copy_builder_sign(req: BuilderSign, uid: str = Depends(copy_user)) -> dict[str, str]:
     """Builder headers for one relayer call the set-up page makes (the SDK's remoteBuilderSigning)."""
@@ -5045,6 +5105,7 @@ def _db() -> Iterator[sqlite3.Connection]:
                 if "buys" not in {r[1] for r in con.execute("PRAGMA table_info(pace)")}:
                     con.execute("ALTER TABLE pace ADD COLUMN buys TEXT")  # each buy's [dollars, price] (_measure_pace)
                 own_trading.migrate(con)  # an offer's amount and names
+                copying.migrate(con)  # a one-tap copy offer's names
                 con.execute("CREATE INDEX IF NOT EXISTS alerts_by_state ON alerts (state, next_at)")
                 _db_ready.add(str(alerts_db()))
             yield con
@@ -5114,7 +5175,7 @@ RETRY_S = (30.0, 60.0, 120.0, 240.0)  # waits before each try again of a tempora
 def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, trader: str | None = None,
           outcome: str | None = None, trade_at: float | None = None, stop: str | None = None,
           trigger_at: float | None = None, copy: tuple[str, float] | None = None,
-          own: list[dict[str, Any]] | None = None,
+          copy_names: dict[str, Any] | None = None, own: list[dict[str, Any]] | None = None,
           on_queue: Callable[[sqlite3.Connection], Any] | None = None) -> str | None:  # fmt: skip
     """Send one alert if today's cap allows it; its id when it went out now, else None (not sent, or sent later by
     a retry). At the cap, the first alert that doesn't fit sends cap_text (the limit, and when alerts resume) instead,
@@ -5123,7 +5184,8 @@ def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, tra
     first buy); ``trigger_at``: when the buy that sent it was made (defaults to ``trade_at``). ``on_queue`` runs in
     the transaction that keeps the alert (a summary clears what it sums up there: kept and cleared together, or
     neither). ``copy`` (the outcome token and the price the alert shows): a "Copy" button when the account has
-    one-tap copy on and set up, and what it buys kept (copying.offer). Whether a trade is sent at all, held for a summary or left to the Feed is the person's choice for that
+    one-tap copy on and set up, and what it buys kept (copying.offer), with ``copy_names`` (the outcome, market,
+    trader and Polymarket page the Copies view shows it by). Whether a trade is sent at all, held for a summary or left to the Feed is the person's choice for that
     trader (_wants), decided before this.
 
     Never twice, across any crash or failure (Telegram can't tell a repeat): the alert is kept (queued, with its
@@ -5162,7 +5224,7 @@ def _send(uid: str, chat: str, kind: str, text_for: Callable[[str], str], *, tra
         if on_queue is not None:
             on_queue(con)
         if can_copy and copy:
-            copying.offer(con, aid, uid, copy[0], copy[1])
+            copying.offer(con, aid, uid, copy[0], copy[1], **(copy_names or {}))
         if own and copy:
             for o in own:
                 own_trading.offer(con, aid, uid, o["code"], o["market"], o["side"], copy[1], usd=own_usd,
@@ -6238,6 +6300,8 @@ def _deliver(uid: str, chat: str, b: NewBuy, category: str | None, tag: str = ""
         return 1 if aid else 0
     aid = _send(uid, chat, "buy", lambda aid: tag + b.text(aid), trader=b.wallet, outcome=b.outcome, trade_at=b.at,
                 stop=b.wallet, copy=(b.t.token, b.now) if b.t.token and b.now else None,
+                copy_names={"label": b.t.outcome, "title": b.t.title, "trader": _who(b.wallet), "url": b.t.url}
+                if copying.on_for(uid) else None,
                 own=_own_offers(uid, b.t, b.wallet, category))  # fmt: skip
     return 1 if aid else 0
 

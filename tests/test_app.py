@@ -800,11 +800,18 @@ def test_the_page_never_says_copy() -> None:
     """The copy estimate is gone from everything people see (the owner: it isn't reliable yet): no "Copyable",
     "Copy not proven", "Costly to copy", "Copy estimate" or "Copying" in the words the page shows (the text of its
     strings and its HTML, not its code: a lone lowercase name like "copyable" or a route is code). As #126's "never
-    bet" guard, over the page's own strings."""
+    bet" guard, over the page's own strings.
+
+    The one exception (owner, 15 Nov 2026): the Copies view, the copies an account with copying on made, never an
+    estimate. Its block (between its BEGIN and END lines) and its header links (data-copies) are left out; the rest
+    of the page is held to it as before."""
     import re
 
-    page = "\n".join(ln for ln in (engine.HERE / "static" / "index.html").read_text().splitlines()
-                     if not ln.lstrip().startswith("//"))  # fmt: skip
+    text = (engine.HERE / "static" / "index.html").read_text()
+    begin, end = "// ---- copies view (#/copies, /api/me/copies): BEGIN ----", "// ---- copies view: END ----"
+    assert text.count(begin) == 1 and text.count(end) == 1
+    text = text[: text.index(begin)] + text[text.index(end) + len(end) :]
+    page = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("//") and "data-copies" not in ln)
     words = [re.sub(r"\$\{[^}]*\}", " ", m) for m in re.findall(r'"[^"\n]*"|`[^`\n]*`', page)]
     words += re.findall(r'"[^"\n]*"', page)  # again on their own: a "…" inside a `…${ }…` is text too
     code = re.compile(r'^["`][#/a-z_-]*["`]$')  # "copyable", "#/copied": a name or a route, never shown
