@@ -112,7 +112,7 @@ function EveryBuyChart({ tiles, act }) {
 
 // ---------- one market's replay
 function chartGeom(w, W, compact) {
-  const ml = compact ? 8 : 74, mr = compact ? 8 : 112, top = w.matchView ? (compact ? 34 : 40) : 10;
+  const ml = compact ? 8 : 74, mr = compact ? 8 : 112, top = w.matchView ? 16 + (labelRows(compact) + 1) * LABEL_ROW_H : 10;
   // no outside line (politics): no empty panel for it, the market's own price comes first
   const hB = !w.out ? 0 : compact ? 120 : 180, hP = compact ? 90 : 120, hQ = compact ? 50 : 70, g = compact ? 10 : 18, ax = 26;
   const yB0 = top, yP0 = yB0 + hB + (w.out ? g : 6), yQ0 = yP0 + hP + g, H = yQ0 + hQ + ax;
@@ -144,6 +144,7 @@ function dateTicks(w, n) {
 
 // The match on the chart: in the match view its halves and half-time, kick-off, full time, each goal (when the feed
 // said so; one it took back dashed) and the recording's gaps (hatched); in the whole market's view a band for it.
+const LABEL_ROW_H = 13, labelRows = compact => (compact ? 4 : 3);
 function matchMarks(w, G) {
   const m = w.match, y0 = G.yP0, y1 = G.yQ0 + G.hQ, out = [], vis = t => t >= w.from && t <= w.to, cx = t => Math.max(G.ml, Math.min(G.W - G.mr, G.X(t)));
   if (!w.matchView) {
@@ -160,15 +161,27 @@ function matchMarks(w, G) {
     if (['1H', '2H', 'HT', 'ET1', 'ET2'].includes(p.period) && cx(b) - cx(a) > (G.compact ? 26 : 40)) out.push(html`<text class="axs" x=${(cx(a) + cx(b)) / 2} y=${G.yQ0 - 5} text-anchor="middle">${{ '1H': '1st half', '2H': '2nd half', HT: 'Half-time', ET1: 'Extra time', ET2: 'Extra time' }[p.period]}</text>`);
   }
   for (const g of m.gaps) if (g.to > w.from && g.from < w.to) out.push(html`<rect x=${cx(g.from)} y=${y0} width=${Math.max(2, cx(g.to) - cx(g.from))} height=${y1 - y0} fill="url(#rhatch)"><title>${`${g.why}: ${dateTime(g.from)} to ${new Date(g.to * 1000).toISOString().slice(11, 19)} UTC. The score here is only known from the next update.`}</title></rect>`);
-  const line = (t, dash, label, row, strong) => html`<g><line x1=${G.X(t)} x2=${G.X(t)} y1=${y0 - (row ? 16 : 4)} y2=${y1} stroke="var(--fg)" stroke-width=${strong ? 1.3 : 1} stroke-dasharray=${dash ? '4 3' : null} opacity=${strong ? 0.75 : 0.45} />
-    <text class="axs goal" x=${G.X(t) + 3} y=${y0 - (row ? 20 : 8)}>${label}</text></g>`;
-  if (m.kickoff && vis(m.kickoff) && (!m.firstLive || Math.abs(m.firstLive - m.kickoff) > 120)) out.push(line(m.kickoff, true, G.compact ? 'KO' : 'Kick-off (scheduled)', 1, false));
-  if (m.final && vis(m.final.t)) out.push(line(m.final.t, false, `FT ${scoreText(m.final.score)}`, 1, false));
-  let lastX = -1e9, row = 0;
+  // labels above the price panel, each in the first of LABEL_ROWS rows with room for it (goals close together, a goal
+  // the feed took back and given again, kick-off and full time never print over each other)
+  const marks = [];
+  if (m.kickoff && vis(m.kickoff) && (!m.firstLive || Math.abs(m.firstLive - m.kickoff) > 120)) marks.push({ t: m.kickoff, dash: true, text: G.compact ? 'KO' : 'Kick-off (scheduled)', strong: false, title: `${dateTime(m.kickoff)}: the scheduled kick-off. The feed's first live update came at ${m.firstLive ? new Date(m.firstLive * 1000).toISOString().slice(11, 19) : '–'} UTC.` });
+  if (m.final && vis(m.final.t)) marks.push({ t: m.final.t, dash: false, text: `FT ${scoreText(m.final.score)}`, strong: false, title: `${dateTime(m.final.t)}: full time, ${scoreText(m.final.score)}, as the feed said it.` });
   for (const g of m.goals) {
     if (g.kind === 'correction' || !vis(g.t)) continue;
-    row = G.X(g.t) - lastX < (G.compact ? 40 : 58) ? 1 - row : 0; lastX = G.X(g.t);
-    out.push(html`<g><title>${`${dateTime(g.t)}: the feed showed ${scoreText(g.score)}${g.minute != null ? ` in the ${g.minute}th minute` : ''}${g.retracted ? ', then took it back' : ''}${g.reinstated ? ' again, after taking it back' : ''}${g.after_gap ? '. It came after a recording gap, so it may have happened earlier' : ''}.`}</title>${line(g.t, g.retracted, goalLabel(g), row, !g.retracted)}</g>`);
+    // a phone has room for the score only ("(1–3)": one the feed took back); the minute is in its title and the readout
+    marks.push({ t: g.t, dash: g.retracted, text: G.compact ? (g.retracted ? `(${scoreText(g.score)})` : scoreText(g.score)) : goalLabel(g), strong: !g.retracted, title: `${dateTime(g.t)}: the feed showed ${scoreText(g.score)}${g.minute != null ? ` in the ${g.minute}th minute` : ''}${g.retracted ? ', then took it back' : ''}${g.reinstated ? ' again, after taking it back' : ''}${g.after_gap ? '. It came after a recording gap, so it may have happened earlier' : ''}.` });
+  }
+  marks.sort((a, b) => a.t - b.t);
+  const edge = Array(labelRows(G.compact)).fill(-1e9), cw = 6.4;  // 11 px text
+  for (const k of marks) {
+    const x = G.X(k.t), wd = k.text.length * cw + 8;
+    const right = x + wd <= G.W - 2;  // a label that would run off the edge sits to the left of its line
+    const from = right ? x : x - wd;
+    const row = edge.findIndex(e => e < from);  // -1: no row has room, the line is drawn without its label
+    if (row >= 0) edge[row] = right ? x + wd : x + 4;
+    const yl = y0 - 8 - (Math.max(0, row) + 1) * LABEL_ROW_H;  // above the panel's own caption
+    out.push(html`<g><title>${k.title}</title><line x1=${x} x2=${x} y1=${row < 0 ? y0 : yl + 3} y2=${y1} stroke="var(--fg)" stroke-width=${k.strong ? 1.3 : 1} stroke-dasharray=${k.dash ? '4 3' : null} opacity=${k.strong ? 0.75 : 0.45} />
+      ${row >= 0 && html`<text class="axs goal" x=${right ? x + 3 : x - 3} y=${yl} text-anchor=${right ? 'start' : 'end'}>${k.text}</text>`}</g>`);
   }
   return out;
 }
@@ -249,14 +262,15 @@ export function MarketReplay({ inv, ui, act, w, steps }) {
   const view = !canMatch ? 'whole' : span || (step && !ui.full && !inMatch(step.t) ? 'whole' : 'match');
   const full = w;
   w = view === 'match' ? matchView(w) : w;
-  const ph = hover ?? (ui.full || !step ? null : step.t);
+  const ph0 = hover ?? (ui.full || !step ? null : step.t);
+  const ph = ph0 != null && (ph0 < w.from || ph0 > w.to) ? null : ph0;  // a step outside the match isn't drawn on it
   const T = w.totals, cov = w.cov || {}, ws = inv.summaries, wi = ws.findIndex(s => s.window_id === w.id);
   const go = i => act.setStep(Math.max(0, Math.min(steps.length - 1, i)));
   // a step reads where its own fills end, so "Holding" counts every fill the step describes
   const stepEnd = s => { const ids = new Set(s.trade_ids || []); return w.trades.reduce((m, x) => (ids.has(x.trade_id) ? Math.max(m, x.t) : m), s.t); };
   const ro = Math.round(hover ?? (ph != null && step ? stepEnd(step) : ph) ?? w.to), ob = w.outAt(ro);
   const pop = ui.pop && full.bursts.find(b => b.id === ui.pop);
-  const covLine = [cov.price_step_s ? `the market's price every ${stepWord(cov.price_step_s)}` : null,
+  const covLine = [cov.price_step_s ? `the market's price every ${stepWord(cov.price_step_s)}${cov.match_price_step_s && cov.match_price_step_s !== cov.price_step_s ? `, the match itself every ${stepWord(cov.match_price_step_s)}` : ''}` : null,
     w.out ? `${w.out.name} in ${w.out.step} candles (their highs and lows shaded)` : cov.outside_none ? null : 'no outside price for this market',
     ...(cov.notes || [])].filter(Boolean);
   return html`<div class="wv">
