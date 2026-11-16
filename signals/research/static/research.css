@@ -9,13 +9,13 @@
   --accent: #ff4d1f; --accent-soft: #2a1610; --on-accent: #0e0e0f;
   --gain: #3ecf8e; --loss: #f0506e; --amber: #f5a524; --blue: #7aa2ff;
   --up: #3cc6cf; --down: #c792ea; --binance: #8b8f99; --ink: #f5a524; --ink-soft: #2b2110; --hatch: #838389;
-  --shadow: none;
+  --shadow: none; --raised: #26262a;
   --font: "Host Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #fafaf9; --card: #ffffff; --fg: #111112; --muted: #6c6c72; --faint: #6e6e73; --line: #ececea; --soft: #f3f3f1;
+  --bg: #fafaf9; --card: #ffffff; --fg: #111112; --muted: #6c6c72; --faint: #6e6e73; --line: #ececea; --soft: #f3f3f1; --raised: #ffffff;
   --accent: #4b3fe0; --accent-soft: #eeedfc; --on-accent: #ffffff;
   --gain: #087f3d; --loss: #cf3426; --amber: #a86200; --blue: #2557d6;
   --up: #0b7a83; --down: #8e44ad; --binance: #8b8f99; --ink: #a86200; --ink-soft: #fbf1df; --hatch: #a1a1a6;
@@ -100,10 +100,18 @@ p { margin: 0; }
 .compose-big { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow); }
 .compose-big input, .compose-big textarea { border: 0; background: transparent; font: 16px/1.5 var(--font); color: var(--fg); outline: none; width: 100%; resize: none; }
 .compose-big input { font-size: 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-.compose-big .pickers { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-.pickers label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-.pickers select { font: 500 14px var(--font); color: var(--fg); background: var(--soft); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
-.pickers .small { flex-basis: 100%; }
+/* Market and Time range: the main app's segmented control (.seg in signals/static/index.html), never a native select */
+.compose-big .pickers { display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.pickers .prow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pickers .pl { flex: none; width: 82px; font-size: 13px; color: var(--muted); }
+.seg { display: inline-flex; background: var(--soft); border-radius: 999px; padding: 3px; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.seg::-webkit-scrollbar { display: none; }
+.seg button { border: 0; background: transparent; padding: 5px 12px; border-radius: 999px; font: 500 13.5px var(--font); color: var(--muted); white-space: nowrap; cursor: pointer; }
+.seg button:hover { color: var(--fg); }
+.seg button.on { background: var(--raised); color: var(--fg); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (max-width: 600px) { .pickers .prow { flex-direction: column; align-items: flex-start; gap: 4px; } .pickers .pl { width: auto; }
+  .pickers .seg { flex-wrap: wrap; border-radius: 18px; overflow: visible; } }
 .compose-big .foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .compose-big .foot .btn { flex: none; white-space: nowrap; }
 .list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }

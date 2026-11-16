@@ -99,8 +99,8 @@ export function scopeSlots(scope) {
 // three days; one tile per market (its 20 with the most money), so 30 to 90 days, 90 the plan's own default
 // (case.MARKET_DAYS).
 export const RANGES = {
-  window: [[1, 'Last hour'], [6, 'Last 6 hours'], [24, 'Last 24 hours'], [72, 'Last 3 days']],
-  market: [[720, 'Last 30 days'], [1440, 'Last 60 days'], [2160, 'Last 90 days']],
+  window: [[1, '1 hour'], [6, '6 hours'], [24, '24 hours'], [72, '3 days']],
+  market: [[720, '30 days'], [1440, '60 days'], [2160, '90 days']],
 };
 export const defaultRange = unit => (unit === 'window' ? 24 : 2160);
 const isoAt = t => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
