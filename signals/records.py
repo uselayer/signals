@@ -41,9 +41,13 @@ FIRST_PAGES = 20  # closed positions on a wallet's first read with nothing kept:
 MAX_PAGES = 40  # never more than 2,000 closed positions in one read
 QUICK_TRADES = 500  # the latest trades a quick check reads: one read (Polymarket's most a page), so a few markets traded
 #                     heavily still reach back past the 30 days instead of cutting the read short
-# Bot-like: 100 or more trades a day, the SDK's score's "bot" tag (whale_scores: fills over the 30 days read), worked
+# Bot-like: 100 or more orders a day, the SDK's score's "bot" tag (whale_scores: orders over the 30 days read), worked
 # out from the trades a record already reads, so a wallet never scored is tagged too. It's a tag, never a verdict.
-BOT_TRADES_A_DAY = 100
+# Orders, not fills: one big resting order is filled by hundreds of strangers, each a fill. BreakTheBank (15 Nov) made
+# ~48,700 fills in 30 days, median $8, from ~37 orders a day (one $619K buy at 60¢ was 1,726 fills), so counting fills
+# called half the Leaderboard's top 50 a bot.
+BOT_ORDERS_A_DAY = 100
+ORDER_GAP_S = 3600  # fills of one outcome, side and price, each within this of the one before, are one order
 MERGE_S = 60  # fills of one market this close together are one trade, as the SDK's score merges them
 DAY = 86400
 
@@ -212,15 +216,33 @@ def _paid(buys: list[tuple[Any, ...]]) -> float | None:
     return round(statistics.fmean(prices), 4) if prices else None
 
 
+def _orders(trades: list[tuple[Any, ...]]) -> int:
+    """How many orders ``trades`` (fills, as ``_style`` reads them) came from: fills of one outcome, side and price,
+    each within ORDER_GAP_S of the one before, are one order filled in pieces. A fill without its price and outcome
+    (``(time, bought, market, dollars)`` only) is keyed by its market and side."""
+    last: dict[tuple[Any, ...], float] = {}
+    n = 0
+    for t in sorted(trades, key=lambda t: t[0]):
+        priced = len(t) > 5 and t[4] is not None
+        key = (t[5], t[1], round(t[4], 4)) if priced else (t[2], t[1])
+        seen = last.get(key)
+        last[key] = t[0]
+        if seen is None or t[0] - seen > ORDER_GAP_S:
+            n += 1
+    return n
+
+
 def _bot(trades: list[tuple[Any, ...]], now: float) -> int:
-    """1 when their latest trades come to BOT_TRADES_A_DAY or more a day over the 30 days, as the SDK's score tags a
-    bot, else 0. A read cut short at QUICK_TRADES covers only back to its oldest trade, so it's that span's rate; an
-    uncut one has every trade of the 30 days."""
+    """1 when their latest trades come to BOT_ORDERS_A_DAY or more orders (``_orders``) a day over the 30 days, as the
+    SDK's score tags a bot, else 0. An uncut read has every trade of the 30 days. One cut short at QUICK_TRADES covers
+    only back to its oldest trade: that span's rate, the span a day at least, so a busy few hours (a game, a big order
+    filling) isn't scaled up to a day; 100 orders inside a day still are 100 a day."""
     month = now - 30 * DAY
-    recent = [t[0] for t in trades if t[0] >= month]
-    cut = len(trades) >= QUICK_TRADES and min(recent, default=month) > month
-    days = max((now - min(recent)) / DAY, 1 / 24) if cut else 30.0
-    return int(len(recent) / days >= BOT_TRADES_A_DAY)
+    recent = [t for t in trades if t[0] >= month]
+    oldest = min((t[0] for t in recent), default=month)
+    cut = len(trades) >= QUICK_TRADES and oldest > month
+    days = max((now - oldest) / DAY, 1.0) if cut else 30.0
+    return int(_orders(recent) / days >= BOT_ORDERS_A_DAY)
 
 
 def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:

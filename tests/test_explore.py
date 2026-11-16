@@ -574,15 +574,15 @@ def test_a_market_makers_row_says_what_they_are_and_what_trading_and_rewards_mad
     r = '{group: "checked", evidence: "scored", segment: "no_view", style: "arbitrage", bot: 1, trading_pnl_window: -120, income_window: 2400}'
     got = run_js(STYLE_ROW, f"[exStats({r}), exBadges({r})]")
     assert kv(got[0]) == [["Trading profit, 30d", "−$120", None], ["Rewards, 30d", "$2.4K", None], ["Last trade", "unknown", None]]
-    bot, human = run_js(STYLE_ROW, "[`<span class=\"who-tag bot\" title=\"100 or more trades a day\">${BOT_ICON}Bot</span>`, "
-                        "`<span class=\"who-tag human\" title=\"Fewer than 100 trades a day\">${HUMAN_ICON}Human</span>`]")
+    bot, human = run_js(STYLE_ROW, "[`<span class=\"who-tag bot\" title=\"100 or more orders a day\">${BOT_ICON}Bot</span>`, "
+                        "`<span class=\"who-tag human\" title=\"Fewer than 100 orders a day\">${HUMAN_ICON}Human</span>`]")
     assert got[1] == f'<span class="tier t3">Arbitrage</span>{bot}'
     # 13 Nov, user feedback: every tagged wallet, not only market makers; once each, from a record's bot or a score's tags
     tagged = run_js(STYLE_ROW, '''[{group: "checked", evidence: "scored", segment: "no_edge", bot: 1},
       {group: "limited", tags: ["bot"]}, {group: "checked", evidence: "scored", segment: "no_edge", bot: 0}, {record: true, bot: 1}]
       .map((r) => [exBadges(r), whoBadge(r)])''')
     assert [b.count(">Bot</span>") for b, _ in tagged[:3]] == [1, 1, 0] and tagged[3][1] == bot
-    assert tagged[2][1] == human and human in tagged[2][0]  # under 100 trades a day: Human
+    assert tagged[2][1] == human and human in tagged[2][0]  # under 100 orders a day: Human
     unknown = run_js(STYLE_ROW, "whoBadge({record: true, bot: null})")  # a record that hasn't said yet: Unknown
     assert 'class="who-tag unknown"' in unknown and unknown.endswith("Unknown</span>")
     assert run_js(STYLE_ROW, "[whoBadge({tags: []}), whoBadge(null), whoBadge(undefined)]") == [human, "", ""]  # no record: none

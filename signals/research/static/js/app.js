@@ -365,8 +365,8 @@ function Investigation({ api, id }) {
             return html`<button class="qrun" key=${i} aria-pressed=${i === idx ? 'true' : 'false'} title=${runTitle(inv, r, i)} onClick=${() => act.viewRun(i, rs.length)}>
               <span class="qt">${shortWallets(runTitle(inv, r, i))}</span><span class=${'st' + (stt === 'working' ? ' live' : '')}>${stt}</span></button>`; })}</div>`}
         ${past && html`<div class="banner"><span>You're looking at an earlier question. It's finished and won't change.</span><button class="link" onClick=${() => act.viewRun(rs.length - 1, rs.length)}>Back to the new question →</button></div>`}
-        <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}${isBot(rec) ? html`<span class="who-tag bot" title="100 or more trades a day, from its Signals record">${BOT_ICON}Bot</span>`
-          : isHuman(rec) ? html`<span class="who-tag human" title="Fewer than 100 trades a day, from its Signals record">${HUMAN_ICON}Human</span>`
+        <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}${isBot(rec) ? html`<span class="who-tag bot" title="100 or more orders a day, from its Signals record">${BOT_ICON}Bot</span>`
+          : isHuman(rec) ? html`<span class="who-tag human" title="Fewer than 100 orders a day, from its Signals record">${HUMAN_ICON}Human</span>`
           : rec ? html`<span class="who-tag unknown" title="Not read since this label was added: Human or Bot once their trades are read again">${UNKNOWN_ICON}Unknown</span>` : null}<span>${mk.label}</span>
           ${vsum.length > 0 && !byMarket && html`<span>· ${plural(vsum.length, 'window')}</span><span>· <b class=${totalProfit >= 0 ? 'gain' : 'loss'}>${signedMoney(totalProfit)}</b> from its fills${!past && inv.running ? ' so far' : ''}</span>`}
           ${vsum.length > 0 && byMarket && html`<span>· ${plural(vsum.length, 'market')}</span>${mt.decided > 0 && html`<span>· <b class=${mt.profitMade + mt.profitLost >= 0 ? 'gain' : 'loss'}>${signedMoney(mt.profitMade + mt.profitLost)}</b> on ${plural(mt.decided, 'market')} ended or sold out</span>`}${mt.open > 0 && html`<span>· ${signedMoney(mt.profitOpen)} open, at today's prices</span>`}`}
@@ -392,7 +392,7 @@ function Investigation({ api, id }) {
 // profit (from 10 closed), always with the average price paid beside it (a price is the market's chance, so paying
 // 97¢ wins about 97% of the time by buying alone), and it covers every market, not only these windows.
 const WIN_MIN = 10;
-// Tagged a bot by its record (100+ trades a day) or score: the header's "Bot", else "Human", as the Leaderboard shows it
+// Tagged a bot by its record (100+ orders a day) or score: the header's "Bot", else "Human", as the Leaderboard shows it
 const isBot = r => !!r && (r.bot === 1 || r.bot === true || (Array.isArray(r.tags) && r.tags.includes('bot')));
 const isHuman = r => !!r && !isBot(r) && (r.bot === 0 || r.bot === false || (r.bot == null && Array.isArray(r.tags)));
 const HUMAN_ICON = html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/></svg>`;
