@@ -299,7 +299,11 @@ def totals(coverages: list[dict[str, Any]]) -> dict[str, Any]:
                 "fills_complete": {"complete": sum(bool(c.get("fills_complete")) for c in mk), "total": n},
                 "price_steps_s": steps,
                 "outside": {"name": next((c["outside"] for c in mk if c.get("outside")), None),
-                            "markets": sum(bool(c.get("outside")) for c in mk)},
+                            "markets": sum(bool(c.get("outside")) for c in mk),
+                            "none": next((c["outside_none"] for c in mk if c.get("outside_none")), None)},
+                "moves": {"read": sum(bool(c.get("moves_read")) for c in mk), "total": n,
+                          "markets_with": sum(bool(c.get("moves")) for c in mk),
+                          "converted": sum(bool(c.get("converted")) for c in mk)},
                 "chainlink": {"complete": 0, "total": n}, "book": {"complete": 0, "total": n},
                 "outage": {"windows": []}}  # fmt: skip
     return {
@@ -343,27 +347,55 @@ def market_fills(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for r in sorted(trades, key=lambda r: (r["ts"], r.get("tx") or ""))]  # fmt: skip
 
 
-def market_position(fs: list[dict[str, Any]], outcomes: list[str]) -> list[dict[str, Any]]:
-    """Shares held of each outcome after each fill: [{t, held: {Yes: x, No: y}}]."""
+def market_position(fs: list[dict[str, Any]], outcomes: list[str],
+                    moves: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:  # fmt: skip
+    """Shares held of each outcome after each fill, merge and split: [{t, held: {Yes: x, No: y}}]. A merge takes
+    its pairs off every outcome, a split adds them (a conversion's sides aren't listed: left out, and said)."""
     held = {o: 0.0 for o in outcomes}
     out: list[dict[str, Any]] = []
-    for f in fs:
-        held[f["side"]] = held.get(f["side"], 0.0) + (f["shares"] if f["action"] == "buy" else -f["shares"])
-        if out and out[-1]["t"] == f["t"]:
+    steps = [(f["t"], 0, f) for f in fs] + [(m["t"], 1, m) for m in moves or [] if m["kind"] in ("merge", "split")]
+    for t, is_move, x in sorted(steps, key=lambda s: (s[0], s[1])):
+        if is_move:
+            for o in held:
+                held[o] += x["shares"] if x["kind"] == "split" else -x["shares"]
+        else:
+            held[x["side"]] = held.get(x["side"], 0.0) + (x["shares"] if x["action"] == "buy" else -x["shares"])
+        if out and out[-1]["t"] == t:
             out.pop()
-        out.append({"t": f["t"], "held": {k: round(v, 6) for k, v in held.items()}})
+        out.append({"t": t, "held": {k: round(v, 6) for k, v in held.items()}})
     return out
 
 
+def _exit(fs: list[dict[str, Any]], moves: list[dict[str, Any]], pos: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """How the wallet got out: the moment its position last went to nothing, and what took its shares out over the
+    market's life (its sells, its merges, or both), or None while it still holds."""
+    if not pos or any(v >= DUST for v in pos[-1]["held"].values()):
+        return None
+    i = len(pos) - 1
+    while i > 0 and all(v < DUST for v in pos[i - 1]["held"].values()):
+        i -= 1
+    sold = any(f["action"] == "sell" for f in fs)
+    merged = [m for m in moves if m["kind"] == "merge"]
+    how = "sold_and_merged" if merged and sold else "merged" if merged else "sold"
+    return {"t": pos[i]["t"], "how": how, "merged_pairs": round(sum(m["shares"] for m in merged), 6),
+            "merged_usd": round(sum(m["usd"] or m["shares"] for m in merged), 2)}  # fmt: skip
+
+
 def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: dict[str, Any] | None,
-                 fills_complete: bool, tags: dict[str, Any] | None = None) -> dict[str, Any]:  # fmt: skip
+                 fills_complete: bool, tags: dict[str, Any] | None = None,
+                 moves: dict[str, Any] | None = None) -> dict[str, Any]:  # fmt: skip
     """``window.ready`` for a market (``kind`` "market"): the market's prices over the replay's span, the outside
-    line (Binance BTCUSDT for BTC price markets: closes, and each candle's high and low), the wallet's fills over
-    the market's whole life, its position after each, and what it paid, got back and holds (an open market valued
-    at its latest price, said so in ``value.profit_kind``)."""
+    line (Binance BTCUSDT for BTC price markets: closes, and each candle's high and low; none for politics), the
+    wallet's fills and its merges, splits and conversions (``moves``, ``Reads.market_moves``) over the market's
+    whole life, its position after each, what it paid, got back and holds (an open market valued at its latest
+    price, said so in ``value.profit_kind``), and how it got out (``value.exit``: sold, merged, held to the result
+    or open). Merges and splits are in the profit, exactly: a merged pair is $1 back, a split pair $1 paid."""
     outcomes = list(read.get("outcomes") or [])
     fs = market_fills(trades)
-    pos = market_position(fs, outcomes)
+    moves_read = moves is not None and not moves.get("failed")
+    mv = list((moves or {}).get("moves") or []) if moves_read else []
+    converted = any(m["kind"] == "conversion" for m in mv)
+    pos = market_position(fs, outcomes, mv)
     held = pos[-1]["held"] if pos else {o: 0.0 for o in outcomes}
     prices = {o: _points(read.get("prices", {}).get(o)) for o in outcomes}
     last = {o: (prices[o][-1]["p"] if prices[o] else None) for o in outcomes}
@@ -373,8 +405,11 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
     def paid(f: dict[str, Any]) -> float:
         return float(f["usd"]) if f.get("usd") is not None else f["shares"] * f["price"]
 
-    cost = sum(paid(f) for f in fs if f["action"] == "buy")
-    back = sum(paid(f) for f in fs if f["action"] == "sell")
+    def usd(m: dict[str, Any]) -> float:
+        return float(m["usd"]) if m.get("usd") else m["shares"]  # $1 a pair
+
+    cost = sum(paid(f) for f in fs if f["action"] == "buy") + sum(usd(m) for m in mv if m["kind"] == "split")
+    back = sum(paid(f) for f in fs if f["action"] == "sell") + sum(usd(m) for m in mv if m["kind"] == "merge")
     holding = {o: v for o, v in held.items() if v >= DUST}  # a few hundredths of a share is dust, not a position
     result = read.get("result")
     payout = value_now = None
@@ -386,7 +421,7 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
         kind = "open"
         value_now = sum(v * last[o] for o, v in holding.items()) if all(last[o] is not None for o in holding) else None
     end_value = payout if payout is not None else value_now
-    profit = None if before or end_value is None or not fills_complete else round(end_value + back - cost, 2)
+    profit = None if before or converted or end_value is None or not fills_complete else round(end_value + back - cost, 2)
     market_end = read.get("closed_at") or read.get("end")
     first = fs[0]["t"] if fs else None
     if kind == "closed":
@@ -395,6 +430,18 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
         hold_to = max(int(read.get("closed_at") or market_end or fs[-1]["t"]), fs[-1]["t"]) if fs else None
     else:
         hold_to = int(read.get("price_to") or now())
+    out_of = _exit(fs, mv, pos)
+    end_t = read.get("closed_at") or market_end
+    if kind == "resolved" and out_of and end_t and out_of["t"] < int(end_t):
+        hold_to = out_of["t"]  # it got out before the result: held until then, not to the end
+    if kind == "open":
+        exit_ = {"how": "open"}
+    elif out_of and (kind == "closed" or (end_t and out_of["t"] < int(end_t))):
+        exit_ = out_of
+    elif not moves_read:
+        exit_ = {"how": "not_known"}  # its merges couldn't be read: whether it held to the result isn't known
+    else:
+        exit_ = {"how": "held", "t": int(end_t) if end_t else None}
     span_from, span_to = int(read.get("price_from") or (first or 0)), int(read.get("price_to") or now())
     out_pts = out_ranges = None
     if outside and outside.get("available"):
@@ -411,10 +458,25 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
     if before:
         notes.append("It sold more shares here than its fills show it buying: the rest came some way fills don't show "
                      "(splitting dollars into both outcomes, or a conversion), so this market's profit isn't counted.")  # fmt: skip
+    if moves is not None and moves.get("failed"):
+        notes.append("Its merges and splits in this market couldn't be read, so whether it held to the end or merged "
+                     "out first isn't known.")  # fmt: skip
+    elif moves_read and not moves.get("complete", True):
+        notes.append("Polymarket listed more merges and splits here than one read holds: the latest weren't read.")
+    if converted:
+        notes.append("It converted shares in this market (a negRisk conversion swaps No shares across the event's "
+                     "markets; Polymarket doesn't list which), so its position and profit here aren't counted.")  # fmt: skip
+    if mv and not converted:
+        notes.append("Merges and splits are counted: a merged pair of Yes and No is $1 back, a split pair $1 paid.")
+    mt = markets.by_id(read.get("market_type"))
+    if not (outside and outside.get("available")) and mt and mt.outside is None and mt.no_outside:
+        notes.append(mt.no_outside)
     coverage = {"window_id": read.get("slug"), "kind": "market", "source": "Polymarket API (uselayer)",
                 "price_step_s": (read.get("coverage") or {}).get("price_step_s"),
                 "price_points": (read.get("coverage") or {}).get("price_points"),
                 "fills_complete": bool(fills_complete and not before), "shares_not_from_fills": before,
+                "moves_read": moves_read, "moves": len(mv), "converted": converted,
+                "outside_none": mt.no_outside if mt and mt.outside is None else None,
                 "outside": f"Binance {outside.get('symbol')}" if outside and outside.get("available") else None,
                 "outside_step": (outside or {}).get("step") if outside and outside.get("available") else None,
                 "outside_why": (outside or {}).get("why") if outside and not outside.get("available") else None,
@@ -423,6 +485,7 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
         "kind": "market", "window_id": read.get("slug"), "market_type": read.get("market_type"),
         "market_label": read.get("market_label"), "title": read.get("question"), "condition_id": read.get("condition_id"),
         "event_slug": read.get("event_slug"), "event_title": read.get("event_title"),
+        "group_item": read.get("group_item"), "neg_risk": read.get("neg_risk"),
         "start": span_from, "end": span_to, "axis": {"from": span_from, "to": span_to},
         "market_start": read.get("start"), "market_end": read.get("end"), "closed": read.get("closed"),
         "closed_at": read.get("closed_at"), "result": result, "rule": rule, "rules": read.get("description"),
@@ -431,21 +494,22 @@ def market_ready(read: dict[str, Any], trades: list[dict[str, Any]], outside: di
             "name": f"Binance {(outside or {}).get('symbol')}", "unit": (outside or {}).get("unit"),
             "step": (outside or {}).get("step"), "points": out_pts, "ranges": out_ranges,
             "highest": (outside or {}).get("highest"), "lowest": (outside or {}).get("lowest")},
-        "trades": fs, "position": pos,
+        "trades": fs, "moves": mv, "position": pos,
         "hold": {"from": first, "to": hold_to, "days": None if first is None or hold_to is None
                  else round((hold_to - first) / 86_400, 1), "still_held": kind == "open"},
         "value": {"cost": round(cost, 2), "sold_for": round(back, 2), "held": {o: round(v, 6) for o, v in held.items()},
                   "payout": None if payout is None else round(payout, 2),
                   "value_now": None if value_now is None else round(value_now, 2), "last_prices": last,
-                  "profit": profit, "profit_kind": kind},
+                  "profit": profit, "profit_kind": kind, "exit": exit_},
         "tags": tags or {}, "coverage": coverage,
     }  # fmt: skip
 
 
 PROFIT_NOTES = {
-    "resolved": "From fills and the payout of shares held at the resolution; merges and redemptions aren't counted.",
-    "closed": "It sold out before the end: from what it paid and what its sells brought in.",
-    "open": "Still held: valued at the market's latest price, not a result. Merges and redemptions aren't counted.",
+    "resolved": "From its fills, merges and splits, and the payout of shares held at the resolution; redemptions are "
+                "that payout.",
+    "closed": "It got out before the end: from what it paid and what its sells and merges brought in.",
+    "open": "Still held: valued at the market's latest price, not a result.",
 }
 
 
@@ -460,7 +524,8 @@ def market_summary(r: dict[str, Any]) -> dict[str, Any]:
     line = r["prices"].get(side) or [] if side else []
     return {
         "kind": "market", "window_id": r["window_id"], "market_type": r.get("market_type"), "title": r["title"],
-        "event_slug": r.get("event_slug"), "event_title": r.get("event_title"),
+        "event_slug": r.get("event_slug"), "event_title": r.get("event_title"), "group_item": r.get("group_item"),
+        "neg_risk": r.get("neg_risk"),
         "start": r["hold"]["from"] or r["start"], "end": r["hold"]["to"] or r["end"],
         "market_end": r.get("closed_at") or r.get("market_end"), "closed": r.get("closed"), "result": r.get("result"),
         "rule": r.get("rule"), "outcomes": r["outcomes"],
@@ -469,11 +534,13 @@ def market_summary(r: dict[str, Any]) -> dict[str, Any]:
         "first_entry_s": None, "shares": bought, "held": v["held"],
         "cost": v["cost"], "sold_for": v["sold_for"], "payout": v["payout"], "value_now": v["value_now"],
         "profit": v["profit"], "profit_kind": v["profit_kind"], "open": v["profit_kind"] == "open",
-        "profit_note": PROFIT_NOTES[v["profit_kind"]], "held_days": r["hold"]["days"],
+        "profit_note": PROFIT_NOTES[v["profit_kind"]], "held_days": r["hold"]["days"], "exit": v.get("exit"),
+        "moves": [{"t": m["t"], "kind": m["kind"], "shares": m["shares"], "usd": m["usd"]} for m in r.get("moves") or []],
         "spark_side": side, "spark": _thin(line),
         "outside_spark": _thin((r.get("outside") or {}).get("points") or []),
-        "coverage": {k: r["coverage"][k] for k in ("kind", "fills_complete", "shares_not_from_fills", "price_step_s",
-                                                   "outside", "chainlink", "book", "outage")},
+        "coverage": {k: r["coverage"].get(k) for k in ("kind", "fills_complete", "shares_not_from_fills", "price_step_s",
+                                                       "outside", "chainlink", "book", "outage", "moves_read",
+                                                       "converted", "outside_none")},
     }  # fmt: skip
 
 
@@ -519,7 +586,15 @@ def _build_market(store: Any, reads: Any, sid: str, slug: str, tags: dict[str, A
         if mt and mt.outside and mt.outside.get("source") == "binance":
             read["_outside"] = reads.outside_prices("binance", lo, hi, mt.outside.get("symbol") or "BTC")
         store.put_window(sid, slug, read=read)
+    moves = read.get("_moves")
+    if wallet and facts.get("condition_id") and (moves is None or moves.get("failed") or not fresh):
+        try:  # merges, splits and conversions: what changes its shares without a fill (how it got out, too)
+            moves = reads.market_moves(wallet, facts["condition_id"])
+        except Exception as e:  # noqa: BLE001 - said in coverage, never taken as "held to the end"
+            moves = {"failed": f"{type(e).__name__}: {e}"[:200], "moves": []}
+        read["_moves"] = moves
+        store.put_window(sid, slug, read=read)
     r = market_ready(read, trades, read.get("_outside"), complete,
-                     tags if tags is not None else (kept["ready"] or {}).get("tags"))  # fmt: skip
+                     tags if tags is not None else (kept["ready"] or {}).get("tags"), moves)  # fmt: skip
     store.put_window(sid, slug, ready=r, summary=market_summary(r))
     return r

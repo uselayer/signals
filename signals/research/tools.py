@@ -81,14 +81,19 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "wallet_markets",
         "description": (
-            "A wallet's markets of one market type (e.g. 'btc-long': long-dated BTC price markets) traded between "
+            "A wallet's markets of one market type (e.g. 'btc-long': long-dated BTC price markets; 'politics': "
+            "Polymarket's Politics markets, told apart by their own tags) traded between "
             "start and end, the most money traded first: the same list Start's tiles are built from. JSON: {wallet, "
             "start, end, market_type, label, min_days (only markets that run at least this long, listing to end "
             "date), top, trades_read, trades_complete (false: read newest first, it stopped at 30,000 trades, so only "
             "start onward was read, later than you asked: say so), start (how far back it read), asked_from, read_to, markets_traded, markets_looked_at, matched, markets: [{slug, condition_id, question, "
             "event_slug, event_title (strikes of one event share it), start_iso, end_iso, runs_days, closed, result, "
             "rule {kind, strike, source, says}, usd_in_range, fills_in_range, first_fill_in_range, "
-            "last_fill_in_range}], note}."
+            "last_fill_in_range, group_item (its name in a multi-outcome event, e.g. a candidate), neg_risk, "
+            "bought_in_range {Yes: $, No: $}}], note}. For politics also: not_this_type (markets read and left out), "
+            "skipped_near [{question, category, usd_in_range}] (left out but close: a politics tag, another "
+            "category), events [{event_slug, event_title, neg_risk, markets, shown, legs [{slug, name, "
+            "bought_in_range, result, shown}]}] (each event with two or more of its markets, past the tiles too)."
         ),
         "input_schema": {
             "type": "object",
@@ -106,19 +111,26 @@ TOOLS: list[dict[str, Any]] = [
             "One market that isn't a 15-minute window (e.g. 'Will Bitcoin reach $100,000 by December 31, 2026?'), "
             "for the breakdown's wallet, by slug: the replay the page draws, built from the data. JSON: {kind "
             "'market', window_id (the slug), market_type, title (the question), event_slug, event_title, "
-            "market_start, market_end, closed, closed_at, result ('Yes'/'No', null while open), rule {kind "
-            "(touch_high | touch_low | close_above | close_below | all_time_high | other), strike, source, says}, "
+            "group_item, neg_risk, market_start, market_end, closed, closed_at, result ('Yes'/'No', null while "
+            "open), rule {kind (BTC: touch_high | touch_low | close_above | close_below | all_time_high | other; "
+            "politics: result | one_of (one leg of a which/where/who event) | by_date | other), strike, source, says, "
+            "and for politics quote (the rules' own resolving sentence) and deadline}, "
             "rules (the market's own resolution text: quote it rather than assume), outcomes, prices {Yes: [{t, p}], "
             "No: [...]} (p 0-1, one point per coverage.price_step_s), outside {name 'Binance BTCUSDT', unit, step, "
             "points [{t, p}] (closes), ranges [{t, h, l}] (each candle's high and low), highest {t, high}, lowest "
-            "{t, low}} or null, trades [{trade_id, t, side (the outcome), action, shares, price, usd, outside (the "
-            "outside line's close at or before the fill)}] (every fill over the market's whole life), position "
-            "[{t, held: {Yes, No}}], hold {from, to, days, still_held}, value {cost, sold_for, held, payout, "
-            "value_now, last_prices, profit, profit_kind: resolved | closed (sold out before the end) | open (valued "
-            "at the latest price, not a result)}, coverage {price_step_s, fills_complete, shares_not_from_fills "
-            "(true: it sold shares no fill shows it buying, e.g. from splitting dollars into both outcomes, so "
-            "profit is null; not missing fills), "
-            "outside, outside_step, notes}}. Times are unix seconds."
+            "{t, low}} or null (always null for politics: no outside series), trades [{trade_id, t, side (the "
+            "outcome), action, shares, price, usd, outside (the outside line's close at or before the fill)}] "
+            "(every fill over the market's whole life), moves [{t, kind (merge: pairs of Yes and No turned into $1 "
+            "each | split: dollars into pairs | conversion: negRisk No shares swapped across the event, sides not "
+            "listed), shares (pairs), usd, tx}], position [{t, held: {Yes, No}}] (after fills, merges and splits), "
+            "hold {from, to (when it got out, or the end, or now), days, still_held}, value {cost (buys and "
+            "splits), sold_for (sells and merges), held, payout, value_now, last_prices, profit, profit_kind: "
+            "resolved | closed (got out before the end) | open (valued at the latest price, not a result), exit "
+            "{how: held (to the result) | sold | merged | sold_and_merged | open | not_known (its moves couldn't be "
+            "read: never say it held to the result), t, merged_pairs, merged_usd}}, coverage {price_step_s, "
+            "fills_complete, shares_not_from_fills (true: it sold shares no fill or split shows it buying, so "
+            "profit is null; not missing fills), moves_read, moves, converted (true: profit null), outside, "
+            "outside_step, outside_none (why there's no outside line), notes}}. Times are unix seconds."
         ),
         "input_schema": {
             "type": "object",

@@ -46,12 +46,26 @@ export function marketTally(tiles) {
   return n;
 }
 
-// Strikes of one event held together ("What price will Bitcoin hit in November?"): the events with 2+ of its markets.
+// Strikes of one event held together ("What price will Bitcoin hit in November?"), or one market per candidate or date
+// ("Who will win…?"): the events with 2+ of its markets. `strikes` when every one has a price in its question.
 export function eventGroups(tiles) {
   const by = new Map();
   for (const s of tiles) if (s.event_slug) { const g = by.get(s.event_slug) || { event_slug: s.event_slug, title: s.event_title || s.event_slug, markets: [] }; g.markets.push(s); by.set(s.event_slug, g); }
-  return [...by.values()].filter(g => g.markets.length > 1).sort((a, b) => b.markets.length - a.markets.length);
+  return [...by.values()].filter(g => g.markets.length > 1).map(g => ({ ...g, strikes: g.markets.every(s => s.rule && s.rule.strike) }))
+    .sort((a, b) => b.markets.length - a.markets.length);
 }
+
+// Which side it bought in one market of an event, from dollars bought ({Yes: $, No: $}) or shares (a tile's `shares`).
+export const sideBought = bought => { const k = Object.entries(bought || {}).filter(([, v]) => v > 0).map(([o]) => o); return k.length > 1 ? 'both sides' : k[0] || null; };
+// An event's markets as "Yes on Lula, No on Bolsonaro", from the selection's events (every market it traded in the
+// event, past the tiles shown) or, without them, from the tiles.
+export function eventLegs(g, events) {
+  const e = (events || []).find(x => x.event_slug === g.event_slug);
+  const legs = e ? e.legs.map(l => ({ name: l.name, side: sideBought(l.bought_in_range), shown: l.shown }))
+    : g.markets.map(s => ({ name: s.group_item || s.title, side: sideBought(s.shares), shown: true }));
+  return { legs, markets: e ? e.markets : g.markets.length, shown: e ? e.shown : g.markets.length };
+}
+export const legsText = L => L.legs.filter(l => l.side).map(l => `${l.side === 'both sides' ? 'both sides of' : `${l.side} on`} ${l.name}`).join(', ');
 
 // Each buy across markets: how many days before its market's end, at what price, in a market that made money, lost
 // money or is still open. The cross-market view (Drew, 10 Nov: patterns across windows, not only single replays).
@@ -69,10 +83,20 @@ export function buyDots(tiles) {
 }
 
 // What resolves one market, in a few words for a chip (the rule's own sentence is in `says`).
-export const ruleChip = r => (!r ? null : { touch_high: 'Any-time high', touch_low: 'Any-time low', close_above: 'One close, on a date', close_below: 'One close, on a date', all_time_high: 'New all-time high' }[r.kind] || 'See its rules');
+// one leg of a "which / where / who" event is one outcome of several, decided by its deadline (never "By a date")
+export const ruleChip = r => (!r || !r.kind ? null : r.kind === 'one_of' ? `One of several outcomes${r.deadline && !isNaN(Date.parse(r.deadline)) ? ` · by ${shortDate(Date.parse(r.deadline) / 1000)}` : ''}`
+  : { touch_high: 'Any-time high', touch_low: 'Any-time low', close_above: 'One close, on a date', close_below: 'One close, on a date', all_time_high: 'New all-time high', result: 'Who wins', by_date: 'By a date' }[r.kind] || 'See its rules');
 
-export const statusText = s => (s.profit_kind === 'open' ? 'Open' : s.result ? `Resolved ${s.result}` : s.profit_kind === 'closed' ? 'Sold out' : 'Closed');
-export const profitWord = s => (s.profit_kind === 'open' ? 'open, at today\'s price' : s.profit_kind === 'closed' ? 'sold out before the end' : 'from its fills and the payout');
+// How it got out (value.exit): sold, merged, both; held to the result; open; or not known (its merges weren't read).
+const OUT = { sold: 'Sold out', merged: 'Merged out', sold_and_merged: 'Sold and merged out' };
+export const exitWord = x => (x && OUT[x.how]) || null;
+export const statusText = s => {
+  if (s.profit_kind === 'open') return 'Open';
+  const out = exitWord(s.exit);
+  if (s.result) return out ? `${out}, resolved ${s.result}` : `Resolved ${s.result}`;
+  return out || (s.profit_kind === 'closed' ? 'Sold out' : 'Closed');
+};
+export const profitWord = s => (s.profit_kind === 'open' ? 'open, at today\'s price' : s.profit_kind === 'closed' ? 'got out before the end' : 'from its fills and the payout');
 
 const BURST_GAP = 3600; // fills of one outcome and action within an hour of each other draw as one mark
 
@@ -85,6 +109,7 @@ export function prepMarket(r, summary) {
     kind: 'market', raw: r, id: r.window_id, title: r.title, from: r.axis.from, to: r.axis.to, start: r.axis.from, end: r.axis.to,
     outcomes, prices, out, rule: r.rule || {}, rules: r.rules, result: r.result, closed: r.closed, marketEnd: r.closed_at || r.market_end,
     marketStart: r.market_start, event: r.event_title, cov: r.coverage || {}, hold: r.hold || {}, value: r.value || {},
+    moves: (r.moves || []).map((m, i) => ({ ...m, i })).sort((a, b) => a.t - b.t || a.i - b.i), exit: (r.value || {}).exit || null,
   };
   const back = (rows, t) => { let lo = 0, hi = rows.length - 1, best = null; while (lo <= hi) { const m = (lo + hi) >> 1; if (rows[m][0] <= t) { best = rows[m]; lo = m + 1; } else hi = m - 1; } return best; };
   w.priceAt = (o, t) => { const q = back(prices[o] || [], t); return q ? q[1] : null; };
@@ -94,7 +119,7 @@ export function prepMarket(r, summary) {
   w.posAt = t => { let h = {}; for (const [tt, v] of w.pos) { if (tt <= t) h = v; else break; } return h; };
   w.bursts = marketBursts(w.trades);
   const v = r.value || {};
-  w.totals = { cost: v.cost || 0, sold: v.sold_for || 0, payout: v.payout, valueNow: v.value_now, profit: v.profit, kind: v.profit_kind, note: summary && summary.profit_note };
+  w.totals = { cost: v.cost || 0, sold: v.sold_for || 0, payout: v.payout, valueNow: v.value_now, profit: v.profit, kind: v.profit_kind, note: summary && summary.profit_note, exit: v.exit || null };
   w.side = (summary && summary.spark_side) || outcomes[0];
   return w;
 }
@@ -116,6 +141,15 @@ export function marketBursts(trades) {
   }
   return out.sort((a, b) => a.t0 - b.t0);
 }
+
+// A merge, split or conversion in words ("Merges 3,200 pairs of Yes and No into $3,200").
+export function moveText(w, m) {
+  const pair = (w.outcomes || []).join(' and ');
+  if (m.kind === 'merge') return `Merges ${shares(m.shares)} pairs of ${pair} into ${money(m.usd || m.shares)}, $1 a pair. Holding ${heldText(w, m.t)}.`;
+  if (m.kind === 'split') return `Splits ${money(m.usd || m.shares)} into ${shares(m.shares)} pairs of ${pair}. Holding ${heldText(w, m.t)}.`;
+  return `Converts ${shares(m.shares)} shares across this event's markets (Polymarket doesn't list which sides), so its position here isn't counted.`;
+}
+export const moveTitle = m => ({ merge: 'Merges out', split: 'Splits dollars into pairs', conversion: 'Converts shares' }[m.kind] || 'Moves shares');
 
 export const heldText = (w, t) => { const h = w.posAt(t), a = Object.entries(h).filter(([, v]) => v >= 0.01).map(([o, v]) => `${shares(v)} ${o}`); return a.length ? a.join(' and ') : 'nothing'; };
 const range = b => (Math.round(b.lo) === Math.round(b.hi) ? cents(b.lo) : `${cents(b.lo)}–${cents(b.hi)}`);
@@ -139,10 +173,13 @@ export function marketAutoSteps(w, maxBursts = 6) {
   }
   const big = w.bursts.slice(1).sort((a, b) => b.usd - a.usd).slice(0, maxBursts).sort((a, b) => a.t0 - b.t0);
   for (const b of big) st.push({ t: b.t0, title: `${b.action === 'buy' ? 'Buys' : 'Sells'} ${shares(b.shares)} ${b.side}`, observed: marketBurstText(w, b), trade_ids: b.fills.map(x => x.trade_id) });
-  const T = w.totals;
+  for (const m of (w.moves || []).filter(m => m.kind !== 'merge' || m.shares >= 1).slice(0, maxBursts)) st.push({ t: m.t, title: moveTitle(m), observed: moveText(w, m), move: true });
+  const T = w.totals, x = T.exit;
   const endT = Math.min(w.to, w.marketEnd || w.to);
+  if (x && x.t && OUT[x.how] && w.result && x.t < endT) st.push({ t: x.t, title: `${OUT[x.how]} before the result`, observed: `Holding nothing from ${dateTime(x.t)}${x.merged_pairs ? `, after merging ${shares(x.merged_pairs)} pairs into ${money(x.merged_usd)}` : ''}. It spent ${money(T.cost)} and got back ${money(T.sold)} before the market resolved.` });
+  st.sort((a, b) => a.t - b.t);
   if (T.kind === 'open') st.push({ t: w.to, title: 'Still held', observed: `Holding ${heldText(w, w.to)} on ${dateOf(w.to)}, worth ${T.valueNow == null ? 'an unknown amount' : money(T.valueNow)} at the latest price. It spent ${money(T.cost)}${T.sold ? ` and sold for ${money(T.sold)}` : ''}${T.profit == null ? '' : `: ${T.profit < 0 ? '−' : '+'}${money(T.profit)} so far, open, at today's price`}.` });
-  else st.push({ t: endT, title: w.result ? `Resolves ${w.result}` : 'Sold out', observed: w.result ? `${w.title} resolved ${w.result}. Holding ${heldText(w, endT)}, the ${w.result} shares pay ${money(T.payout || 0)}. It spent ${money(T.cost)}${T.sold ? ` and sold for ${money(T.sold)}` : ''}${T.profit == null ? '' : `: ${T.profit < 0 ? '−' : '+'}${money(T.profit)} on this market, from its fills`}.` : `It sold out of this market before the end. It spent ${money(T.cost)} and sold for ${money(T.sold)}${T.profit == null ? '' : `: ${T.profit < 0 ? '−' : '+'}${money(T.profit)}`}.` });
+  else st.push({ t: endT, title: w.result ? `Resolves ${w.result}` : exitWord(x) || 'Sold out', observed: w.result ? `${w.title} resolved ${w.result}. Holding ${heldText(w, endT)}, the ${w.result} shares pay ${money(T.payout || 0)}. It spent ${money(T.cost)}${T.sold ? ` and ${x && x.merged_pairs ? 'got back' : 'sold for'} ${money(T.sold)}` : ''}${T.profit == null ? '' : `: ${T.profit < 0 ? '−' : '+'}${money(T.profit)} on this market, from its fills`}.` : `It ${x && x.how === 'merged' ? 'merged' : x && x.how === 'sold_and_merged' ? 'sold and merged' : 'sold'} out of this market before the end. It spent ${money(T.cost)} and ${x && x.merged_pairs ? 'got back' : 'sold for'} ${money(T.sold)}${T.profit == null ? '' : `: ${T.profit < 0 ? '−' : '+'}${money(T.profit)}`}.` });
   return st.map((x, i) => ({ index: i, inferred: null, trade_ids: [], annotations: [], ...x, auto: true }));
 }
 

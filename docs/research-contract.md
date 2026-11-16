@@ -52,8 +52,8 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 - `plan.proposed` `{plan_id, ask_id, title, scope: {wallet, family|market_type, from, to, min_days?, top?}, market: {id,
   label, unit}, steps: [{id, title, source, estimate_s}], scope_options: [{id, text}], estimate_usd, estimate_s,
   needs_approval: true}`. `market` is the market type studied (`signals/research/markets.py` `TYPES`): `unit` `window`
-  (BTC 15-minute windows; `family` "btc-updown-15m", the scope as before) or `market` (e.g. `btc-long`, "Long-dated
-  BTC": one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
+  (BTC 15-minute windows; `family` "btc-updown-15m", the scope as before) or `market` (`btc-long`, "Long-dated
+  BTC", or `politics`, "Politics": one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
   many markets to tile, default 20). The page's header says `market.label`; a plan without `market` is BTC 15-minute. Every new investigation shows its plan and waits;
   a follow-up that widens the scope (more windows, a longer range, another wallet) does too. The run ends after it.
   `estimate_usd` is the server's, never the agent's: the median `cost_usd` of the latest 20 Starts that ran to their
@@ -115,26 +115,42 @@ are assembled by the server from the same reads the agent's tools made, so no dr
     `coverage.per_source` is then `{kind: "market", markets, fills_complete: {complete, total}, price_steps_s,
     outside: {name, markets}, selection: {market_type, label, min_days, top, matched, shown, markets_traded,
     markets_looked_at, from, asked_from, to, trades_read, trades_complete, read_to}}`; `from` later than
-    `asked_from` means a busy wallet's read stopped at 30,000 trades.
+    `asked_from` means a busy wallet's read stopped at 30,000 trades. Politics is told apart by Gamma's own tags (the
+    SDK's `category_of`, as Signals' Politics chip), not slugs, so its facts are read 60 markets at a time until `top`
+    match, at most 180 (`MarketType.looks_at`); its `selection` adds `not_this_type`, `skipped_near` [{question,
+    category, usd_in_range}] (left out, but with a politics tag) and `events` [{event_slug, event_title, neg_risk,
+    markets, shown, legs: [{slug, name (group_item), bought_in_range: {Yes: $, No: $}, result, shown}]}]: every event
+    with 2+ of its markets, past the tiles shown. `per_source.moves` {read, total, markets_with, converted} and
+    `outside.none` (why there's no outside line) come with every market type.
   - `window.summary` (a market tile) `{kind: "market", window_id, market_type, title (the question), event_slug,
-    event_title, start (first fill), end (end of the hold), market_end, closed, result, rule, outcomes, entries: [{t,
+    event_title, group_item, neg_risk, start (first fill), end (end of the hold), market_end, closed, result, rule, outcomes, entries: [{t,
     side, action, price, shares, usd, outside}], shares: {outcome: bought}, held, cost, sold_for, payout, value_now,
-    profit, profit_kind: resolved|closed|open, open, profit_note, held_days, spark_side, spark: [{t, p}],
-    outside_spark, coverage: {kind, fills_complete, shares_not_from_fills, price_step_s, outside, ...}}`. `open`: still
+    profit, profit_kind: resolved|closed|open, open, profit_note, held_days, exit, moves: [{t, kind, shares, usd}],
+    spark_side, spark: [{t, p}], outside_spark, coverage: {kind, fills_complete, shares_not_from_fills, price_step_s,
+    outside, moves_read, converted, outside_none, ...}}`. `open`: still
     held, valued at the latest price (never counted as made or lost). `profit` null: it sold shares its fills don't
     show it buying (a split or conversion), so it isn't counted.
   - `window.ready` (a market replay) `{kind: "market", window_id, market_type, market_label, title, condition_id,
     event_slug, event_title, start, end, axis: {from, to}, market_start, market_end, closed, closed_at, result, rule:
-    {kind: touch_high|touch_low|close_above|close_below|all_time_high|other, strike, source, binance, says}, rules
+    {kind: touch_high|touch_low|close_above|close_below|all_time_high|other (BTC) or result|one_of|by_date|other (politics,
+    with quote: the rules' own resolving sentence, and deadline), strike, source, binance, says}, group_item,
+    neg_risk, rules
     (the market's own text), outcomes, prices: {outcome: [{t, p}]}, outside: {name, unit, step, points: [{t, p}],
     ranges: [{t, h, l}], highest, lowest}|null, trades: [{trade_id, t, side, action, shares, price, usd, outside}],
-    position: [{t, held: {outcome: shares}}], hold: {from, to, days, still_held}, value: {cost, sold_for, held,
-    payout, value_now, last_prices, profit, profit_kind}, tags, coverage}`. Fills are every fill over the market's
+    moves: [{t, kind: merge|split|conversion, shares, usd, tx}], position: [{t, held: {outcome: shares}}] (after
+    fills, merges and splits), hold: {from, to (when it got out, else the end or now), days, still_held}, value:
+    {cost (buys and splits), sold_for (sells and merges), held, payout, value_now, last_prices, profit, profit_kind,
+    exit: {how: held|sold|merged|sold_and_merged|open|not_known, t, merged_pairs, merged_usd}}, tags, coverage}`.
+    Moves are the wallet's merges, splits and conversions in the market (`Reads.market_moves`, one read per market):
+    a merged pair is $1 back and a split pair $1 paid, exactly, so both are in the profit; a conversion's sides
+    aren't listed, so its profit is null (`coverage.converted`). When they can't be read, `coverage.moves_read` is
+    false and `exit.how` is `not_known`, never `held`. Fills are every fill over the market's
     whole life (not only the plan's range). Prices are Polymarket's history in 14-day pieces at a step for the span
     (`coverage.price_step_s`: a minute to 2 days, 15 minutes to 15 days, an hour to 120 days, 4 hours beyond); only
     the first outcome's is read and the second is 1 minus it (`coverage.notes`). The outside line for BTC price
     markets is Binance BTCUSDT (what they resolve on): 1-minute closes to 2 days, else hourly (daily past 120 days)
     candles with each one's high and low, which hold every minute's, so "did it touch the strike" is exact.
+    Politics has none (`outside` null, `coverage.outside_none` says why: no news or polls feed).
   - Agent tools: `wallet_markets` (that list, same answer as Start's) and `market` (a market's `window.ready`).
 - `walkthrough.ready` `{window_id, steps: [{index, t, title, observed, inferred|null, trade_ids, annotations: [{kind:
   point|span|region, t0, t1, panel: btc|prices|position, label}], number_check}]}`

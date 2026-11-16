@@ -51,7 +51,9 @@ PRICE_STEPS = [(2 * 86_400, 60), (15 * 86_400, 900), (120 * 86_400, 3_600), (Non
 MARKET_FILLS = 5_000  # a wallet's fills in one market read over its whole life (Polymarket lists 5,000 by offset)
 FACTS_AT_ONCE = 20  # Gamma's markets by condition id, per read
 MARKETS_TOP = 20  # a market-type scope's tiles: its markets with the most money traded in the range
-MARKETS_LOOKED_AT = 60  # markets whose facts are read to find them (the most money traded first)
+MARKETS_LOOKED_AT = 60  # markets whose facts are read to find them (the most money traded first), a batch at a time
+MARKET_MOVES = 500  # a wallet's merges, splits and conversions in one market read at most (more: coverage says so)
+MOVE_TYPES = "MERGE,SPLIT,CONVERSION"  # what changes a position without a fill (a redemption is the payout, counted)
 NEWEST_CHUNK_S = 7 * 86_400  # a market-type scope reads the wallet's trades a week at a time, newest first
 ENGINE = os.environ.get("SIGNALS_ENGINE_URL", "https://usesignals.app").rstrip("/")
 # Layer's recordings, for the notes a recorded window carries (supervisor brief, 10 Nov; docs/tick-recorder.md in Layer).
@@ -201,7 +203,10 @@ def _when(x: Any) -> int | None:
 def market_facts(m: dict[str, Any]) -> dict[str, Any]:
     """A Gamma market as the agent and the replay read it: the question, its event (several strikes of one event
     share it), its own rules (what resolves it), when it was listed, ends and closed, its outcomes and tokens, and
-    the outcome that won (None while open)."""
+    the outcome that won (None while open), its Gamma tags and category (Politics, Crypto…: ``category_of``), and,
+    for one market of a multi-outcome event, its name in the event (``group_item``, e.g. a candidate) and negRisk."""
+    from uselayer.whale_scores import category_of
+
     event = (m.get("events") or [{}])[0]
     outcomes = json.loads(m.get("outcomes") or "[]")
     tokens = json.loads(m.get("clobTokenIds") or "[]")
@@ -218,7 +223,29 @@ def market_facts(m: dict[str, Any]) -> dict[str, Any]:
             "end_iso": iso(end) if end else None, "closed_at_iso": iso(closed_at) if closed_at else None,
             "closed": bool(m.get("closed")), "result": result, "outcomes": outcomes,
             "tokens": dict(zip(outcomes, tokens, strict=False)), "description": m.get("description"),
-            "resolution_source": m.get("resolutionSource") or event.get("resolutionSource")}  # fmt: skip
+            "resolution_source": m.get("resolutionSource") or event.get("resolutionSource"),
+            # what kind of market it is, from Gamma's own tags (the SDK's rule, as Signals' market chips count it)
+            "tags": [str(t.get("label")) for t in m.get("tags") or [] if t.get("label")], "category": category_of(m),
+            # one market of a multi-outcome event ("Who will win…?": one market per candidate, often negRisk)
+            "neg_risk": bool(m.get("negRisk")), "group_item": m.get("groupItemTitle") or None}  # fmt: skip
+
+
+def event_legs(markets: list[dict[str, Any]], shown: set[str]) -> list[dict[str, Any]]:
+    """The events with two or more of the wallet's markets (one market per candidate, or per date): each market's
+    name in the event and the dollars it bought of each side in the range, so "Yes on one candidate, No on the
+    others" or "three candidates of the same race" is visible past the tiles shown."""
+    by: dict[str, dict[str, Any]] = {}
+    for m in markets:
+        if not m.get("event_slug"):
+            continue
+        e = by.setdefault(m["event_slug"], {"event_slug": m["event_slug"], "event_title": m.get("event_title"),
+                                            "neg_risk": bool(m.get("neg_risk")), "legs": []})  # fmt: skip
+        e["legs"].append({"slug": m["slug"], "name": m.get("group_item") or m.get("question"),
+                          "bought_in_range": m.get("bought_in_range") or {}, "result": m.get("result"),
+                          "shown": m["condition_id"] in shown})  # fmt: skip
+    out = [e | {"markets": len(e["legs"]), "shown": sum(x["shown"] for x in e["legs"])}
+           for e in by.values() if len(e["legs"]) > 1]  # fmt: skip
+    return sorted(out, key=lambda e: -e["markets"])
 
 
 def _row(t: Any) -> dict[str, Any]:
@@ -348,7 +375,8 @@ class Reads:
             # TODO(uselayer): a public market-by-slug read; until then the SDK reader's own Gamma list call.
             # Gamma leaves closed markets out unless asked, so ask for each, closed first (most windows asked about).
             found = [m for closed in ("true", "false")
-                     for m in poly._list(poly._profiles + "/markets", {"slug": slug, "closed": closed})][:1]  # fmt: skip
+                     for m in poly._list(poly._profiles + "/markets", {"slug": slug, "closed": closed,
+                                                                       "include_tag": "true"})][:1]  # fmt: skip
         if not found:
             raise ReadError(f"Polymarket has no market {slug or condition_id}.")
         return found[0]
@@ -455,6 +483,25 @@ class Reads:
         rows.sort(key=lambda r: (r["ts"], r["tx"] or ""))
         return {"wallet": w, "condition_id": condition_id, "count": len(rows), "complete": len(raw) < MARKET_FILLS,
                 "source": "Polymarket activity for this market (uselayer)", "trades": rows}  # fmt: skip
+
+    def market_moves(self, wallet: str, condition_id: str) -> dict[str, Any]:
+        """A wallet's merges, splits and conversions in one market over its whole life, oldest first: what changes
+        its shares without a fill. A merge turns pairs of Yes and No into $1 each (``shares`` pairs, ``usd`` back),
+        a split turns dollars into pairs, a conversion (negRisk) swaps No shares across an event's markets (which
+        ones isn't listed). ``complete`` false: it stopped at MARKET_MOVES."""
+        w = str(wallet).strip().lower()
+        poly = self.whales._poly
+        # TODO(uselayer): a public read of a wallet's merges and splits in a market; until then the SDK reader's pages
+        raw = poly._pages("/v2/activity", {"user": w, "condition": condition_id, "type": MOVE_TYPES},
+                          MARKET_MOVES, 0, 500)  # fmt: skip
+        kinds = {"MERGE": "merge", "SPLIT": "split", "CONVERSION": "conversion"}
+        rows = [{"t": int(r.get("timestamp") or 0), "kind": kinds[str(r.get("type")).upper()],
+                 "shares": round(float(r.get("size") or 0), 6), "usd": round(float(r.get("usdcSize") or 0), 6),
+                 "tx": r.get("transactionHash")}
+                for r in raw if str(r.get("type")).upper() in kinds and r.get("conditionId") in (None, condition_id)]  # fmt: skip
+        rows.sort(key=lambda r: (r["t"], r["tx"] or ""))
+        return {"wallet": w, "condition_id": condition_id, "moves": rows, "complete": len(raw) < MARKET_MOVES,
+                "source": "Polymarket activity for this market: merges, splits, conversions (uselayer)"}  # fmt: skip
 
     def price_series(self, token: str, start: int, end: int) -> tuple[list[list[float]], int]:
         """An outcome's price from ``start`` to ``end`` at one step for the span (PRICE_STEPS: 1 minute to 2 days,
@@ -563,35 +610,54 @@ class Reads:
             if M.is_window(t.get("slug")) or not mt.matches(t.get("slug"), {}):
                 continue  # the slug alone rules it out (an Up/Down window, another subject)
             m = by.setdefault(t["condition_id"], {"usd": 0.0, "fills": 0, "first": t["ts"], "last": t["ts"],
-                                                  "slug": t.get("slug")})  # fmt: skip
+                                                  "slug": t.get("slug"), "bought": {}})  # fmt: skip
             m["usd"] += float(t.get("usd") or 0)
             m["fills"] += 1
             m["first"], m["last"] = min(m["first"], t["ts"]), max(m["last"], t["ts"])
+            if t.get("action") == "buy" and t.get("outcome"):
+                m["bought"][t["outcome"]] = m["bought"].get(t["outcome"], 0.0) + float(t.get("usd") or 0)
         ranked = sorted(by, key=lambda c: -by[c]["usd"])
-        looked = ranked[:MARKETS_LOOKED_AT]
-        facts = self.markets_facts(looked)
-        kept = []
-        for c in looked:
-            f = facts.get(c)
-            if not f or not mt.matches(f["slug"], f):
-                continue
-            runs = (f["end"] - f["start"]) / 86_400 if f["end"] and f["start"] else None
-            if runs is not None and runs < days:
-                continue
-            m = by[c]
-            kept.append({"slug": f["slug"], "condition_id": c, "question": f["question"], "event_slug": f["event_slug"],
-                         "event_title": f["event_title"], "start_iso": f["start_iso"], "end_iso": f["end_iso"],
-                         "runs_days": None if runs is None else round(runs, 1), "closed": f["closed"],
-                         "result": f["result"], "rule": mt.rule(f), "usd_in_range": round(m["usd"], 2),
-                         "fills_in_range": m["fills"], "first_fill_in_range": m["first"],
-                         "last_fill_in_range": m["last"]})  # fmt: skip
-        return {"wallet": w, "start": got["start"], "asked_from": a, "end": b, "market_type": mt.id, "label": mt.label,
-                "min_days": days,
-                "top": n, "trades_read": got["count"], "trades_complete": got["complete"], "read_to": got["read_to"],
-                "markets_traded": len(by), "markets_looked_at": len(looked), "matched": len(kept),
-                "markets": kept[:n], "source": got["source"],
-                "note": (f"The {len(looked)} markets with the most money traded were checked; "
-                         f"{max(0, len(ranked) - len(looked))} smaller ones weren't. " + got["note"])}  # fmt: skip
+        # a batch of the busiest at a time; a type its slugs can't narrow (politics) reads on until `n` match
+        looked: list[str] = []
+        kept, skipped, not_type = [], [], 0
+        while len(looked) < min(len(ranked), mt.looks_at) and len(kept) < n:
+            batch = ranked[len(looked) : min(len(ranked), len(looked) + MARKETS_LOOKED_AT, mt.looks_at)]
+            looked += batch
+            facts = self.markets_facts(batch)
+            for c in batch:
+                f = facts.get(c)
+                if not f or not mt.matches(f["slug"], f):
+                    if f:
+                        not_type += 1
+                        if mt.near and mt.near(f) and len(skipped) < 5:  # close to the type, but not it
+                            skipped.append({"question": f["question"], "category": f.get("category"),
+                                            "usd_in_range": round(by[c]["usd"], 2)})  # fmt: skip
+                    continue
+                runs = (f["end"] - f["start"]) / 86_400 if f["end"] and f["start"] else None
+                if runs is not None and runs < days:
+                    continue
+                m = by[c]
+                kept.append({"slug": f["slug"], "condition_id": c, "question": f["question"], "event_slug": f["event_slug"],
+                             "event_title": f["event_title"], "group_item": f.get("group_item"),
+                             "neg_risk": f.get("neg_risk"), "start_iso": f["start_iso"], "end_iso": f["end_iso"],
+                             "runs_days": None if runs is None else round(runs, 1), "closed": f["closed"],
+                             "result": f["result"], "rule": mt.rule(f), "usd_in_range": round(m["usd"], 2),
+                             "fills_in_range": m["fills"], "first_fill_in_range": m["first"],
+                             "last_fill_in_range": m["last"],
+                             "bought_in_range": {o: round(v, 2) for o, v in m["bought"].items()}})  # fmt: skip
+        out = {"wallet": w, "start": got["start"], "asked_from": a, "end": b, "market_type": mt.id, "label": mt.label,
+               "min_days": days,
+               "top": n, "trades_read": got["count"], "trades_complete": got["complete"],
+               "read_to": got["read_to"],
+               "markets_traded": len(by), "markets_looked_at": len(looked), "matched": len(kept),
+               "markets": kept[:n], "source": got["source"],
+               "note": (f"The {len(looked)} markets with the most money traded were checked; "
+                        f"{max(0, len(ranked) - len(looked))} smaller ones weren't. " + got["note"])}  # fmt: skip
+        if mt.near:  # a type told apart by its tags, not its slugs: what it read but left out, and events held
+            out["not_this_type"] = not_type
+            out["skipped_near"] = skipped
+            out["events"] = event_legs(kept, {m["condition_id"] for m in kept[:n]})
+        return out
 
     # ---- prices outside Polymarket ----
 

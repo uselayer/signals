@@ -25,6 +25,7 @@ from signals.research.data import (
     complete_slugs,
     in_scope,
     iso,
+    now,
     scope_time,
     window_length,
 )
@@ -322,6 +323,9 @@ def prebuild_markets(store: Any, reads: Any, sid: str, scope: dict[str, Any], mt
                         "to": got["end"],
                         "trades_read": got["trades_read"], "trades_complete": got["trades_complete"],
                         "read_to": got["read_to"]}  # fmt: skip
+    for k in ("not_this_type", "skipped_near", "events"):  # a type told apart by its tags (politics)
+        if k in got:
+            per["selection"][k] = got[k]
     emit({"type": "coverage", "per_source": per, "windows": covs})
     return len(covs)
 
@@ -336,6 +340,7 @@ def scope_ok(scope: dict[str, Any] | None) -> bool:
         return False
 
 
+MARKET_DAYS = 90  # a market-type plan's range when it names no start (owner's default for long-dated)
 MAX_FILL = 120  # tiles the end-of-run sweep builds at most
 
 
@@ -422,7 +427,6 @@ class Case:
                                     "2026-11-10T05:30:00Z (or 'now' for to).") from e  # fmt: skip
         if scope.get("wallet"):
             self.store.set_wallet(self.sid, str(scope["wallet"]).lower())
-        self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild)
         fam = str(scope.get("family") or "")
         if fam and M.by_id(fam) is None and not re.fullmatch(r"[a-z0-9]+-updown-\d+m-?", fam):
             raise ReadError(f"scope.family {fam!r} isn't a market type: give market_type, one of "
@@ -435,6 +439,12 @@ class Case:
             scope["market_type"] = mt.id
             scope.setdefault("min_days", mt.min_days)
             scope.setdefault("top", MARKETS_TOP)
+            if not scope.get("from"):  # "from is 90 days back unless asked otherwise": left out, Start couldn't tile
+                to = scope.get("to")
+                end = now() if not to or str(to).strip().lower() == "now" else scope_time(to)
+                scope["from"] = iso(int(end) - MARKET_DAYS * 86_400)
+                scope.setdefault("to", "now")
+        self.store.set_scope(self.sid, scope)  # Start builds this scope's tiles at once (prebuild), defaults filled
         plan = {"type": "plan.proposed", "plan_id": f"plan-{self.ask_id}", "ask_id": self.ask_id,
                 "title": inp.get("title"), "scope": scope, "steps": steps,
                 "market": {"id": mt.id, "label": mt.label, "unit": mt.unit},

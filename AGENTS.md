@@ -428,8 +428,11 @@ behind Vercel (see README, "Hosting").
 - Wording: "Research wording" below (confirmed by the owner, 10 Nov).
 - Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
   Layer's recordings.
-- Market types (`markets.py` `TYPES`): BTC 15-minute windows and long-dated BTC (one tile per market). A new kind
-  (politics, a sports league) is one entry there: what matches, what resolves one market (read from its own rules,
+- Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC and politics (one tile per market;
+  politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it, with no outside line).
+  A market replay counts the wallet's merges and splits too (`Reads.market_moves`): a tile never says it held to
+  the result when it merged out, and when they can't be read it says so. A new kind (a sports league) is one entry
+  there: what matches, what resolves one market (read from its own rules,
   never assumed for the type), its outside line, its default `min_days` and its prompt section. The 15-minute
   path stays as it is. A long-dated breakdown reads back 90 days and tiles the 20 markets with the most money
   traded, markets running 7+ days (owner's defaults until changed); an open position is valued at today's price

@@ -33,6 +33,13 @@ class MarketType:
     outside: dict[str, str] | None = None  # the outside line its replay draws: {source, symbol, name}
     min_days: float = 0.0  # by default only markets that run at least this long (from listing to end date)
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    # how many of the wallet's busiest markets' facts are read at most to find this type's (60 a batch): more for a
+    # type its slugs can't narrow (politics, told apart by Gamma's tags)
+    looks_at: int = 60
+    # a market read and left out that's close to this type (said in coverage), for a type told apart by its tags
+    near: Callable[[dict[str, Any]], bool] | None = None
+    # with no outside line: why, in one sentence, for the replay's coverage
+    no_outside: str | None = None
 
 
 # ---- BTC 15-minute Up/Down windows (the first Breakdowns; their path is unchanged) ----
@@ -166,8 +173,149 @@ BTC_LONG = MarketType(
     aliases=("long-dated-btc", "btc-long-dated", "long-dated-crypto", "crypto-long"),
 )  # fmt: skip
 
-# Sessions 2 (politics) and 3 (Premier League) add their entry here.
-TYPES: list[MarketType] = [BTC_15M, BTC_LONG]
+
+
+# ---- politics (elections, who gets appointed, "will X happen by <date>": Polymarket's Politics category) ----
+
+POLITICS_TAGS = {"politics", "elections", "geopolitics", "world", "trump", "us election", "global elections",
+                 "midterms", "congress", "senate", "white house", "us politics", "world elections"}  # fmt: skip
+
+
+def politics_matches(slug: str | None, facts: dict[str, Any]) -> bool:
+    """A Politics market as Signals' Politics chip counts it: Gamma's tags, read by the SDK's ``category_of``
+    (``facts["category"]``). A slug alone can't say (no facts yet): it isn't ruled out, except an Up/Down window."""
+    if UPDOWN.match(slug or ""):
+        return False
+    if not facts:
+        return True
+    cat = facts.get("category")
+    if cat is None and "tags" in facts:
+        from uselayer.whale_scores import category_of
+
+        cat = category_of({"tags": [{"label": t} for t in facts.get("tags") or []]})
+    return cat == "Politics"
+
+
+def politics_near(facts: dict[str, Any]) -> bool:
+    """Read and left out, but close: a market with a politics tag whose category came out as something else (a Fed
+    decision tagged Trump is Economy)."""
+    return facts.get("category") != "Politics" and bool({str(t).lower() for t in facts.get("tags") or []} & POLITICS_TAGS)
+
+
+# a sentence ends at . ! or ? before a capital, but not after "U.S." or "Mr."
+_SENTENCE = re.compile(r"(?<![A-Z]\.[A-Z]\.)(?<!\b(?:Mr|Ms|Dr|St|Jr|Sr)\.)(?<=[.!?])\s+(?=[A-Z\"“])")
+_RESOLVES = re.compile(r"\bresolve[sd]?\b", re.IGNORECASE)
+_RESULT_RULE = re.compile(r"resolve (?:according )?to the (?:winner|party that wins|individual|next individual|candidate)|"
+                          r"resolve to the next individual|\bwins? and accepts\b|\bwins? the\b.*\b(?:election|nomination|race)",
+                          re.IGNORECASE)  # fmt: skip
+_RESULT_Q = re.compile(r"\b(win|wins|winner|elected|election|nominee|nomination|next|control|balance of power|"
+                       r"majority leader|speaker|prime minister|president)\b", re.IGNORECASE)  # fmt: skip
+_DATE_RULE = re.compile(r"by the (?:specified|listed) date|between market creation and|through the (?:listed|specified) "
+                        r"date|\bby (?:January|February|March|April|May|June|July|August|September|October|November|"
+                        r"December) \d", re.IGNORECASE)  # fmt: skip
+_DATE_Q = re.compile(r"\b(by|before|through|until|in) (?:the end of )?(?:January|February|March|April|May|June|July|"
+                     r"August|September|October|November|December|\d{4})", re.IGNORECASE)  # fmt: skip
+# one leg of a "which / where / who" event (one market per country, place or person): one outcome of several
+_ONE_OF_EVENT = re.compile(r"^\s*(?:which|where|who)\b", re.IGNORECASE)
+_ONE_OF_RULE = re.compile(r"resolve according to the (?:country|location|city|place|venue|person|company)\b", re.IGNORECASE)
+_NONE_LEG = re.compile(r"^\s*(?:will\s+)?(?:no|none)\b", re.IGNORECASE)  # "Will no meeting occur by …": a date leg
+_SOURCE = re.compile(r"(?:primary )?resolution source (?:for this market )?(?:is|will be) ([^.]{3,160})", re.IGNORECASE)
+_NAMED = ("Associated Press", "Fox News", "NBC", "CNN", "official certification", "official results",
+          "consensus of credible sources", "consensus of official")  # fmt: skip
+
+
+def _clip_words(text: str, n: int = 240) -> str:
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= n else t[: t.rfind(" ", 0, n)].rstrip(",;:") + "…"
+
+
+def politics_rule(facts: dict[str, Any]) -> dict[str, Any] | None:
+    """What resolves one politics market, read from its own rules (Gamma's ``description``), never assumed for the
+    type. ``quote``: the rules' own sentence that resolves it, short. ``kind``: ``result`` (who wins, is appointed
+    or controls: an election or an appointment), ``one_of`` (one leg of a "which / where / who" event: Yes if
+    this outcome is the one, decided by the deadline; never "by a date"), ``by_date`` (Yes, or No, if something
+    happens by the market's date; also an event's "none by <date>" leg), else ``other`` (the parser isn't sure:
+    read the quote). A kind is given only when the question and the
+    rules agree on it. ``source``: what the rules name to resolve it (the Associated Press, official results…),
+    else the market's resolution source, else None. ``says``: one sentence for the page."""
+    rules = " ".join(str(facts.get("description") or "").split())
+    q = str(facts.get("question") or "")
+    sentences = _SENTENCE.split(rules)
+    quote = next((x for x in sentences if _RESOLVES.search(x)), sentences[0] if sentences and sentences[0] else "")
+    quote = _clip_words(quote)
+    item = str(facts.get("group_item") or "")
+    # only one outcome of the event can be the one: its rules say so, or a which/where/who event Polymarket runs as
+    # negRisk ("Who will Trump insult by …?" isn't: several can be Yes, so each stays a date market)
+    one_of = bool(item) and bool(_ONE_OF_RULE.search(rules) or (
+        facts.get("neg_risk") and _ONE_OF_EVENT.match(str(facts.get("event_title") or ""))))
+    if _RESULT_RULE.search(rules) and _RESULT_Q.search(q):
+        kind = "result"
+    elif one_of and not (_NONE_LEG.match(q) or _NONE_LEG.match(item)):
+        kind = "one_of"
+    elif _DATE_RULE.search(rules) and _DATE_Q.search(q):
+        kind = "by_date"
+    else:
+        kind = "other"
+    m = _SOURCE.search(rules)
+    source = _clip_words(m[1], 120) if m else None
+    if not source:
+        named = [x for x in _NAMED if x.lower() in rules.lower()]
+        source = ", ".join(named) if named else (facts.get("resolution_source") or None)
+    deadline = facts.get("end_iso")
+    lead = {"result": "The result", "by_date": "Whether it happens by the date in its rules",
+            "one_of": f"Whether {item} is the one of its event's outcomes"
+                      + (f", decided by {deadline[:10]}" if deadline else ""),
+            "other": "Its rules say"}[kind]  # what the page shows after "What resolves it:"
+    says = f"{lead}: “{quote}”" if quote else f"{lead}."
+    return {"kind": kind, "strike": None, "source": source, "deadline": deadline, "quote": quote or None,
+            "says": says}  # fmt: skip
+
+
+POLITICS_PROMPT = """## Politics (market_type politics; the unit is a market)
+A politics market is one Polymarket files under Politics (its own tags, as Signals' Politics chip counts them): an \
+election ("Will the Democrats win the Michigan Senate race?"), who is appointed ("Will X be the next Prime \
+Minister?"), or whether something happens by a date ("Will the US x Iran ceasefire continue through the end of the month?"). \
+Outcomes are Yes and No; a share pays $1 if its outcome wins, and its price (0 to 1) is the market's chance. The \
+unit is a market: one market's life for this wallet, from its first buy to its last sell or merge, the resolution, \
+or now. A tile or a market's replay (the market tool) holds every fill over the market's whole life, its merges, \
+splits and conversions (moves), its position after each, and the market's own price at the stated step \
+(coverage.price_step_s: never claim timing finer than the step).
+What resolves it: read each market's rule (rule.kind, rule.quote, rule.source) and its rules text, and say which \
+applies; never assume one for all. rule.kind result: who wins, is appointed or controls (the source the rules \
+name: a news call, official results or certification); by_date: Yes (or No, in its own words) if the thing \
+happens by the market's date; one_of: one leg of a "which / where / who" event (one market per country, place or \
+person): Yes if this outcome is the one, decided by rule.deadline, never "by a date"; other: the parser wasn't \
+sure, so quote the rules instead of naming a kind.
+There is no outside line: no news feed, no polls, no vote counts, no results data beyond the market's own result. \
+So never say a trade followed news, a poll, a debate or a result coming in, never that it "knew" or "expected" \
+anything, and never what the outcome "should" have been. Say a buy came after a move in the market's own price, \
+with the move's size and time. Never give your own view of an election or a candidate.
+Multi-outcome events: "Who will win…?" is one market per candidate (or per date) under one event (event_slug, \
+event_title; group_item is the market's name in the event, often neg_risk). A tile stays one market, but count \
+across the event: wallet_markets.events lists each event with two or more of its markets and what it bought of \
+each side, including markets past the tiles shown. Holding Yes on one candidate and No on the others, or several \
+candidates of the same race, is a pattern worth showing.
+Moves: a merge turns pairs of Yes and No into $1 each (a way out before the end, like a sell); a split turns \
+dollars into pairs; a conversion (neg_risk) swaps No shares across the event's markets, and Polymarket doesn't \
+say which, so that market's profit isn't counted. value.exit says how it left: sold, merged, held to the result, \
+or still open; coverage.moves_read false means its moves couldn't be read: then never say it held to the result.
+Open markets: profit is valued at today's price (profit_kind "open") and must be called open, never a result. \
+Many US races resolved after the midterm election day; a market closed but not yet resolved has no result.
+Worth checking: buys after big moves in the market's own price; scaling in over weeks; how many days before the \
+end it buys and at what prices; selling or merging before the result vs holding to the end; both sides of one \
+market; Yes on one candidate and No on others; many long shots bought cheaply (a low price is a low chance, \
+not a bargain); buying the side priced near $1; how long it holds; profit per market and per event."""
+
+POLITICS = MarketType(
+    id="politics", label="Politics", unit="market", prompt=POLITICS_PROMPT,
+    matches=politics_matches, rule=politics_rule, min_days=7.0, looks_at=180, near=politics_near,
+    no_outside=("No outside series for politics markets: the replay is the market's own price, the wallet's fills "
+                "and its position. There's no news or polls feed, so no trade here can be tied to news."),
+    aliases=("politics-markets", "elections", "election", "us-politics", "geopolitics"),
+)  # fmt: skip
+
+# Session 3 (Premier League) adds its entry here.
+TYPES: list[MarketType] = [BTC_15M, BTC_LONG, POLITICS]
 DEFAULT = BTC_15M
 
 
