@@ -24,8 +24,8 @@ function Top({ fixtures, copyTrading }) {
   const acct = useRef();
   useEffect(() => mountUser(acct.current));
   return html`<header class="top"><div class="in">
-    <a class="brand" href="/"><span class="logo">${LOGO}</span>Signals</a>
-    <nav class="tabs" aria-label="Main"><a class="on new" href="#/">Breakdowns</a><a href="/#/">Feed</a><a href="/#/watchlist">Watchlist</a><a href="/#/traders">Traders</a>${copyTrading && html`<a href="/#/copies">Copy trading</a>`}</nav>
+    <a class="brand" href="#/"><span class="logo">${LOGO}</span>Signals</a>
+    <nav class="tabs" aria-label="Main"><a class="on new" href="#/">Breakdowns</a><a href="/#/traders">Traders</a>${copyTrading && html`<a href="/#/copies">Copy trading</a>`}</nav>
     <div class="acct">${SAMPLE ? html`<span class="chip">Sample: a recorded breakdown</span><a class="btn sm primary" href="./?signin#/">Sign in to ask your own</a>`
       : fixtures ? html`<span class="chip">Fixtures: recorded data, no service</span>` : html`<div ref=${acct}></div>`}</div></div></header>`;
 }

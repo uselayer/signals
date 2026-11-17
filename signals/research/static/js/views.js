@@ -40,7 +40,7 @@ export function PlanStage({ inv, act, plan, past }) {
     ${p.status === 'signin' && html`<${SigninCard} p=${p} />`}
     ${p.status === 'proposed' && html`<div style="display:flex;gap:8px"><button class="btn primary" onClick=${() => act.approve(p.plan_id)}>${other ? 'Queue it' : 'Start'}</button><button class="btn ghost" onClick=${() => act.editPlan(p.plan_id)}>Change the plan</button></div>`}
     ${(working || queued) && html`<div class="leave"><p><b>You can leave this page.</b> ${queued ? "It starts by itself, and we'll tell you when it's ready." : "It keeps running, and we'll tell you when it's ready."}</p>
-      <div class="row"><a class="btn sm" href="#/">Start another breakdown</a><a class="btn sm" href="/#/">Go to Feed</a></div></div>`}
+      <div class="row"><a class="btn sm" href="#/">Start another breakdown</a></div></div>`}
   </div>`;
 }
 

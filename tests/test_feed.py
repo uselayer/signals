@@ -157,14 +157,12 @@ def test_following_shows_their_sells_too_and_recommended_doesnt(api: TestClient,
     assert rec["bets"] and not any(b.get("side") == "sell" for b in rec["bets"])  # Recommended: buys only
 
 
-def test_the_feed_page_has_following_and_recommended(api: TestClient) -> None:
+def test_the_page_has_no_feed_and_no_watchlist_tab(api: TestClient) -> None:
+    # 16 Nov (owner): the Feed is noise, so it's gone; the Watchlist is hidden for now. Breakdowns, Traders, Copy trading.
     page = api.get("/").text
-    for words in ('"Following"', '"Recommended"', "#/recommended", "Only buys I can still get into", "Also ${did} by",
-                  "Sold at <b>", "They no longer hold it.", "They still hold some.",
-                  "Sign in to see the Feed", "Browse traders", "/api/me/feed", "or more from Sharps.", "not as a signal to buy",
-                  "All big trades right now", "Typically 3–5 min behind", "Typically read every 30–60 s"):  # fmt: skip
-        assert words in page, words
-    assert '"Traders we follow"' not in page
+    for gone in ('data-tab="feed"', 'data-tab="watch"', "Sign in to see the Feed", "/api/me/feed", "in your Feed"):
+        assert gone not in page, gone
+    assert 'location.replace(researchOn ? "/breakdowns/" : "#/traders")' in page  # home is Breakdowns
 
 
 # ---- reads: one poller fills the cache, pages only read it, and misses on one key share one read ----
@@ -439,47 +437,9 @@ def test_a_recommended_trader_whose_reads_keep_failing_is_tried_less_often_and_t
     assert WATCH not in engine._live_errors and api.get("/api/live", headers=auth()).json()["stale"] == 0
 
 
-def test_the_feed_says_what_it_hasnt_read_and_how_old_it_is_never_no_trades(run_js: Any) -> None:
-    got = run_js(("plural", "STALE_NOTE_MS", "feedGaps"), """(() => {
-      const t = (n) => Array.from({ length: n }, (_, i) => ({ wallet: "0x" + i }));
-      const now = 10 ** 7;
-      return [
-        feedGaps({ traders: t(3), bets: [], pending: 0, failed: 0 }, now - 30000, now),
-        feedGaps({ traders: t(3), bets: [], pending: 3, failed: 0 }, now, now),
-        feedGaps({ traders: t(3), bets: [], pending: 0, failed: 3 }, now, now),
-        feedGaps({ traders: t(3), bets: [], pending: 1, failed: 1 }, now - 12 * 60000, now),
-        feedGaps({ traders: t(3), bets: [1], pending: 0, failed: 0, stale: 1 }, now, now),
-      ];
-    })()""")
-    assert got[0] == {"notes": [], "empty": None}  # everyone read, nothing traded: "None of … traded" stands
-    assert got[1]["empty"][0] == "Still reading their trades" and got[1]["notes"] == ["Still reading 3 traders; their trades show in a minute."]
-    assert got[2]["empty"][0] == "Their trades couldn't be read just now"
-    assert got[3]["empty"][0] == "No trades from the traders read so far"
-    assert got[3]["notes"] == ["1 trader couldn't be read just now; retrying.", "Still reading 1 trader; their trades show in a minute.",
-                               "Some of these traders were last read 12 minutes ago."]  # fmt: skip
-    assert got[4] == {"notes": ["1 trader couldn't be refreshed just now: showing their trades from the last good read; "
-                                "retrying."], "empty": None}  # fmt: skip
-
-
-def test_the_feed_page_rules(run_js: Any) -> None:
-    got = run_js(("feed", "auth", "analyticsOn", "analyticsAccount", "accountIs", "LEAD", "leadOf", "oneCardPerTrade"), """(() => {
-      Object.assign(feed, { mine: { bets: [1] }, mineAt: 5, mineErr: "x" }); auth.uid = "user_1";
-      accountIs("user_1"); const same = feed.mine !== null;
-      accountIs("user_2"); const other = feed.mine === null && feed.mineAt === 0 && feed.mineErr === null && auth.uid === "user_2";
-      feed.mine = { bets: [] }; accountIs(null); const out = feed.mine === null;
-      const cards = oneCardPerTrade([
-        { token: "t", status: "in", copy_ok: false, at: "2026-10-13T10:00:00Z", wallet: "0xa", name: "A" },
-        { token: "t", status: "in", copy_ok: true, at: "2026-10-13T11:00:00Z", wallet: "0xb", name: "B" },
-        { token: "t", status: "moved", copy_ok: true, at: "2026-10-13T08:00:00Z", wallet: "0xc", name: "C" }]);
-      return [same, other, out, cards[0].wallet, cards[0].also.map((x) => x.wallet)];
-    })()""")
-    # one you can still get into leads, then whoever bought first; copy_ok (the copy estimate) never decides it
-    assert got == [True, True, True, "0xa", ["0xb", "0xc"]]
-
-
 def test_analytics_knows_a_signed_in_person_by_their_clerk_id_only(run_js: Any) -> None:
     # PostHog hears who is signed in as Clerk's user id and nothing else; signing out starts a new anonymous visitor.
-    got = run_js(("feed", "auth", "analyticsOn", "analyticsAccount", "accountIs"), """(() => {
+    got = run_js(("auth", "analyticsOn", "analyticsAccount", "accountIs"), """(() => {
       const calls = []; globalThis.window = { posthog: { identify: (...a) => calls.push(["identify", ...a]), reset: () => calls.push(["reset"]) } };
       accountIs("user_0"); accountIs(null); // analytics off (no key, or blocked): nothing is sent
       analyticsOn = true;
@@ -543,31 +503,15 @@ def test_an_events_trader_is_the_follow_controls_with_what_the_page_read(run_js:
                    {"wallet": "0xabc", "category": "Crypto", "categories": ["Crypto"]}, {"wallet": "0xabc"}]  # fmt: skip
 
 
-def test_onboarding_is_asked_on_the_feed_never_on_the_leaderboard(run_js: Any) -> None:
-    # The markets question is asked on a Feed page only (the owner, 7 Nov): a signed-out visitor lands on the Leaderboard.
-    # route() draws the sign-in page before it, so signed out a Feed page asks to sign in, never which markets.
-    got = run_js(("interests", "needsOnboarding"), """(() => {
-      const before = [needsOnboarding("traders:worth"), needsOnboarding("traders:top"), needsOnboarding("watchlist"), needsOnboarding("feed"), needsOnboarding("feed:rec")];
-      interests = []; // Skip: all markets, answered
-      return [before, needsOnboarding("feed")];
+def test_home_old_feed_links_and_the_watchlist_go_home(run_js: Any) -> None:
+    # Breakdowns is home (owner, 16 Nov): the site with no hash, #/, the Feed's old #/recommended and #/big (alerts and
+    # emails linked there) and the hidden Watchlist all go home; every other page keeps its address.
+    got = run_js(("WATCHLIST_ON", "exploreOn", "boardOn", "routeName"), """(() => {
+      globalThis.location = { hash: "" };
+      return ["", "#/", "#", "#/recommended", "#/big", "#/watchlist", "#/traders", "#/copies", "#/watch/0xabc"]
+        .map((h) => { location.hash = h; return routeName(); });
     })()""")
-    assert got == [[False, False, False, True, True], False]
-
-
-def test_one_polling_loop_however_often_the_feed_is_loaded(run_js: Any) -> None:
-    got = run_js(("feed", "FEED_KEYS", "loadFeed"), """(async () => {
-      let timers = 0, live = 0; const pending = [];
-      globalThis.feedTimer = null; globalThis.auth = { uid: null };
-      globalThis.setTimeout = () => ++timers; globalThis.clearTimeout = () => { timers = Math.max(0, timers - 1); };
-      globalThis.feedView = () => "rec"; globalThis.onFeed = () => true; globalThis.renderFeed = () => {};
-      globalThis.canFollowFeed = () => true;
-      globalThis.api = () => new Promise((ok) => pending.push(ok));
-      const a = loadFeed(), b = loadFeed();  // the listener calls it while a read is on its way
-      pending[1]({ traders: [], bets: [] }); await b;
-      pending[0]({ traders: [], bets: [], stale: true }); await a;
-      return [timers, !!feed.data.stale];
-    })()""")
-    assert got == [1, False]  # one timer, and the stale answer was dropped
+    assert got == ["home", "home", "home", "home", "home", "home", "traders:worth", "copies", "#/watch/0xabc"]
 
 
 def test_an_open_trade_reads_the_same_for_every_trader(run_js: Any) -> None:

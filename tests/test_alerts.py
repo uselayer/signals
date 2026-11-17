@@ -175,7 +175,7 @@ def test_twenty_alerts_a_day_then_one_limit_message_then_nothing_until_tomorrow(
     sent = [engine._send("user_1", "555", "buy", lambda aid: f"alert {aid}") for _ in range(engine.DAILY_CAP)]
     assert all(sent) and len(engine.tg.sent) == engine.DAILY_CAP
     assert engine._send("user_1", "555", "whale", lambda aid: "one more") is None
-    assert engine.tg.sent[-1]["text"].startswith(CAP) and "still in your Feed" in engine.tg.sent[-1]["text"]
+    assert engine.tg.sent[-1]["text"].startswith(CAP) and "Feed" not in engine.tg.sent[-1]["text"]
     assert "reply_markup" not in engine.tg.sent[-1]
     assert engine._send("user_1", "555", "group", lambda aid: "and another") is None
     assert len(engine.tg.sent) == engine.DAILY_CAP + 1  # nothing more today, not even the limit message again
@@ -1329,7 +1329,7 @@ def test_every_trade_of_a_busy_trader_alerts_with_no_limit_per_trader(api: TestC
 def test_the_limit_message_says_when_alerts_resume() -> None:
     at = datetime(2026, 10, 13, 21, 40, 30, tzinfo=UTC).timestamp()
     text = engine.cap_text(at)
-    assert text.startswith(CAP + "2 h 19 min.") and "still in your Feed" in text
+    assert text == CAP + "2 h 19 min."
     assert engine.cap_text(datetime(2026, 10, 13, 23, 55, tzinfo=UTC).timestamp()).startswith(CAP + "5 min.")
 
 
@@ -1383,8 +1383,8 @@ def test_summary_only_holds_their_trades_for_one_summary_every_six_hours(
     lines = engine.tg.sent[-1]["text"].splitlines()
     assert lines[0] == "From traders you follow, over the last 6 h:" and lines[1] == "• <b>Sam</b>: 2 trades, 2 buys ($1,000)"
     assert "UTC" not in engine.tg.sent[-1]["text"]  # no clock time, no time zone (owner, 11 Nov)
-    assert lines[2] == "You chose a summary every 6 hours for these traders. Every trade is in your Feed."
-    assert ">Open your Feed</a>" in lines[3] and engine._sent_today("user_1") == 1 and _held() == []  # counts once
+    assert lines[2] == "You chose a summary every 6 hours for these traders." and len(lines) == 3  # no Feed link (removed 16 Nov)
+    assert engine._sent_today("user_1") == 1 and _held() == []  # counts once
     assert engine._summaries(users, now + 2 * engine.SUMMARY_S) == 0
 
 
