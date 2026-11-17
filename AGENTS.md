@@ -197,7 +197,10 @@ behind Vercel (see README, "Hosting").
   bought **Yes** · Market", then "$1,240 at 41¢ · 6 min ago. Now 42¢.", where it traded, and the links. How long ago
   is measured from the trade's Polymarket timestamp (`_ago`: minutes, at least "1 min ago", then "2 h ago"), never
   "just now", "live" or a UTC time. A buy sent because it passed a rule starts with the rule it matched (`_rule_tag`:
-  "Matches your rule · $500+ in Politics", from the parts that are set).
+  "Matches your rule · $500+ in Politics", from the parts that are set). A trade whose market Layer checked and
+  found on neither Kalshi nor Polymarket US ("No verified Kalshi or US match found.") sends nothing to Telegram:
+  no buy, sell or big-trade alert, no summary line (`_no_match`; owner, 16 Nov: "reduce the noise"). When Layer's
+  matches can't be read, alerts go as before.
   Outside the "can still get in" range it says "Now 60¢, price already moved.", whoever the trader. Nothing about
   copying (no copy line: the copy estimate isn't shown anywhere) and never a cost in the alert: costs, the fill, liquidity and risks are the
   trade page's. Every alert links "Check current price" (`#/check/<wallet>/<market>`, the trade's own page,

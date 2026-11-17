@@ -115,6 +115,36 @@ def test_every_buy_by_a_followed_trader_alerts_whatever_the_amount(api: TestClie
     assert sorted("\n$5 at 40¢" in m["text"] for m in engine.tg.sent) == [False, True]  # a $5 buy is news too
 
 
+def test_a_trade_with_no_kalshi_or_us_match_sends_nothing_to_telegram(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Owner, 16 Nov: "remove any alert that is not matched from telegram". Only a checked "no match" is left out:
+    # while Layer's matches can't be read (None), alerts go as before.
+    matched = {"found": True, "url": "https://kalshi.com/m", "differences": [], "side": "yes"}
+    looks = {"tok-0xcid:0": {"found": False}, "tok-0xcid:1": matched}  # 0xcid:2 isn't looked up: None
+    monkeypatch.setattr(engine, "kalshi_of", lambda m, t=None, o=None: looks.get(t or ""))
+    monkeypatch.setattr(engine, "us_of", lambda m, t=None, o=None: {"found": False} if t in looks else None)
+    user(follows=(SAM,))
+    trades: list[WhaleTrade] = []
+    live_reads(monkeypatch, detail_of(trades, {"0xcid:0": 0.40, "0xcid:1": 0.40, "0xcid:2": 0.40}))
+    t0 = datetime.now(UTC) - timedelta(minutes=6)
+    engine.alert_pass(now=t0.timestamp() - 60)  # first round: noted only
+    trades += [trade(SAM, t0, 0.40, 150, m, "b") for m in ("0xcid:0", "0xcid:1", "0xcid:2")]
+    trades.append(sold(SAM, t0, 0.41, 500, "0xcid:0", "s"))
+    engine._cache.clear()
+    assert engine.alert_pass(now=t0.timestamp() + 6 * 60) == 2  # the matched buy and the unread one; no sell
+    texts = [m["text"] for m in engine.tg.sent]
+    assert sum("Kalshi" in x for x in texts) == 1 and not any(engine.NO_MATCH_LINE in x or " sold " in x for x in texts)
+    user("politics", "9", follows=(), interests=["Politics"])  # big trades: the same
+    rows = [big(WHALE, market="0xcid:0", i="w0")]
+    monkeypatch.setattr(engine.reads.whales, "big_trades", lambda usd, **k: list(rows))
+    live_reads(monkeypatch, lambda *a, **k: TraderDetail(Trader(venue="polymarket", id=WHALE, name=None), "visible", {},
+                                                         [WhalePosition("0xcid:0", None, "Yes", 1, 0.49, 0.51, None, None)], []))  # fmt: skip
+    users = engine._load_follows()["users"]
+    engine.whale_pass(users, time.time())  # first round: noted only
+    rows.insert(0, big(WHALE, market="0xcid:0", i="w1"))
+    engine._cache.clear()
+    assert engine.whale_pass(users, time.time()) == 0
+
+
 def test_a_followed_trader_nobody_recommends_or_has_checked_alerts_too(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     # Following, and its alerts, never depend on a tier: a trader Explore lists as "Limited evidence" or "Not checked
     # yet" (in no check, never scored) alerts their followers like any other.
