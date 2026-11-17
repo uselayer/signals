@@ -1,0 +1,34 @@
+{
+  "feature": "breakdowns-sample",
+  "mode": "desk",
+  "bugs": [
+    {
+      "t": 44.876,
+      "at": "00:44",
+      "title": "Sample opens on the ask form, no finished breakdown",
+      "details": "Opened /breakdowns/?sample signed out; expected a finished breakdown (answer card, findings, chart) per the brief, saw only the question form where the recorded run plays after pressing Break it down (not pressed). No market pickers or breakdowns list shown either.",
+      "url": "https://usesignals.app/breakdowns/?sample#/",
+      "screenshot": "05-bug-1.png"
+    }
+  ],
+  "passed": [
+    {
+      "t": 55.055,
+      "what": "Signed-out /breakdowns/ shows a clear teaser, Sign in and sample links, no error"
+    },
+    {
+      "t": 66.529,
+      "what": "Sample links and Traders tab navigate correctly"
+    }
+  ],
+  "errors": [
+    {
+      "t": 49.834,
+      "e": "console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED"
+    },
+    {
+      "t": 61.288,
+      "e": "console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED"
+    }
+  ]
+}
