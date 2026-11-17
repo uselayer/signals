@@ -58,8 +58,8 @@ POLL_S = 300  # how often Clerk is asked for new sign-ups
 OWNER_DEFAULT = "pemakenemi56@gmail.com"
 REPLY_DEFAULT = "david@uselayer.sh"
 PT = ZoneInfo("America/Los_Angeles")
-THANKS_SUBJECT = "Thanks for signing up to Signals"
-HELLO_SUBJECT = "Quick hello from David"
+THANKS_SUBJECT = "Welcome to Signals"
+HELLO_SUBJECT = "A personal welcome to Signals"
 CONGRATS_SUBJECT = "Congratulations on your first follow"
 IN_THE_WAY_SUBJECT = "Anything in the way?"
 ASK_SUBJECT = "Quick question"
@@ -93,33 +93,43 @@ def _hi(first_name: str | None) -> str:
     return f"Hi {first_name}," if first_name else "Hi there,"
 
 
+# A range on purpose: the owner (16 Nov) never wants a note to say how many people have joined. True while
+# sign-ups stay under 1,000; change it before then.
+EARLY = "You're one of our first 1,000 members"
+
+
 def thanks_text(first_name: str | None, follows: int, telegram: bool, site: str) -> str:
-    """They followed someone in their first day: thanks and where to go, nothing to answer (the owner's wording, 8 Nov)."""
-    links = [f"You can see all the Polymarket traders and their latest trades here: {site}"]
-    if not telegram:
-        links.append("Also, make sure to turn on Telegram alerts to get their trades the moment they happen.")
+    """They followed someone in their first day: a personal welcome that makes them feel early and picked out (the
+    owner, 16 Nov, after AgentMail's welcome), the one step left, and a direct line to David."""
+    if telegram:
+        step = f"Their trades are already on their way to you on Telegram. Everything else lives here: {site}"
+    else:
+        step = f"One last step so you never miss a move: turn on Telegram alerts, and their trades reach you the second they happen: {site}"
     return "\n".join([
         _hi(first_name), "",
-        f"Thanks for signing up, and for following {_traders(follows)}. I'm David, I built Signals.", "",
-        *links, "",
-        "If anything doesn't work, reply here. It comes straight to me.", "",
-        "David",
+        f"{EARLY}, and I wanted to welcome you myself. I'm David, I built Signals.", "",
+        f"You followed {_traders(follows)} on your first day, so you already know what you're here for.", "",
+        step, "",
+        "Because you're this early, you get something later members won't: a direct line to me. Reply with anything "
+        "you want Signals to do, and there's a real chance I build it this week.", "",
+        "Welcome in.", "",
+        "David", "",
+        "P.S. I'm curious: what brought you here?",
     ])  # fmt: skip
 
 
 def hello_text(first_name: str | None, site: str) -> str:
-    """A day on and following nobody: what Signals is, and two questions."""
+    """A day on and following nobody: the same personal welcome, what Signals is, and an offer to set it up together."""
     return "\n".join([
         _hi(first_name), "",
-        "I'm David, I built Signals. Thanks for signing up yesterday.", "",
-        "Signals lets you follow the Polymarket traders who are actually good: their real track record, and every "
+        f"{EARLY}, and I wanted to welcome you myself. I'm David, I built Signals.", "",
+        "Signals shows you which Polymarket traders actually win, with their real track record, then sends you every "
         "trade they make as they make it.", "",
-        "Two quick questions, if you have a minute:",
-        "1. What were you hoping to find on Signals?",
-        "2. Is anything stopping you from following a trader?", "",
-        f"You can start by following a trader: {site}",
-        "Happy to do a 5-minute walkthrough too, just reply with a time that works :)", "",
-        "David",
+        "Since you're this early, I'd like to set it up with you. Reply with what you trade (sports, politics, crypto) "
+        f"and I'll send you the traders I'd follow. Or pick your own here: {site}", "",
+        "Early members get my full attention. Anything you ask for goes straight to the top of my list.", "",
+        "David", "",
+        "P.S. How did you hear about Signals?",
     ])  # fmt: skip
 
 
