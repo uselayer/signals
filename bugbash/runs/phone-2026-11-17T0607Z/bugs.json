@@ -1,0 +1,74 @@
+{
+  "feature": "phone",
+  "mode": "phone",
+  "bugs": [
+    {
+      "t": 17.994,
+      "at": "00:17",
+      "title": "Trader names cut to 'Trad…' on phone leaderboard",
+      "details": "On the 390px Leaderboard, rows show names truncated to 4 letters ('Trad…', 'Brea…', 'UpT…') because the Bot/Human pill and sparkline squeeze the name column; expected a readable name.",
+      "url": "https://usesignals.app/#/traders",
+      "screenshot": "03-bug-1.png"
+    },
+    {
+      "t": 20.713,
+      "at": "00:20",
+      "title": "Home URL opens Breakdowns, not the main site",
+      "details": "Opened https://usesignals.app/ and landed on the Breakdowns teaser (no Feed/Watchlist/Traders tabs); expected the main site home.",
+      "url": "https://usesignals.app/#/traders",
+      "screenshot": "04-bug-2.png"
+    },
+    {
+      "t": 51.943,
+      "at": "00:51",
+      "title": "Their numbers table spills past its card",
+      "details": "On a trader page at 390px the 90-day column ('+$1.3M', 'too many to count') runs past the right edge of the card; expected it to fit.",
+      "url": "https://usesignals.app/#/worth/0xa19cbababc312f9df185e49d7004c249ed1ade6b",
+      "screenshot": "10-bug-3.png"
+    },
+    {
+      "t": 63.383,
+      "at": "01:03",
+      "title": "Profit chart axis labels unreadably small",
+      "details": "On the trader page the chart's axis labels (+$83.2K, 30 days ago, 2h ago) render at about 6px; expected readable text on a phone.",
+      "url": "https://usesignals.app/#/worth/0xa19cbababc312f9df185e49d7004c249ed1ade6b",
+      "screenshot": "14-bug-4.png"
+    },
+    {
+      "t": 103.067,
+      "at": "01:43",
+      "title": "Sample question box cuts the question mid-sentence",
+      "details": "On the phone sample page the question box shows 'Analyze this wallet's BTC 15-minute trades. Plot ... show how its positions' and stops; the rest can't be seen or scrolled to without pressing Break it down.",
+      "url": "https://usesignals.app/breakdowns/?sample",
+      "screenshot": "18-bug-5.png"
+    }
+  ],
+  "passed": [
+    {
+      "t": 66.094,
+      "what": "Leaderboard chips and period switch fit without sideways scroll"
+    },
+    {
+      "t": 67.576,
+      "what": "Leaderboard foot text and Top profit link readable"
+    },
+    {
+      "t": 105.796,
+      "what": "Sample page has no sideways scroll and the header fits"
+    },
+    {
+      "t": 107.284,
+      "what": "Trader page Human/Bot pill reads clearly beside the name"
+    }
+  ],
+  "errors": [
+    {
+      "t": 3.184,
+      "e": "console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED"
+    },
+    {
+      "t": 9.615,
+      "e": "console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED"
+    }
+  ]
+}
