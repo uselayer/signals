@@ -87,7 +87,7 @@ BTC_15M = MarketType(
 )  # fmt: skip
 
 
-# ---- long-dated BTC price markets ("Will Bitcoin reach $X by December 31?") ----
+# ---- BTC price markets that run a month or a year ("What price will Bitcoin hit in November?", "… in 2026?") ----
 
 _BTC = re.compile(r"\b(bitcoin|btc)\b", re.IGNORECASE)
 _PRICE_Q = re.compile(r"\b(reach|dip|hit|above|below|price|all[- ]time high|ath)\b|\$\s?\d", re.IGNORECASE)
@@ -155,9 +155,42 @@ def btc_long_matches(slug: str | None, facts: dict[str, Any]) -> bool:
     return bool(_BTC.search(q) and _PRICE_Q.search(q))
 
 
-BTC_LONG_PROMPT = """## Long-dated BTC (market_type btc-long; the unit is a market)
-A market such as "Will Bitcoin reach $X by the end of the year?" or "Will Bitcoin dip to $Y this month?" runs for \
-weeks or months; outcomes are Yes and No, a share pays $1 if its outcome wins, and its price (0 to 1) is \
+# How long a BTC price market runs, as Polymarket files it (owner, 17 Nov: "why didn't we break down markets based on
+# how they break it down?"): Gamma's own Daily, Weekly, Monthly or Yearly tag on the market. Its Weekly tab is
+# mostly one-day markets ("Bitcoin above $64k on November 18?"), so Breakdowns studies Monthly and Yearly. A long
+# market with no length tag ("When will Bitcoin hit $150k?", tagged Price Milestone) counts as yearly.
+LENGTHS = ("daily", "weekly", "monthly", "yearly")
+_MONTH = "(january|february|march|april|may|june|july|august|september|october|november|december)"
+_MONTHLY_SLUG = re.compile(rf"-in-{_MONTH}(?:-\d{{4}})?(?:-|$)")  # will-bitcoin-reach-100k-in-november-2026
+_DAY_SLUG = re.compile(rf"-on-{_MONTH}-\d")  # bitcoin-above-64k-on-november-18-2026
+
+
+def btc_length(slug: str | None, facts: dict[str, Any]) -> str:
+    """"daily", "weekly", "monthly" or "yearly": Gamma's length tag on the market, else its slug's words ("in
+    November": monthly; "on November 18": daily), else yearly."""
+    tags = {str(t).strip().lower() for t in facts.get("tags") or []}
+    tagged = next((k for k in LENGTHS if k in tags), None)
+    if tagged:
+        return tagged
+    s = slug or str(facts.get("slug") or "")
+    return "daily" if _DAY_SLUG.search(s) else "monthly" if _MONTHLY_SLUG.search(s) else "yearly"
+
+
+def _btc_of_length(length: str) -> Callable[[str | None, dict[str, Any]], bool]:
+    """A BTC price market of this length. Before Gamma's facts are read (a slug alone: no tags), any BTC price
+    market may be one, so a market whose slug doesn't say isn't left out before its tags can."""
+
+    def matches(slug: str | None, facts: dict[str, Any]) -> bool:
+        return btc_long_matches(slug, facts) and ("tags" not in facts or btc_length(slug, facts) == length)
+
+    return matches
+
+
+BTC_PRICE_PROMPT = """## BTC monthly and yearly (market_type btc-monthly or btc-yearly; the unit is a market)
+btc-monthly is Polymarket's Monthly BTC price markets ("What price will Bitcoin hit in November?"); btc-yearly its \
+Yearly ones ("What price will Bitcoin hit this year?") and long ones with no length tag ("When will Bitcoin hit \
+a new all-time high?"). A plan made before the split says btc-long: both together. A market such as "Will Bitcoin reach $X by \
+the end of the year?" or "Will Bitcoin dip to $Y this month?" runs for weeks or months; outcomes are Yes and No, a share pays $1 if its outcome wins, and its price (0 to 1) is \
 the market's chance. The unit is a market: one market's life for this wallet, from its first buy to its last sell, \
 the resolution, or now. A tile or a market's replay (the market tool) holds every fill the wallet made in that \
 market over its whole life (not only the plan's range), its position after each fill, the market's price at the \
@@ -180,10 +213,22 @@ after a move, never that it was news); scaling in over days; how many days befor
 prices; selling before the resolution vs holding to the end; holding several strikes or both sides; buying the \
 side priced near $1 (a high price is a high chance, not a bargain); how long it holds; profit per market."""
 
+_BINANCE = {"source": "binance", "symbol": "BTC", "name": "Binance BTCUSDT"}
+BTC_MONTHLY = MarketType(
+    id="btc-monthly", label="BTC monthly", unit="market", prompt=BTC_PRICE_PROMPT,
+    matches=_btc_of_length("monthly"), rule=btc_rule, min_days=7.0, outside=_BINANCE,
+    aliases=("btc-month", "bitcoin-monthly", "monthly-btc"),
+)  # fmt: skip
+BTC_YEARLY = MarketType(
+    id="btc-yearly", label="BTC yearly", unit="market", prompt=BTC_PRICE_PROMPT,
+    matches=_btc_of_length("yearly"), rule=btc_rule, min_days=7.0, outside=_BINANCE,
+    aliases=("btc-year", "bitcoin-yearly", "yearly-btc"),
+)  # fmt: skip
+# Before the split (17 Nov): "Long-dated BTC", monthly and yearly together. Not a pill any more; saved plans and
+# links that name it still open (``by_id``), and a follow-up in one reads the same markets as before.
 BTC_LONG = MarketType(
-    id="btc-long", label="Long-dated BTC", unit="market", prompt=BTC_LONG_PROMPT,
-    matches=btc_long_matches, rule=btc_rule, min_days=7.0,
-    outside={"source": "binance", "symbol": "BTC", "name": "Binance BTCUSDT"},
+    id="btc-long", label="Long-dated BTC", unit="market", prompt=BTC_PRICE_PROMPT,
+    matches=btc_long_matches, rule=btc_rule, min_days=7.0, outside=_BINANCE,
     aliases=("long-dated-btc", "btc-long-dated", "long-dated-crypto", "crypto-long"),
 )  # fmt: skip
 
@@ -616,13 +661,14 @@ SOCCER = MarketType(
              "futbol"),
 )  # fmt: skip
 
-TYPES: list[MarketType] = [BTC_15M, BTC_LONG, POLITICS, SOCCER]
+TYPES: list[MarketType] = [BTC_15M, BTC_MONTHLY, BTC_YEARLY, POLITICS, SOCCER]
+RETIRED: list[MarketType] = [BTC_LONG]  # still opens (by_id), never offered
 DEFAULT = BTC_15M
 
 
 def by_id(x: str | None) -> MarketType | None:
     k = str(x or "").strip().lower().rstrip("-")
-    return next((t for t in TYPES if k == t.id or k in t.aliases), None)
+    return next((t for t in TYPES + RETIRED if k == t.id or k in t.aliases), None)
 
 
 def of_scope(scope: dict[str, Any] | None) -> MarketType:
@@ -650,4 +696,4 @@ def described() -> list[dict[str, Any]]:
 
 def sections() -> str:
     """"# The markets" for the agent's instructions: every type's section, in order."""
-    return "\n\n".join(t.prompt for t in TYPES)
+    return "\n\n".join(dict.fromkeys(t.prompt for t in TYPES))  # monthly and yearly share one section

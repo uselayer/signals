@@ -147,7 +147,8 @@ function Breakdowns({ api, list, setList, types }) {
     document.addEventListener('click', away); document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('click', away); document.removeEventListener('keydown', esc); };
   }, [menu]);
-  const label = id => { const t = types.find(x => x.id === id); return t ? t.label.replace(' Up or Down ', ' ') : null; };
+  // a breakdown from before BTC monthly and yearly split (17 Nov) is both: it shows under either pill, by its old name
+  const label = id => { const t = types.find(x => x.id === id); return t ? t.label.replace(' Up or Down ', ' ') : id === 'btc-long' ? 'Long-dated BTC' : null; };
   const reload = () => api.sessions().then(setList, () => {});
   const remove = async s => {
     setMenu(null); setErr(null); setList(l => l.filter(x => x.id !== s.id));
@@ -159,7 +160,7 @@ function Breakdowns({ api, list, setList, types }) {
     try { await api.restore(s.id); } catch (e) { setErr(e.message); }
     reload();
   };
-  const shown = list.filter(s => market === 'all' || s.market === market);
+  const shown = list.filter(s => market === 'all' || s.market === market || (s.market === 'btc-long' && (market === 'btc-monthly' || market === 'btc-yearly')));
   const groups = [];
   for (const s of shown) {
     const key = s.wallet || '';

@@ -55,24 +55,28 @@ def test_each_market_reads_its_own_rule_from_its_rules() -> None:
 
 
 def test_market_types_are_a_list_politics_and_sports_join_with_one_entry() -> None:
-    assert [t.id for t in M.TYPES][:2] == ["btc-updown-15m", "btc-long"]
+    assert [t.id for t in M.TYPES][:3] == ["btc-updown-15m", "btc-monthly", "btc-yearly"]
     assert M.of_scope(None).id == "btc-updown-15m" and M.of_scope({"family": "btc-updown-15m"}).unit == "window"
-    assert M.of_scope({"market_type": "btc-long"}).unit == "market" and M.by_id("long-dated-crypto").id == "btc-long"
+    assert M.of_scope({"market_type": "btc-monthly"}).unit == "market" and M.by_id("btc-yearly") is M.BTC_YEARLY
+    # a plan saved before the split still opens as Long-dated BTC (monthly and yearly together), never as a pill
+    assert M.of_scope({"market_type": "btc-long"}) is M.BTC_LONG and M.by_id("long-dated-crypto") is M.BTC_LONG
+    assert "btc-long" not in [t["id"] for t in M.described()]
     assert M.btc_long_matches("will-bitcoin-dip-to-65k-in-november-2026", {})
     assert not M.btc_long_matches("btc-updown-15m-1794285000", {}) and not M.btc_long_matches("will-china-unban-bitcoin", {})
     assert M.is_window("btc-updown-15m-1794285000") and not M.is_window(SLUG)
     # every type's section is in the agent's instructions, under "# The markets"
-    assert all(t.prompt in A.SYSTEM for t in M.TYPES) and A.SYSTEM.index("# The markets") < A.SYSTEM.index("## Long-dated BTC")
+    assert all(t.prompt in A.SYSTEM for t in M.TYPES) and A.SYSTEM.index("# The markets") < A.SYSTEM.index("## BTC monthly and yearly")
+    assert A.SYSTEM.count("## BTC monthly and yearly") == 1  # one section for both
 
 
 def test_the_15_minute_section_is_the_one_the_agent_had_before() -> None:
     old = ("A BTC 15-minute window's slug is btc-updown-15m-<start unix seconds>; it runs 900 seconds and is listed about a "
            "day ahead, so fills before the start are real (pre_open).")  # fmt: skip
     assert old in A.SYSTEM and "buying both sides (Up + Down under $1 together locks a profit" in A.SYSTEM
-    # the instructions' own example numbers count as sources: the long-dated section adds none beyond 0, 1 and 15
+    # the instructions' own example numbers count as sources: the BTC price section adds none beyond these
     import re
 
-    assert set(re.findall(r"\d+", M.BTC_LONG_PROMPT)) <= {"0", "1", "15"}
+    assert set(re.findall(r"\d+", M.BTC_PRICE_PROMPT)) <= {"0", "1", "15"}
 
 
 # ---- the wording check ----
@@ -211,7 +215,7 @@ def test_an_open_market_is_valued_at_todays_price_and_says_so(monkeypatch: pytes
     monkeypatch.setattr(workspace, "now", lambda: T0 + 40 * DAY)
     store, sid = _store_with_wallet()
     r = workspace.build(store, _reads(), sid, SLUG)
-    assert r["kind"] == "market" and r["market_type"] == "btc-long" and r["rule"]["kind"] == "touch_high"
+    assert r["kind"] == "market" and r["market_type"] == "btc-yearly" and r["rule"]["kind"] == "touch_high"
     assert [f["action"] for f in r["trades"]] == ["buy", "buy", "sell"] and r["position"][-1]["held"]["No"] == 150
     v = r["value"]
     assert v["profit_kind"] == "open" and v["cost"] == 165 and v["sold_for"] == 45
@@ -384,7 +388,7 @@ def test_a_politics_market_is_known_by_its_tags_never_its_slug() -> None:
                         "outcomes": '["Yes", "No"]', "clobTokenIds": '["a", "b"]', "negRisk": True,
                         "groupItemTitle": "Abdul El-Sayed (D)", "tags": [{"label": "Politics"}, {"label": "Midterms"}]})
     assert f["category"] == "Politics" and f["neg_risk"] and f["group_item"] == "Abdul El-Sayed (D)"
-    assert M.of_market(POL_SLUG, f) is M.POLITICS and M.of_market(SLUG, D.market_facts(_gamma())) is M.BTC_LONG
+    assert M.of_market(POL_SLUG, f) is M.POLITICS and M.of_market(SLUG, D.market_facts(_gamma())) is M.BTC_YEARLY
 
 
 def test_what_resolves_a_politics_market_is_quoted_from_its_rules_and_a_kind_only_when_sure() -> None:
@@ -830,3 +834,21 @@ def test_the_pages_premier_league_chips_say_end_of_the_season_and_one_match() ->
             " ruleChip({ kind: 'one_of', deadline: '2027-06-15T00:00:00Z' })]));")  # fmt: skip
     out = subprocess.run([node, "--input-type=module", "-e", code], capture_output=True, text=True, timeout=30, check=True)
     assert json.loads(out.stdout) == ["End of the season", "One match", "One of several outcomes · by 15 Jun"]
+
+
+def test_btc_monthly_and_yearly_are_polymarkets_own_length_tags() -> None:
+    """Owner, 17 Nov: "why didn't we break down markets based on how they break it down?" Gamma's Monthly or Yearly
+    tag decides (read on live markets that day); a long market with none counts as yearly; one-day markets, tagged
+    Weekly, are neither; a slug alone (no tags read yet) isn't left out before its tags can say."""
+    monthly = ("will-bitcoin-reach-100k-in-november-2026", {"tags": ["Bitcoin", "Monthly", "Hit Price", "Crypto"]})
+    yearly = ("will-bitcoin-reach-95000-by-december-31-2026-from-june-8", {"tags": ["Crypto", "Hit Price", "Yearly"]})
+    milestone = ("will-bitcoin-hit-150k-by-december-31", {"tags": ["Crypto", "Bitcoin", "Price Milestone"]})
+    one_day = ("bitcoin-above-64k-on-november-18-2026", {"tags": ["Bitcoin", "Weekly", "Multi Strikes"]})
+    assert [M.btc_length(*m) for m in (monthly, yearly, milestone, one_day)] == ["monthly", "yearly", "yearly", "weekly"]
+    assert M.BTC_MONTHLY.matches(*monthly) and not M.BTC_YEARLY.matches(*monthly)
+    assert M.BTC_YEARLY.matches(*yearly) and M.BTC_YEARLY.matches(*milestone) and not M.BTC_MONTHLY.matches(*yearly)
+    assert not M.BTC_MONTHLY.matches(*one_day) and not M.BTC_YEARLY.matches(*one_day)
+    assert M.BTC_MONTHLY.matches(monthly[0], {}) and M.BTC_YEARLY.matches(monthly[0], {})  # no tags yet: both may
+    # no length tag read: the slug's words say ("in November": monthly; "on November 18": a day)
+    assert M.btc_length(monthly[0], {"tags": []}) == "monthly" and M.btc_length(one_day[0], {}) == "daily"
+    assert M.btc_length(yearly[0], {"tags": ["Monthly"]}) == "monthly"  # the tag wins over the slug
