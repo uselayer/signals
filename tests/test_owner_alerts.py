@@ -238,3 +238,11 @@ def test_owner_check_tells_when_telegram_refused_the_sign_in_button(owner: Teleg
     monkeypatch.setitem(engine._tg, "login_refused", None)  # after a restart with the domain linked
     engine.owner_check(NOW + 120)
     assert owner.calls[-1]["text"].startswith("Signals, fixed: Alerts carry the sign-in button again.")
+
+
+def test_the_owner_is_told_when_layers_matches_stop_loading_since_alerts_stop_too() -> None:
+    from signals.owner_alerts import matches_problem
+
+    assert matches_problem(44 * 60, None) is None  # loaded within 45 minutes: alerts going out
+    said = matches_problem(50 * 60, "HTTPError: 503")
+    assert said is not None and "50 min (HTTPError: 503)" in said and "no Telegram alerts are going out" in said

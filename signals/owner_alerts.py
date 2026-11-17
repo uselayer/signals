@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from signals import us_match
+
 DISK_WARN = 0.85  # a share of the disk's space, or of its inodes, in use that's told
 ERRORS_WINDOW_S = 600  # server errors are counted over this long
 SCORING_FAILING_S = 1800  # the evaluation failing this long, every round, is told
@@ -128,7 +130,19 @@ def scoring_problem(error: str | None, since: float | None, now: float, after: f
             "new or updated records.")  # fmt: skip
 
 
+def matches_problem(age: float, error: str | None, stale: float = us_match.STALE_S) -> str | None:
+    """Layer's Kalshi and Polymarket US matches last loaded ``age`` seconds ago (or the engine started then, with
+    none loaded since): past ``stale`` they say nothing, and Telegram alerts, which go only for matched trades,
+    have stopped."""
+    if age < stale:
+        return None
+    return (f"Layer's Kalshi and Polymarket US matches haven't loaded for {_ago(age)}"
+            f"{f' ({error})' if error else ''}, so no Telegram alerts are going out: they're sent only for trades "
+            "on Kalshi or Polymarket US.")  # fmt: skip
+
+
 FIXED = {
+    "matches": "Layer's matches load again, so Telegram alerts are going out.",
     "disk": "The disk has room again.",
     "errors": f"No server errors for {ERRORS_WINDOW_S // 60} minutes.",
     "scoring": "Trader scoring is working again.",

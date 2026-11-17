@@ -115,9 +115,12 @@ def test_every_buy_by_a_followed_trader_alerts_whatever_the_amount(api: TestClie
     assert sorted("\n$5 at 40¢" in m["text"] for m in engine.tg.sent) == [False, True]  # a $5 buy is news too
 
 
-def test_a_trade_with_no_kalshi_or_us_match_sends_nothing_to_telegram(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Owner, 16 Nov: "remove any alert that is not matched from telegram". Only a checked "no match" is left out:
-    # while Layer's matches can't be read (None), alerts go as before.
+def test_only_trades_on_kalshi_or_polymarket_us_reach_telegram(
+    api: TestClient, monkeypatch: pytest.MonkeyPatch, every_trade_matched: Any
+) -> None:
+    # Owner, 17 Nov: "as long as i can copy trade. If these alerts are not on poly us or kalshi, no need to show
+    # them". A checked "no match" sends nothing, and neither does a trade while Layer's matches can't be read (None).
+    monkeypatch.setattr(engine, "_matched", every_trade_matched)  # the real rule, not conftest's stand-in
     matched = {"found": True, "url": "https://kalshi.com/m", "differences": [], "side": "yes"}
     looks = {"tok-0xcid:0": {"found": False}, "tok-0xcid:1": matched}  # 0xcid:2 isn't looked up: None
     monkeypatch.setattr(engine, "kalshi_of", lambda m, t=None, o=None: looks.get(t or ""))
@@ -130,9 +133,8 @@ def test_a_trade_with_no_kalshi_or_us_match_sends_nothing_to_telegram(api: TestC
     trades += [trade(SAM, t0, 0.40, 150, m, "b") for m in ("0xcid:0", "0xcid:1", "0xcid:2")]
     trades.append(sold(SAM, t0, 0.41, 500, "0xcid:0", "s"))
     engine._cache.clear()
-    assert engine.alert_pass(now=t0.timestamp() + 6 * 60) == 2  # the matched buy and the unread one; no sell
-    texts = [m["text"] for m in engine.tg.sent]
-    assert sum("Kalshi" in x for x in texts) == 1 and not any(engine.NO_MATCH_LINE in x or " sold " in x for x in texts)
+    assert engine.alert_pass(now=t0.timestamp() + 6 * 60) == 1  # the matched buy alone: no sell, nothing unread
+    assert "View on Kalshi" in engine.tg.sent[0]["text"] and engine.NO_MATCH_LINE not in engine.tg.sent[0]["text"]
     user("politics", "9", follows=(), interests=["Politics"])  # big trades: the same
     rows = [big(WHALE, market="0xcid:0", i="w0")]
     monkeypatch.setattr(engine.reads.whales, "big_trades", lambda usd, **k: list(rows))
