@@ -3648,8 +3648,7 @@ def cap_text(now: float | None = None) -> str:
     left = 86400 - now % 86400
     h, m = int(left // 3600), int(left % 3600 // 60)
     wait = f"{h} h {m} min" if h else f"{m} min"
-    return (f"You've reached today's limit of {DAILY_CAP} alerts. Alerts resume in {wait}. Every trade by"
-            f" traders you follow is still in your Feed: {SITE}/#/")  # fmt: skip
+    return f"You've reached today's limit of {DAILY_CAP} alerts. Alerts resume in {wait}."
 
 
 # What you get from each trader you follow (follows.json: "alert_for" {wallet: {"mode", "usd", …}}): every trade (the
@@ -6497,7 +6496,7 @@ def alert_pass(now: float | None = None) -> int:
 def _summary_text(rows: list[tuple[str, str, float | None, float]], aid: str | None = None, now: float | None = None) -> str:
     """One message for everything held for a person: per trader, how many more trades (buys and sells, with their
     dollars), over how long since the first was held (relative, as alerts say it: no clock time and no time zone,
-    owner, 11 Nov), and a link to the Feed, where every trade is."""
+    owner, 11 Nov). No link: the Feed it pointed at was removed (owner, 16 Nov)."""
     e = html.escape
     per: dict[str, dict[str, list[float]]] = {}
     for trader, side, usd, _ in rows:
@@ -6508,8 +6507,8 @@ def _summary_text(rows: list[tuple[str, str, float | None, float]], aid: str | N
         parts = [f"{len(v)} {side}{'s' if len(v) != 1 else ''} (${sum(v):,.0f})" for side, v in sides.items() if v]
         n = sum(map(len, sides.values()))
         lines.append(f"• <b>{e(_who(trader))}</b>: {n} trade{'s' if n != 1 else ''}, {' and '.join(parts)}")
-    lines.append(f"You chose a summary every {SUMMARY_S // 3600} hours for these traders. Every trade is in your Feed.")
-    return "\n".join([*lines, _links(("Open your Feed", f"{SITE}/#/"), aid=aid)])
+    lines.append(f"You chose a summary every {SUMMARY_S // 3600} hours for these traders.")
+    return "\n".join(lines)
 
 
 def _summaries(users: dict[str, dict[str, Any]], now: float) -> int:

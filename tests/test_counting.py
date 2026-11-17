@@ -168,10 +168,6 @@ def test_metrics_are_for_the_owner_only(api: TestClient, monkeypatch: pytest.Mon
     assert away.get("/api/metrics", headers={"Authorization": "Bearer "}).status_code == 404  # no key set: no way in
 
 
-def test_the_page_counts_an_interest_pick_anonymously(api: TestClient) -> None:
-    assert '"/api/count/picked"' in api.get("/").text
-
-
 # ---- review fixes ----
 
 

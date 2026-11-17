@@ -214,12 +214,12 @@ def test_off_without_keys(tmp_path: Path) -> None:
 
 def test_writer_answer_and_flags() -> None:
     raw = {"worth_sending": True, "skip_reason": "", "subject": "S", "preheader": "P", "tldr": [],
-           "items": [{"lead": "L.", "body": "B.", "page": "https://usesignals.app/#/watchlist", "video_hint": ""},
+           "items": [{"lead": "L.", "body": "B.", "page": "https://usesignals.app/#/traders", "video_hint": ""},
                      {"lead": "M.", "body": "C.", "page": "/admin", "video_hint": None},
                      {"lead": "", "body": "dropped", "page": None, "video_hint": None}],
            "ask": ""}  # fmt: skip
     draft, why = weekly.to_draft(raw)
-    assert why == "" and [it["page"] for it in draft["items"]] == ["/#/watchlist", None]
+    assert why == "" and [it["page"] for it in draft["items"]] == ["/#/traders", None]
     assert draft["tldr"] == ["L.", "M."] and draft["ask"] == "What should Signals do next?"
     assert draft["items"][0]["video_hint"] is None
     assert weekly.to_draft({**raw, "worth_sending": False, "skip_reason": "Quiet."}) == (None, "Quiet.")

@@ -65,12 +65,8 @@ MODEL_DEFAULT = "anthropic/claude-sonnet-5"
 ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]  # date.weekday() order
 
-# The pages an item may point at, all open to everyone (the Feed asks a signed-out visitor to sign in).
+# The pages an item may point at, all open to everyone. The Feed was removed and the Watchlist hidden (owner, 16 Nov).
 PAGES = {
-    "/": "Feed: trades from the traders you follow (signed in)",
-    "/#/recommended": "Feed, Top traders: $1,000+ trades from the leaderboard's top traders",
-    "/#/big": "Feed, Big trades: the biggest trades right now",
-    "/#/watchlist": "Watchlist: the open trades of everyone you follow",
     "/#/traders": "Traders: the leaderboard of Polymarket traders' track records",
     "/breakdowns/": "Breakdowns: ask AI to break down how a trader or market trades",
 }
@@ -282,7 +278,7 @@ def render(draft: dict[str, Any], *, unsubscribe: str, site: str = SITE, preview
 
 SYSTEM = """You write Signals' weekly product update email, in the voice of David, who builds Signals.
 
-Signals (usesignals.app) shows what Polymarket traders do: a leaderboard of traders' real track records (profit, win rate, how they usually trade), a page per trader, a Feed of trades from the traders you follow, a Watchlist of their open trades, Telegram alerts the moment a trader you follow trades (with a rule for which trades), and Breakdowns, where AI breaks down how a trader or a market trades. For each open trade it shows what buying it now would really cost; the reader buys on Polymarket themselves. Readers are people who signed up: traders who want to see what good Polymarket traders are doing.
+Signals (usesignals.app) shows what Polymarket traders do: a leaderboard of traders' real track records (profit, win rate, how they usually trade), a page per trader, Telegram alerts the moment a trader you follow trades (with a rule for which trades), and Breakdowns, where AI breaks down how a trader or a market trades. For each open trade it shows what buying it now would really cost; the reader buys on Polymarket themselves. Readers are people who signed up: traders who want to see what good Polymarket traders are doing.
 
 You get the pull requests merged this week in Signals (uselayer/signals). Keep ONLY changes a user would notice: new features, new pages or views, clearer screens, better alerts, fixes to things users would have hit. Drop internal work: refactors, tests, CI, monitoring, analytics and tracking, emails and alerts to the team, admin or owner-only tools, research studies and notes (anything under research/), deploy and hosting changes, and anything not live for every user.
 
