@@ -143,6 +143,7 @@ reads = Client(store=":memory:")  # leaderboards, traders, links, cost previews:
 monitoring.watch(reads._http._client)  # every request the SDK sends, whoever asked: monitoring's ``api``
 LAYER_KEY = os.environ.get("LAYER_API_KEY", "")
 _us_stop = threading.Event()
+_STARTED = time.monotonic()  # with no matches loaded yet, how long they've been missing counts from here
 
 
 def us_of(market: str | None, token: str | None = None, outcome: str | None = None) -> dict[str, Any] | None:
@@ -1686,6 +1687,10 @@ def owner_check(now: float | None = None) -> None:
     _owner_watch.update("scoring", scoring, now)
     refused = _tg["login_refused"]  # the bot's name (one getMe, cached) only when there's something to say
     _owner_watch.update("login_button", owner_alerts.login_button_problem(refused, _bot_name() if refused else None), now)
+    if LAYER_KEY:  # alerts need Layer's matches (_matched): matches that stop loading pause them all
+        built = us_match.twins._built
+        _owner_watch.update("matches", owner_alerts.matches_problem(
+            time.monotonic() - (built if built is not None else _STARTED), us_match.twins.error), now)  # fmt: skip
 
 
 def _welcome_activity(uid: str) -> welcome.Activity:
@@ -5345,13 +5350,12 @@ US_DIFFERS = " Some settlement rules differ."
 NO_MATCH_LINE = f"{TRADED_INTL} No verified Kalshi or US match found."
 
 
-def _no_match(t: WhaleTrade) -> bool:
-    """Whether Layer's matches were read and neither Kalshi nor Polymarket US has this outcome (the alert would say
-    NO_MATCH_LINE). Such a trade sends nothing to Telegram (owner, 16 Nov: "remove any alert that is not matched
-    ... reduce the noise"): no buy, sell or big-trade alert, and no place in a summary. When the matches can't be
-    read, alerts go as before, so a Layer outage never silences them all."""
-    k, us = kalshi_of(t.market, t.token, t.outcome), us_of(t.market, t.token, t.outcome)
-    return (k is not None or us is not None) and not any(v and v["found"] for v in (k, us))
+def _matched(t: WhaleTrade) -> bool:
+    """Whether this outcome has a verified match on Kalshi or Polymarket US, where it can be copied. Only those go
+    to Telegram (owner, 17 Nov: "as long as i can copy trade. If these alerts are not on poly us or kalshi, no need
+    to show them"): no buy, sell or big-trade alert and no summary line for the rest, nor while Layer's matches
+    can't be read (the owner is told then: owner_alerts.matches_problem)."""
+    return any(v and v["found"] for v in (kalshi_of(t.market, t.token, t.outcome), us_of(t.market, t.token, t.outcome)))
 
 
 def _venue_line(t: WhaleTrade) -> tuple[str, str | None, str | None]:
@@ -6464,8 +6468,8 @@ def alert_pass(now: float | None = None) -> int:
     except VenueError:
         cats = {}  # grouped over the longer window; a rule with markets lets none through (_rule_matches)
     sent = 0
-    new_buys = [b for b in new_buys if not _no_match(b.t)]  # no Kalshi or US match: nothing to Telegram
-    new_sells = [s for s in new_sells if not _no_match(s.t)]
+    new_buys = [b for b in new_buys if _matched(b.t)]  # not on Kalshi or Polymarket US: nothing to Telegram
+    new_sells = [s for s in new_sells if _matched(s.t)]
     for b in new_buys:  # each follower's rule for this trader: now, in their summary, or only in their Feed
         for uid in to[b.wallet]:
             want = _wants(users[uid], b.wallet, b.usd, category=cats.get(b.t.market), price=b.paid,
@@ -6590,8 +6594,8 @@ def whale_pass(users: dict[str, dict[str, Any]], now: float) -> int:
 
 def _whale_send(new: list[WhaleTrade], wants: dict[str, dict[str, Any]], now: float) -> int:
     """whale_pass's messages: each new big trade to everyone who picked its market and doesn't follow the trader,
-    when it has a Kalshi or US match (_no_match)."""
-    new = [t for t in new if not _no_match(t)]
+    when it has a Kalshi or US match (_matched)."""
+    new = [t for t in new if _matched(t)]
     try:
         cats = _categories([t.market for t in new]) if new else {}
     except VenueError:

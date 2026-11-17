@@ -127,3 +127,15 @@ def run_js() -> Any:
         return json.loads(r.stdout)
 
     return run
+
+
+@pytest.fixture(autouse=True)
+def every_trade_matched(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Only trades on Kalshi or Polymarket US reach Telegram (``engine._matched``), and no test loads Layer's
+    matches: every trade counts as matched here, so alert tests check alerts. Returns the real rule, for the test
+    of the rule itself (tests/test_alerts.py)."""
+    from signals import app as engine
+
+    real = engine._matched
+    monkeypatch.setattr(engine, "_matched", lambda t: True)
+    return real
