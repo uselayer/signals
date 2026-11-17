@@ -22,7 +22,8 @@ export async function fixtureApi(base = './fixtures/') {
     fixtures: true,
     config: async () => ({ clerk_key: null, event_version: 2, fixtures: true, market_types: [
       { id: 'btc-updown-15m', label: 'BTC Up or Down 15m', unit: 'window', min_days: 0 },
-      { id: 'btc-long', label: 'Long-dated BTC', unit: 'market', min_days: 7 },
+      { id: 'btc-monthly', label: 'BTC monthly', unit: 'market', min_days: 7 },
+      { id: 'btc-yearly', label: 'BTC yearly', unit: 'market', min_days: 7 },
       { id: 'politics', label: 'Politics', unit: 'market', min_days: 7 },
       { id: 'soccer', label: 'Soccer', unit: 'market', min_days: 7, aliases: ['premier-league', 'epl'] }] }),
     sessions: async () => (gone.has(SID) ? [] : [{ id: SID, title: sample.runs[0][0].title, created: Date.now() / 1000 - 3600, sample: true, wallet: null, name: null, market: 'btc-updown-15m' }]),

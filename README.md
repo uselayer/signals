@@ -308,7 +308,8 @@ It's `signals/research/`, its own service (`Dockerfile.research`, `railway.resea
 investigations are long and read a lot, and the engine keeps alerts first.
 
 - **Market types** (`markets.py`): a breakdown studies one, named in its plan's scope: BTC 15-minute windows (a tile
-  per window), or long-dated BTC price markets ("Will Bitcoin reach $X by December 31?", a tile per market: its
+  per window), or BTC monthly and yearly price markets (Polymarket's own Monthly and Yearly tags: "What price will Bitcoin hit in
+  November?", a tile per market: its
   whole life for the wallet, the market's price over weeks, Binance BTCUSDT with highs and lows, open positions
   valued at today's price), politics (Gamma's tags, as the Politics chip counts them) and soccer (every league's
   match markets: Gamma's Soccer tag and a game; and the Premier League's season futures, managers and punishments:

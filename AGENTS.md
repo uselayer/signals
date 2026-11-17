@@ -460,8 +460,11 @@ behind Vercel (see README, "Hosting").
   folders to make by hand, and no Delete while it runs or waits to start.
 - Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
   Layer's recordings.
-- Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC, politics and soccer (one
-  tile per market; politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it;
+- Market types (`markets.py` `TYPES`): BTC 15-minute windows, BTC monthly, BTC yearly, politics and soccer (one
+  tile per market; BTC monthly and yearly are Polymarket's own length tags on the market (owner, 17 Nov: "why
+  didn't we break down markets based on how they break it down?"): Monthly, else Yearly, and a long BTC price
+  market with no length tag ("Price Milestone") counts as yearly; Weekly is mostly one-day markets, never
+  studied. `btc-long` ("Long-dated BTC", both together) is retired: saved plans and links still open, no pill; politics = Polymarket's Politics category from Gamma's tags, as the Politics chip counts it;
   soccer (owner, 16 Nov: "the Premier League is a league, soccer is the sport") = any league's match market (Gamma's
   Soccer tag, id 100350, on all 185 of its soccer leagues and no other sport, AND a game), plus the Premier League's
   other markets (Gamma's EPL tag AND the market's own text naming the league, or a club's manager market, since
@@ -477,7 +480,7 @@ behind Vercel (see README, "Hosting").
   the result when it merged out, and when they can't be read it says so. A new kind (a sports league) is one entry
   there: what matches, what resolves one market (read from its own rules,
   never assumed for the type), its outside line, its default `min_days` and its prompt section. The 15-minute
-  path stays as it is. A long-dated breakdown reads back 90 days and tiles the 20 markets with the most money
+  path stays as it is. A BTC monthly or yearly breakdown reads back 90 days and tiles the 20 markets with the most money
   traded, markets running 7+ days (owner's defaults until changed); an open position is valued at today's price
   and called open.
 - The wording check sends back a finding, step or answer that says "bet", "edge", "ROI", "it's a bot"… once to
@@ -485,7 +488,7 @@ behind Vercel (see README, "Hosting").
 - Choosing a wallet (owner, 16 Nov: someone with no wallet to reverse-engineer needs one to start from): the ask
   box's wallet field opens a list, "Pick one for me" first, then each market type's top 3 by trading profit over 30
   days on Signals' own Leaderboard (`suggest.py`, from the engine's `/api/leaderboard`, never Polymarket's board;
-  Crypto wallets sorted into BTC 15-minute and long-dated BTC, and Sports wallets into Soccer, by one read of
+  Crypto wallets sorted into BTC 15-minute, BTC monthly and BTC yearly (by slug words), and Sports wallets into Soccer, by one read of
   their latest 500 trades; each list always holds its best Human-tagged wallet when one was found), kept 6 hours.
   Facts only: rank, profit, money traded, Bot or Human; never "recommended". Picking one sets Market. "Pick one for
   me" sends the best-ranked Human-tagged wallet for the Market chosen (owner, 16 Nov; a bot only when none of the

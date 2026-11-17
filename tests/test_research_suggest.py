@@ -80,13 +80,14 @@ def test_recent_markets_tell_15_minute_traders_from_long_dated_ones() -> None:
     assert S.kinds_of([WINDOW] * 3 + ["x"]) == {"btc-updown-15m"}
     assert S.kinds_of([WINDOW] + ["x"] * 9) == set()  # a few windows among other markets isn't a 15-minute trader
     assert S.kinds_of([WINDOW] + ["x"] * 3) == {"btc-updown-15m"}  # a quarter is: its BTC windows are read alone
-    assert S.kinds_of(["bitcoin-above-66k-on-november-15-2026"]) == set()  # one day: under a long-dated scope's 7
-    assert S.kinds_of(["x", LONG]) == {"btc-long"}  # one long-dated BTC market is enough to study
-    assert S.kinds_of([WINDOW] * 6 + [LONG] * 4) == {"btc-updown-15m", "btc-long"}
+    assert S.kinds_of(["bitcoin-above-66k-on-november-15-2026"]) == set()  # one day: under a monthly scope's 7
+    assert S.kinds_of(["x", LONG]) == {"btc-yearly"}  # one yearly BTC market is enough to study
+    assert S.kinds_of(["will-bitcoin-reach-100k-in-november-2026"]) == {"btc-monthly"}
+    assert S.kinds_of([WINDOW] * 6 + [LONG] * 4) == {"btc-updown-15m", "btc-yearly"}
     assert S.kinds_of([]) == set()
     assert S.kinds_of([EPL] * 10) == {"soccer"}  # matches count: listed weeks ahead, they pass the 7 days
     assert S.kinds_of(["will-arsenal-win-the-2026-27-english-premier-league"] * 9 + ["x"]) == set()  # under SOCCER_MIN
-    assert S.kinds_of(["bitcoin-up-or-down-november-16-12pm-et"]) == set()  # an Up/Down market isn't long-dated
+    assert S.kinds_of(["bitcoin-up-or-down-november-16-12pm-et"]) == set()  # an Up/Down market is neither
 
 
 def test_each_market_type_gets_its_top_wallets_from_signals_leaderboard() -> None:
@@ -94,15 +95,15 @@ def test_each_market_type_gets_its_top_wallets_from_signals_leaderboard() -> Non
     web, seen = _web()
     types = S.build(whales, web, ENGINE)
     by = {t["id"]: t for t in types}
-    assert [t["id"] for t in types] == ["btc-updown-15m", "btc-long", "politics", "soccer"]  # TYPES order
+    assert [t["id"] for t in types] == ["btc-updown-15m", "btc-yearly", "politics", "soccer"]  # TYPES order
     assert all(u.startswith(ENGINE + "/api/leaderboard") for u in seen)  # Signals' board, never Polymarket's
     pol = by["politics"]["wallets"]
     assert [w["name"] for w in pol] == ["pol-a", "pol-b", None]  # PER_TYPE, ranked by 30-day trading profit
     assert pol[0] == {"wallet": _w(1), "name": "pol-a", "bot": 0, "category": "Politics", "rank": 1,
                       "profit_30d": 500_000, "traded_30d": 2_000_000}  # fmt: skip
     assert [w["name"] for w in by["btc-updown-15m"]["wallets"]] == ["windows-bot", "both"]
-    assert [w["name"] for w in by["btc-long"]["wallets"]] == ["long-btc", "both"]
-    assert by["btc-long"]["wallets"][0]["rank"] == 2  # its rank in the Crypto category, as the Leaderboard shows it
+    assert [w["name"] for w in by["btc-yearly"]["wallets"]] == ["long-btc", "both"]
+    assert by["btc-yearly"]["wallets"][0]["rank"] == 2  # its rank in the Crypto category, as the Leaderboard shows it
     assert {w for _, w, _ in whales.asked} == {_w(n) for n in (10, 11, 12, 13, 20, 21, 22, 23, 24, 25)}  # Crypto, Sports
     # three bots trade the Premier League ahead of a person: the person takes the third place (owner, 16 Nov)
     assert [(w["name"], w["rank"]) for w in by["soccer"]["wallets"]] == [("epl-bot-a", 1), ("epl-bot-b", 2),
@@ -160,7 +161,7 @@ def test_the_route_answers_at_once_and_builds_in_the_background(monkeypatch: pyt
         assert first.json()["ready"] is False and first.json()["types"] == []  # nothing kept yet: it's building
         _wait_built()
         again = c.get("/api/research/suggestions").json()
-        assert again["ready"] is True and [t["id"] for t in again["types"]] == ["btc-updown-15m", "btc-long", "politics",
+        assert again["ready"] is True and [t["id"] for t in again["types"]] == ["btc-updown-15m", "btc-yearly", "politics",
                                                                                "soccer"]
     finally:
         server.app.dependency_overrides.clear()

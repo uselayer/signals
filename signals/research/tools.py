@@ -31,7 +31,7 @@ TOOLS: list[dict[str, Any]] = [
             "whose last part is the window's start in unix s), condition_id, outcome ('Up'/'Down'), outcome_index, "
             "token, action ('buy'/'sell'), price (0-1, dollars per contract), size (contracts), usd, tx}]}. "
             "slug_prefix keeps only matching markets (default 'btc-updown-15m-'; null for every market, e.g. "
-            "long-dated markets, whose outcomes are 'Yes'/'No'). A busy wallet can have thousands of trades a day: "
+            "monthly and yearly markets, whose outcomes are 'Yes'/'No'). A busy wallet can have thousands of trades a day: "
             "read a day or a few days at a time. For a market type's markets ranked by money, use wallet_markets; "
             "for one market's every fill over its whole life, use market."
         ),
@@ -81,7 +81,7 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "wallet_markets",
         "description": (
-            "A wallet's markets of one market type (e.g. 'btc-long': long-dated BTC price markets; 'politics': "
+            "A wallet's markets of one market type (e.g. 'btc-monthly': Polymarket's Monthly BTC price markets; 'politics': "
             "Polymarket's Politics markets, told apart by their own tags; 'soccer': any league's match markets (Gamma's Soccer tag and a game) and the Premier League's "
             "season markets) traded between "
             "start and end, the most money traded first: the same list Start's tiles are built from. JSON: {wallet, "
@@ -101,7 +101,7 @@ TOOLS: list[dict[str, Any]] = [
             "type": "object",
             "properties": {
                 "wallet": {"type": "string"}, "start": TIME, "end": TIME,
-                "market_type": {"type": "string", "description": "A market type id, e.g. 'btc-long'."},
+                "market_type": {"type": "string", "description": "A market type id, e.g. 'btc-monthly'."},
                 "min_days": {"type": "number"}, "top": {"type": "integer"},
             },  # fmt: skip
             "required": ["wallet", "start", "end", "market_type"],

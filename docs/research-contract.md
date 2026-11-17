@@ -55,8 +55,9 @@ are assembled by the server from the same reads the agent's tools made, so no dr
 - `plan.proposed` `{plan_id, ask_id, title, scope: {wallet, family|market_type, from, to, min_days?, top?}, market: {id,
   label, unit}, steps: [{id, title, source, estimate_s}], scope_options: [{id, text}], estimate_usd, estimate_s,
   needs_approval: true}`. `market` is the market type studied (`signals/research/markets.py` `TYPES`): `unit` `window`
-  (BTC 15-minute windows; `family` "btc-updown-15m", the scope as before) or `market` (`btc-long`, "Long-dated
-  BTC", `politics`, "Politics", or `soccer`, "Soccer" (`premier-league` and `epl` are its aliases: older plans say them): one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
+  (BTC 15-minute windows; `family` "btc-updown-15m", the scope as before) or `market` (`btc-monthly`, "BTC
+  monthly", `btc-yearly`, "BTC yearly" (`btc-long`, "Long-dated BTC", both together, is retired: older plans still
+  open), `politics`, "Politics", or `soccer`, "Soccer" (`premier-league` and `epl` are its aliases: older plans say them): one tile per market; the scope gets `min_days`, only markets that run that long, default 7, and `top`, how
   many markets to tile, default 20). The page's header says `market.label`; a plan without `market` is BTC 15-minute. Every new investigation shows its plan and waits;
   a follow-up that widens the scope (more windows, a longer range, another wallet) does too. The run ends after it.
   `estimate_usd` is the server's, never the agent's: the median `cost_usd` of the latest 20 Starts that ran to their
@@ -110,7 +111,7 @@ are assembled by the server from the same reads the agent's tools made, so no dr
   lost: [{from, to, why}], seconds_without_book, market_trades: {recorded, polymarket, pct}|{read, complete},
   outage, reasons, notes, pre_open_entries: {fills, first_s_before, before_axis}}`. `why` is plain English for the
   chart's hatching.
-- **Markets** (a market type whose unit is a market: long-dated BTC, politics, the Premier League). The same events
+- **Markets** (a market type whose unit is a market: BTC monthly and yearly, politics, soccer). The same events
   carry them, `window_id` being the market's slug, with `kind: "market"`; times are unix seconds, never seconds
   from a start.
   - Start's tiles: the wallet's trades in the range read newest week first up to 30,000 (`Reads.wallet_markets`),

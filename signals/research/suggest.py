@@ -9,9 +9,9 @@ wallet tagged Human among them when one was found (owner, 16 Nov: "Pick one for 
 three bots would leave it none; ``with_human``):
 
 - Politics: the Politics category's first ``LOOKED_AT`` (a wallet's category is where most of its trades are).
-- BTC 15-minute windows and long-dated BTC: the Crypto category's first ``LOOKED_AT``, each one's latest
+- BTC 15-minute windows and BTC monthly and yearly: the Crypto category's first ``LOOKED_AT``, each one's latest
   ``RECENT`` trades read once (one SDK read each, on the research budget) and sorted by what they are: a fifth or
-  more BTC 15-minute windows, or any long-dated BTC market that isn't a one-day one (``markets.btc_long_matches``).
+  more BTC 15-minute windows, or any monthly or yearly BTC market (``markets.btc_length``), never a one-day one.
   A wallet can be in both.
 - Soccer: the Sports category's first ``SPORTS_LOOKED_AT``, read the same way, with ``SOCCER_MIN`` or more of
   their recent trades in soccer markets (``markets.soccer_hint``: any league's matches, or the Premier League's
@@ -38,7 +38,7 @@ SOCCER_MIN = 10  # a soccer trader: at least this many of its recent trades in s
 # a BTC 15-minute trader: at least this share of its recent trades in those windows (16 Nov, the top 30 read: the
 # busiest window traders spread over many coins, so half was too strict; a breakdown reads only its BTC windows)
 WINDOWS_SHARE = 0.2
-# a one-day BTC market ("Bitcoin above $66k on November 15") runs under the 7 days a long-dated breakdown keeps
+# a one-day BTC market ("Bitcoin above $66k on November 15") runs under the 7 days a monthly or yearly breakdown keeps
 DAILY = re.compile(r"-on-(january|february|march|april|may|june|july|august|september|october|november|december)-\d")
 TTL_S = 6 * 3_600
 RETRY_S = 300  # after a failed build, the next one waits this long
@@ -75,7 +75,7 @@ def with_human(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def kinds_of(slugs: list[str]) -> set[str]:
     """What a wallet's recent markets say it trades: "btc-updown-15m" when a fifth or more are BTC 15-minute
-    windows, "btc-long" when any is a long-dated BTC market (not a one-day one), "soccer" when ``SOCCER_MIN`` or
+    windows, "btc-monthly" or "btc-yearly" when any is a BTC price market of that length (not a one-day one), "soccer" when ``SOCCER_MIN`` or
     more are soccer markets."""
     from signals.research import markets as M
     from signals.research.data import BTC_15M
@@ -83,8 +83,9 @@ def kinds_of(slugs: list[str]) -> set[str]:
     out: set[str] = set()
     if slugs and sum(s.startswith(BTC_15M) for s in slugs) / len(slugs) >= WINDOWS_SHARE:
         out.add(M.BTC_15M.id)
-    if any(not M.is_window(s) and M.btc_long_matches(s, {}) and not DAILY.search(s) for s in slugs):
-        out.add(M.BTC_LONG.id)
+    for s in slugs:  # a monthly or yearly BTC price market, by its slug's words (no tags read here)
+        if not M.is_window(s) and M.btc_long_matches(s, {}) and not DAILY.search(s):
+            out.add(M.BTC_MONTHLY.id if M.btc_length(s, {}) == "monthly" else M.BTC_YEARLY.id)
     if sum(M.soccer_hint(s) for s in slugs) >= SOCCER_MIN:
         out.add(M.SOCCER.id)
     return out
