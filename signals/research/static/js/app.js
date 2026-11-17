@@ -12,7 +12,7 @@ import { AgentColumn } from './agent.js';
 import { isMarket, marketTypeOf, prepMarket, marketAutoSteps, marketAgentSteps, marketTally, shortDate, dateTime } from './marketdata.js';
 import { MarketsStage, MarketReplay, MarketTrades } from './marketview.js';
 import { Hatch } from './chart.js';
-import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets, count, ago } from './format.js';
+import { traderName, pillHues, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets, count, ago } from './format.js';
 
 const LOGO = html`<svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1" /><rect x="8.5" y="7" width="3" height="10" rx="1" /><rect x="14" y="3" width="3" height="14" rx="1" /></svg>`;
 const params = new URLSearchParams(location.search);
@@ -167,6 +167,7 @@ function Breakdowns({ api, list, setList, types }) {
     if (!g) groups.push(g = { key, rows: [] });
     g.rows.push(s);
   }
+  pillHues(groups.map(g => g.key)).forEach((h, i) => { groups[i].hue = h; });
   const who = g => { const n = g.rows.find(s => s.name); return n ? n.name : g.key ? traderName({ wallet: g.key }) : 'No wallet named yet'; };
   const row = s => {
     const can = !s.running && !s.queued && !s.sample, open = menu === s.id;
@@ -182,7 +183,7 @@ function Breakdowns({ api, list, setList, types }) {
       <div class="seg" role="radiogroup" aria-label="Market">${[['all', 'All'], ...types.map(t => [t.id, label(t.id)])].map(([id, l]) => html`<button type="button" role="radio" aria-checked=${id === market ? 'true' : 'false'} class=${id === market ? 'on' : ''} onClick=${() => { setMarket(id); setMenu(null); }}>${l}</button>`)}</div></div>
     ${err && html`<div class="banner err">${err}</div>`}
     ${!shown.length ? html`<p class="muted">${list.length ? `No ${label(market)} breakdowns yet.` : 'None left. Your next one appears here.'}</p>`
-      : html`<div class="bgroups">${groups.map(g => html`<section class="bgroup"><h4>${who(g)} <span class="muted">${plural(g.rows.length, 'breakdown')}</span></h4>
+      : html`<div class="bgroups">${groups.map(g => html`<section class="bgroup"><h4><span class=${g.hue != null ? 'wpill' : 'wpill none'} style=${g.hue != null ? `--h:${g.hue}` : ''}>${who(g)}</span> <span class="muted">${plural(g.rows.length, 'breakdown')}</span></h4>
         <div class="list">${g.rows.map(row)}</div></section>`)}</div>`}
     ${undo && html`<div class="toast" role="status">Breakdown deleted<button type="button" onClick=${restore}>Undo</button></div>`}`;
 }

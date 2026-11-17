@@ -166,6 +166,13 @@ p { margin: 0; }
 .bgroup { display: flex; flex-direction: column; gap: 8px; }
 .bgroup h4 { font-size: 14.5px; display: flex; gap: 8px; align-items: baseline; min-width: 0; overflow-wrap: anywhere; }
 .bgroup h4 .muted { font-weight: 400; font-size: 13px; white-space: nowrap; }
+/* A wallet's pill: tinted by its hue (pillHues in format.js), so each wallet's group reads apart */
+.bgroup h4 { align-items: center; }
+.wpill { --h: 0; --wp-s: 32%; --wp-l: 15%; --wp-fg-l: 76%; --wp-b-l: 30%; display: inline-flex; align-items: center; min-width: 0;
+  padding: 3px 11px; border-radius: 999px; font-weight: 500; overflow-wrap: anywhere;
+  background: hsl(var(--h) var(--wp-s) var(--wp-l)); color: hsl(var(--h) 60% var(--wp-fg-l)); border: 1px solid hsl(var(--h) 38% var(--wp-b-l)); }
+:root[data-theme="light"] .wpill { --wp-s: 48%; --wp-l: 94%; --wp-fg-l: 32%; --wp-b-l: 82%; }
+.wpill.none { background: var(--soft); color: var(--muted); border-color: var(--line); }
 .list .brow { position: relative; display: flex; align-items: center; gap: 12px; padding: 12px 8px 12px 14px; border-top: 1px solid var(--line); }
 .list .brow:first-child { border-top: 0; }
 .list .brow > a { display: flex; flex-direction: column; align-items: stretch; gap: 0; flex: 1; min-width: 0; padding: 0; border: 0; }
