@@ -1,0 +1,66 @@
+{
+  "feature": "trader-page",
+  "mode": "desk",
+  "bugs": [
+    {
+      "t": 34.866,
+      "at": "00:34",
+      "title": "Their numbers table overflows its card",
+      "details": "On the top trader's page the 7/30/90 days table is wider than its card: the 90 days column is cut off at the card edge and 'too many to count' runs past it.",
+      "url": "https://usesignals.app/#/worth/0x2c335066fe58fe9237c3d3dc7b275c2a034a0563",
+      "screenshot": "04-bug-1.png"
+    },
+    {
+      "t": 78.192,
+      "at": "01:18",
+      "title": "No 'What buying now costs' on open trades",
+      "details": "On the top trader's Positions and Recent trades, clicking or hovering rows did nothing; no Check your price or buying-cost entry anywhere (only a Polymarket link and 'No verified US match found').",
+      "url": "https://usesignals.app/#/worth/0x2c335066fe58fe9237c3d3dc7b275c2a034a0563",
+      "screenshot": "12-bug-2.png"
+    },
+    {
+      "t": 113.531,
+      "at": "01:53",
+      "title": "30-day profit differs from the Leaderboard row",
+      "details": "BreakTheBank's board row says +$1.8M over 30D (+2.9% per $62.7M traded), but the trader page's 30 days column says +$2.9M profit taken, with the same +2.9% per $ traded.",
+      "url": "https://usesignals.app/#/worth/0xf0318c32136c2db7fec88b84869aee6a1106c80c",
+      "screenshot": "15-bug-3.png"
+    },
+    {
+      "t": 133.007,
+      "at": "02:13",
+      "title": "Made-up wallet shows a broken page, not 'no record'",
+      "details": "Opening #/worth/0x…0001 gave a 502 from the trader API, a Human pill, a $10 wallet, empty tables and a raw red 'polymarket doesn't know that: profile not found' with Follow still offered; no plain 'no record' message.",
+      "url": "https://usesignals.app/#/worth/0x0000000000000000000000000000000000000001",
+      "screenshot": "17-bug-4.png"
+    }
+  ],
+  "passed": [
+    {
+      "t": 37.673,
+      "what": "Top trader page loads with record, Bot pill, avg price 56¢, weeks up 7 of 12, usual trade $50K matching the board"
+    },
+    {
+      "t": 116.322,
+      "what": "Human trader page loads: Human pill, avg price 57¢, 8 of 12 weeks up, usual trade $74.4K match the board; Open P&L filled in after loading"
+    },
+    {
+      "t": 135.818,
+      "what": "Made-up wallet page doesn't crash or spin forever"
+    }
+  ],
+  "errors": [
+    {
+      "t": 2.208,
+      "e": "console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED"
+    },
+    {
+      "t": 120.647,
+      "e": "HTTP 502 GET https://usesignals.app/api/trader/polymarket/0x0000000000000000000000000000000000000001"
+    },
+    {
+      "t": 120.647,
+      "e": "console: Failed to load resource: the server responded with a status of 502 (Bad Gateway)"
+    }
+  ]
+}
