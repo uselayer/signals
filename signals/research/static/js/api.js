@@ -71,6 +71,9 @@ export const live = {
   // wallets to study by market type, for the wallet field's list and "Pick one for me" (signals/research/suggest.py)
   suggestions: () => call('GET', '/suggestions'),
   create: title => call('POST', '/sessions', { title }).then(j => j.id),
+  // Delete in the list, and its Undo (kept on the service until then: server.py delete_session)
+  remove: id => call('DELETE', `/sessions/${id}`),
+  restore: id => call('POST', `/sessions/${id}/restore`),
   session: id => call('GET', `/sessions/${id}`),
   ask: (id, question, context, origin) => call('POST', `/sessions/${id}/ask`, { question, context: context || null, origin: origin || null }),
   // answers to a plan and to a proposal (docs/research-contract.md "Client calls"): approve/edit and accept start a run

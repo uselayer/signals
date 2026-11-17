@@ -12,7 +12,7 @@ import { AgentColumn } from './agent.js';
 import { isMarket, marketTypeOf, prepMarket, marketAutoSteps, marketAgentSteps, marketTally, shortDate, dateTime } from './marketdata.js';
 import { MarketsStage, MarketReplay, MarketTrades } from './marketview.js';
 import { Hatch } from './chart.js';
-import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets, count } from './format.js';
+import { traderName, windowLabel, signedMoney, money, mmss, clock, signedBtc, cents, shares, plural, shortWallets, count, ago } from './format.js';
 
 const LOGO = html`<svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><rect x="3" y="11" width="3" height="6" rx="1" /><rect x="8.5" y="7" width="3" height="10" rx="1" /><rect x="14" y="3" width="3" height="14" rx="1" /></svg>`;
 const params = new URLSearchParams(location.search);
@@ -129,6 +129,62 @@ function rowLabel(s) {
   if (st === 'ready') return html`<span class="r ready">✓ Ready</span>`;
   if (st === 'queued') return html`<span class="r queued">Queued · starts after your current one</span>`;
   return html`<span class="r">${st === 'stopped' ? 'Stopped' : 'Saved'}</span>`;
+}
+
+// Your breakdowns (owner, 17 Nov: "can i delete a breakdown? we need better organizational ui"; mock
+// claude.ai/artifact/E4tCRRfdxCGJv5EHGZrHAx): grouped by wallet, newest first; the Market pills filter them; one
+// line per question (the whole of it on hover); "18 h ago"; ⋯ → Delete, with Undo for 6 seconds. Not while it runs
+// or waits to start (nothing stops a run), nor the sample.
+const DOTS = html`<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.4" fill="currentColor" /><circle cx="8" cy="8" r="1.4" fill="currentColor" /><circle cx="12.5" cy="8" r="1.4" fill="currentColor" /></svg>`;
+function Breakdowns({ api, list, setList, types }) {
+  const [market, setMarket] = useState('all'), [menu, setMenu] = useState(null), [undo, setUndo] = useState(null), [err, setErr] = useState(null);
+  const timer = useRef();
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const away = e => { if (!e.target.closest('.rmenu, .more')) setMenu(null); };
+    const esc = e => { if (e.key === 'Escape') setMenu(null); };
+    document.addEventListener('click', away); document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('click', away); document.removeEventListener('keydown', esc); };
+  }, [menu]);
+  const label = id => { const t = types.find(x => x.id === id); return t ? t.label.replace(' Up or Down ', ' ') : null; };
+  const reload = () => api.sessions().then(setList, () => {});
+  const remove = async s => {
+    setMenu(null); setErr(null); setList(l => l.filter(x => x.id !== s.id));
+    try { await api.remove(s.id); } catch (e) { setErr(e.message); reload(); return; }
+    clearTimeout(timer.current); setUndo(s); timer.current = setTimeout(() => setUndo(null), 6000);
+  };
+  const restore = async () => {
+    const s = undo; clearTimeout(timer.current); setUndo(null);
+    try { await api.restore(s.id); } catch (e) { setErr(e.message); }
+    reload();
+  };
+  const shown = list.filter(s => market === 'all' || s.market === market);
+  const groups = [];
+  for (const s of shown) {
+    const key = s.wallet || '';
+    let g = groups.find(x => x.key === key);
+    if (!g) groups.push(g = { key, rows: [] });
+    g.rows.push(s);
+  }
+  const who = g => { const n = g.rows.find(s => s.name); return n ? n.name : g.key ? traderName({ wallet: g.key }) : 'No wallet named yet'; };
+  const row = s => {
+    const can = !s.running && !s.queued && !s.sample, open = menu === s.id;
+    return html`<div class="brow">
+      <a href=${`#/i/${s.id}`} title=${shortWallets(s.title) || 'Untitled breakdown'}><span class="t">${shortWallets(s.title) || 'Untitled breakdown'}</span>
+        <span class="s">${s.sample ? 'Sample, from recorded data · ' : ''}${market === 'all' && label(s.market) ? `${label(s.market)} · ` : ''}${ago(s.created)}</span></a>
+      ${rowLabel(s)}
+      ${can ? html`<button type="button" class="more" aria-label="More for this breakdown" aria-haspopup="menu" aria-expanded=${open ? 'true' : 'false'} onClick=${() => setMenu(open ? null : s.id)}>${DOTS}</button>` : html`<span class="more-gap"></span>`}
+      ${open && html`<div class="rmenu" role="menu"><button type="button" role="menuitem" class="del" onClick=${() => remove(s)}>Delete</button></div>`}
+    </div>`;
+  };
+  return html`<div class="yours-head"><h3>Your breakdowns</h3>
+      <div class="seg" role="radiogroup" aria-label="Market">${[['all', 'All'], ...types.map(t => [t.id, label(t.id)])].map(([id, l]) => html`<button type="button" role="radio" aria-checked=${id === market ? 'true' : 'false'} class=${id === market ? 'on' : ''} onClick=${() => { setMarket(id); setMenu(null); }}>${l}</button>`)}</div></div>
+    ${err && html`<div class="banner err">${err}</div>`}
+    ${!shown.length ? html`<p class="muted">${list.length ? `No ${label(market)} breakdowns yet.` : 'None left. Your next one appears here.'}</p>`
+      : html`<div class="bgroups">${groups.map(g => html`<section class="bgroup"><h4>${who(g)} <span class="muted">${plural(g.rows.length, 'breakdown')}</span></h4>
+        <div class="list">${g.rows.map(row)}</div></section>`)}</div>`}
+    ${undo && html`<div class="toast" role="status">Breakdown deleted<button type="button" onClick=${restore}>Undo</button></div>`}`;
 }
 
 // Wallets to study (owner, 16 Nov: someone with no wallet to reverse-engineer needs one to start from). The wallet
@@ -320,9 +376,9 @@ function Home({ api, types }) {
         <div class="ex-grid">${EXAMPLES.map(([, label, question], i) => html`<button type="button" class=${'ex' + (q === question(whoOf(typed, i)) ? ' on' : '')} onClick=${() => pick(i)}><span>${label()}</span><span class="who">uses ${whoOf(typed, i)}</span></button>`)}
           <button type="button" class=${'ex' + (chosen && chosen.pick ? ' on' : '')} onClick=${pickForMe}><span>No wallet? Let us pick one</span><span class="who">${pickWho ? `uses ${pickWho}, the top ${pickNext.human ? 'human ' : ''}trader` : `the top human ${shortLabel(type)} trader`}</span></button></div></div>`}
       ${err && html`<div class="banner err">${err}</div>`}</div>
-    ${!SAMPLE && html`<div style="display:flex;flex-direction:column;gap:10px"><h3>Your breakdowns</h3>
+    ${!SAMPLE && html`<div class="yours">
       ${list == null ? html`<p class="muted">Loading…</p>` : list.length === 0 ? html`<p class="muted">None yet. Your first one appears here and stays here.</p>`
-        : html`<div class="list">${list.map(s => html`<a href=${`#/i/${s.id}`}><div><div class="t">${shortWallets(s.title) || 'Untitled breakdown'}</div><div class="s">${s.sample ? 'Sample, from recorded data · ' : ''}Started ${new Date(s.created * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC</div></div>${rowLabel(s)}</a>`)}</div>`}</div>`}
+        : html`<${Breakdowns} api=${api} list=${list} setList=${setList} types=${types} />`}</div>`}
     <p class="muted small">Later: re-running a breakdown when the wallet trades again, with Telegram alerts, comes after the first version.</p>
   </main>`;
 }

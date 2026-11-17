@@ -17,6 +17,7 @@ export async function fixtureApi(base = './fixtures/') {
   };
   const windows = sample.runs[1].filter(e => e.type === 'window.summary').map(({ type, ...s }) => s);
   let asked = 2;
+  const gone = new Set(); // deleted in the list (Undo brings one back)
   return {
     fixtures: true,
     config: async () => ({ clerk_key: null, event_version: 2, fixtures: true, market_types: [
@@ -24,7 +25,9 @@ export async function fixtureApi(base = './fixtures/') {
       { id: 'btc-long', label: 'Long-dated BTC', unit: 'market', min_days: 7 },
       { id: 'politics', label: 'Politics', unit: 'market', min_days: 7 },
       { id: 'soccer', label: 'Soccer', unit: 'market', min_days: 7, aliases: ['premier-league', 'epl'] }] }),
-    sessions: async () => [{ id: SID, title: sample.runs[0][0].title, created: Date.now() / 1000 - 3600, sample: true }],
+    sessions: async () => (gone.has(SID) ? [] : [{ id: SID, title: sample.runs[0][0].title, created: Date.now() / 1000 - 3600, sample: true, wallet: null, name: null, market: 'btc-updown-15m' }]),
+    remove: async id => { gone.add(id); return { deleted: true }; },
+    restore: async id => { gone.delete(id); return { deleted: false }; },
     // the wallet field's list, as /api/research/suggestions answered on 16 Nov (Politics from Signals' Leaderboard;
     // the 15-minute pair are the sample traders, with Polymarket's 30-day crypto figures)
     suggestions: async () => ({ ready: true, built_at: 1794800000, types: [

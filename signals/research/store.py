@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS findings (session TEXT NOT NULL, id TEXT NOT NULL, n 
 ADDED = [("sessions", "container_at REAL"), ("runs", "code_runs INTEGER DEFAULT 0"),
          ("runs", "container_s INTEGER DEFAULT 0"), ("runs", "container_usd REAL DEFAULT 0"),
          ("sessions", "wallet TEXT"), ("sessions", "scope TEXT"),
-         ("inv_windows", "fills_complete INTEGER DEFAULT 0"), ("runs", "kind TEXT")]  # fmt: skip
+         ("inv_windows", "fills_complete INTEGER DEFAULT 0"), ("runs", "kind TEXT"),
+         ("sessions", "deleted REAL")]  # fmt: skip
 # A plan's cost line: the middle of what the latest Starts cost, once there are enough of them to say.
 START_COSTS_OF = 20
 START_COSTS_LEAST = 5
@@ -90,8 +91,8 @@ class Store:
         return sid
 
     def session(self, sid: str, user: str) -> dict[str, Any] | None:
-        """The session, only for the user it belongs to."""
-        rows = self._q("SELECT * FROM sessions WHERE id = ? AND user = ?", (sid, user))
+        """The session, only for the user it belongs to, unless they deleted it."""
+        rows = self._q("SELECT * FROM sessions WHERE id = ? AND user = ? AND deleted IS NULL", (sid, user))
         return dict(rows[0]) if rows else None
 
     def session_any(self, sid: str) -> dict[str, Any] | None:
@@ -100,8 +101,30 @@ class Store:
         return dict(rows[0]) if rows else None
 
     def sessions(self, user: str, limit: int = 50) -> list[dict[str, Any]]:
-        return [dict(r) for r in self._q(
-            "SELECT id, created, title FROM sessions WHERE user = ? ORDER BY created DESC LIMIT ?", (user, limit))]  # fmt: skip
+        """``user``'s breakdowns, newest first, deleted ones left out: each with its wallet and plan scope when a plan
+        set them, and ``ask``, the first question's text (it carries the "Wallet:" and "Market:" lines the page
+        sends), for the list's wallet groups and market filter."""
+        rows = self._q(
+            "SELECT s.id, s.created, s.title, s.wallet, s.scope, (SELECT m.content FROM messages m WHERE m.session = s.id"
+            " AND m.role = 'user' AND m.hidden = 0 ORDER BY m.seq LIMIT 1) AS ask FROM sessions s"
+            " WHERE s.user = ? AND s.deleted IS NULL ORDER BY s.created DESC LIMIT ?", (user, limit))  # fmt: skip
+        out = []
+        for r in rows:
+            d = dict(r)
+            ask = json.loads(d["ask"]) if d["ask"] else None
+            d["ask"] = ask if isinstance(ask, str) else " ".join(
+                b.get("text", "") for b in ask or [] if isinstance(b, dict) and b.get("type") == "text")  # fmt: skip
+            d["scope"] = json.loads(d["scope"]) if d["scope"] else None
+            out.append(d)
+        return out
+
+    def set_deleted(self, sid: str, user: str, deleted: bool) -> bool:
+        """Delete ``user``'s breakdown, or bring it back (Undo): kept, only left out of the list and its page.
+        Whether it's theirs."""
+        with self._lock:
+            cur = self._db.execute("UPDATE sessions SET deleted = ? WHERE id = ? AND user = ?",
+                                   (time.time() if deleted else None, sid, user))  # fmt: skip
+            return cur.rowcount > 0
 
     def sessions_with_event(self, kind: str) -> list[str]:
         """Every session that has an event of type ``kind`` (events are kept as JSON: "type": "<kind>")."""

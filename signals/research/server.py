@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import threading
 import time
@@ -25,7 +26,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from signals.research import auth
+from signals.research import auth, markets
 from signals.research.store import Store
 
 HOSTED = os.environ.get("RESEARCH_HOSTED") == "1"
@@ -202,10 +203,34 @@ def run_progress(events: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
+# what the page's ask carries (app.js start): "Wallet: 0x… (name on Polymarket)" and "Market: … (market_type id)"
+WALLET_LINE = re.compile(r"^Wallet: (0x[0-9a-fA-F]{40})(?: \((.+) on Polymarket\))?\s*$", re.MULTILINE)
+ANY_WALLET = re.compile(r"\b0x[0-9a-fA-F]{40}\b")
+MARKET_LINE = re.compile(r"\(market_type ([a-z0-9-]+)\)")
+
+
+def list_facts(row: dict[str, Any]) -> dict[str, Any]:
+    """A list row's wallet (the plan's, else the ask's), its Polymarket name when the ask named it, and its market
+    type id (the plan's scope, else the ask's Market line; None when neither says): the list groups by wallet and
+    filters by market (owner, 17 Nov: "we need better organizational ui"). The ask and scope themselves stay here."""
+    ask, scope = row.pop("ask", None) or "", row.pop("scope", None)
+    line = WALLET_LINE.search(ask)
+    named = ANY_WALLET.search(ask)
+    w = str((scope or {}).get("wallet") or row.get("wallet") or (line[1] if line else None)
+            or (named[0] if named else "")).lower()  # fmt: skip
+    row["wallet"] = w if re.fullmatch(r"0x[0-9a-f]{40}", w) else None
+    row["name"] = line[2].strip()[:60] if line and line[2] and line[1].lower() == row["wallet"] else None
+    m = MARKET_LINE.search(ask)
+    mt = markets.of_scope(scope) if scope else markets.by_id(m[1] if m else None)
+    row["market"] = mt.id if mt else None
+    return row
+
+
 @app.get("/api/research/sessions")
 def sessions(user: str = Depends(auth.user_of)) -> JSONResponse:
-    """Your breakdowns, newest first; one still running says so, with where it has got to (``run_progress``)."""
-    rows, last = store.sessions(user), store.last_runs(user)
+    """Your breakdowns, newest first, each with its wallet and market (``list_facts``); one still running says so,
+    with where it has got to (``run_progress``)."""
+    rows, last = [list_facts(r) for r in store.sessions(user)], store.last_runs(user)
     for r in rows:
         if _queued(r["id"]):
             r["queued"] = True
@@ -217,6 +242,25 @@ def sessions(user: str = Depends(auth.user_of)) -> JSONResponse:
             if lr["error"]:
                 r["stopped"] = lr["error"]
     return _private({"sessions": rows})
+
+
+@app.delete("/api/research/sessions/{sid}")
+def delete_session(sid: str, user: str = Depends(auth.user_of)) -> JSONResponse:
+    """Delete one of your breakdowns: gone from the list and its page, kept so Undo can bring it back. Not while it
+    runs or waits to start: nothing stops a run yet."""
+    _own(sid, user)
+    if sid in _running or _queued(sid):
+        raise HTTPException(409, detail="This breakdown is still running. Delete it once it has finished.")
+    store.set_deleted(sid, user, True)
+    return _private({"deleted": True})
+
+
+@app.post("/api/research/sessions/{sid}/restore")
+def restore_session(sid: str, user: str = Depends(auth.user_of)) -> JSONResponse:
+    """Undo a delete."""
+    if not store.set_deleted(sid, user, False):
+        raise HTTPException(404, detail="No such breakdown.")
+    return _private({"deleted": False})
 
 
 def _own(sid: str, user: str) -> dict[str, Any]:
