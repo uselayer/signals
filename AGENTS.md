@@ -453,6 +453,11 @@ behind Vercel (see README, "Hosting").
 - Every number it shows traces to data (`trace.py`): a figure that doesn't match a tool result or its code's printed
   output is never shown as fact (one retry, then flagged `unverified`). Don't loosen the check to make answers pass.
 - Wording: "Research wording" below (confirmed by the owner, 10 Nov).
+- Your breakdowns (owner, 17 Nov: "can i delete a breakdown? we need better organizational ui"; mock
+  claude.ai/artifact/E4tCRRfdxCGJv5EHGZrHAx): grouped by wallet (its Polymarket name, else "Trader 0x…"),
+  newest first; the Market pills filter them; one line a question (two on a phone, the whole on hover);
+  "18 h ago", not a UTC stamp; ⋯ → Delete with Undo for 6 seconds, kept on the service until then. No
+  folders to make by hand, and no Delete while it runs or waits to start.
 - Binance and Chainlink are different prices: never call one the other. Order books and Chainlink come only from
   Layer's recordings.
 - Market types (`markets.py` `TYPES`): BTC 15-minute windows, long-dated BTC, politics and soccer (one

@@ -25,3 +25,12 @@ export const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;',
 
 // a full wallet address in a title reads shortened ("No wallet addresses on screen"; the question keeps what was typed)
 export const shortWallets = t => String(t || '').replace(/0x[0-9a-fA-F]{40}/g, a => `${a.slice(0, 6)}…${a.slice(-4)}`);
+
+// how long ago, for the list of breakdowns (owner, 17 Nov: "18 h ago", never a UTC stamp there): minutes, hours, days
+export const ago = (t, now = Date.now() / 1000) => {
+  const s = Math.max(0, now - t);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  const d = Math.floor(s / 86400);
+  return d === 1 ? 'yesterday' : `${d} days ago`;
+};
