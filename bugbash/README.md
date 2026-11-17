@@ -1,29 +1,28 @@
 # Agent bug bash
 
 One agent per feature, each on its own cloud machine, testing the live site in a filmed browser.
-Each run leaves a video (with a caption bar saying what the agent is doing, a dot where it clicks and a red
-banner on every bug) plus `report.md` and `bugs.json`.
+Each run leaves a video (with a caption bar saying what the agent is doing, a dot where it clicks and a red banner on
+every bug) plus `report.md` and `bugs.json`. Nothing runs on a laptop.
 
-## Run one feature (what a cloud agent does)
+## Running one
 
-```bash
-bash bugbash/setup.sh                                   # Playwright + Chromium + ffmpeg, checks usesignals.app
-cd bugbash
-node bb.mjs start leaderboard                           # add --phone for a 390x844 phone
-node bb.mjs go https://usesignals.app/#/traders "Opening the Leaderboard"
-node bb.mjs look home                                   # screenshot + visible text + new console/HTTP errors
-node bb.mjs click 'text=30 days' "Switching the period to 30 days"
-node bb.mjs ok "Period switch re-sorts the list"
-node bb.mjs bug "Win rate missing on row 3" "Row 3 shows '—' though the Leaderboard only lists complete rows"
-node bb.mjs stop                                        # writes runs/<feature>-<time>/video.mp4 + report.md
-```
+From Claude Code: `/bugbash` (every brief), `/bugbash trader-page phone` (some), or `/bugbash #301` / `/bugbash the
+new Copy trading tab` (Claude writes a brief for what changed first). Claude starts one cloud agent per feature,
+triages what they find, and republishes the results page with the videos.
 
-Run `node bb.mjs` with no arguments for every command. Look at each screenshot (Read the png) before deciding
-the next step: the agent judges what it sees, it doesn't follow a fixed script.
+Each cloud agent follows [AGENT.md](AGENT.md). It tests the **deployed** site (usesignals.app by default), so bash a
+PR after it's merged and deployed, or pass `--url` for another deployment the cloud environment can reach.
 
-## Briefs
+## Files
 
-`briefs/*.md`, one per feature: what to try and what counts as broken. Add a feature = add a brief.
+- `bb.mjs`: the filmed browser. `node bb.mjs` with no arguments lists its commands (start, go, click, type, look,
+  ok, bug, stop). Each run lands in `runs/<feature>-<time>/` (git-ignored; agents push theirs with `git add -f` to
+  their own `claude/bugbash-*` branch).
+- `briefs/*.md`: one per feature: how to start, what to try, what counts as broken. Add a feature = add a brief.
+- `AGENT.md`: what each cloud agent does, start to finish.
+- `reel.mjs` + `reel.css`: builds the results page from run folders:
+  `node reel.mjs <out dir> <run dirs…> --triage triage.json`.
+- `setup.sh`: installs Playwright's Chromium and ffmpeg on a fresh cloud machine and checks the site is reachable.
 
 ## Rules for every run (Signals)
 
@@ -35,7 +34,8 @@ the next step: the agent judges what it sees, it doesn't follow a fixed script.
   contradicts itself, slow loads (> 8 s). Console/HTTP errors count when they break something visible.
 - Keep each video under about 6 minutes: short captions, no idle waits.
 
-## Where results go
+## Cloud setup (once)
 
-Each cloud run commits `bugbash/runs/<feature>-<time>/` with `git add -f` to its own branch
-`bugbash-run/<feature>-<date>` and pushes it. Nothing is merged; delete those branches after review.
+The Claude Code cloud environment needs network access to the site and Playwright's download host
+(usesignals.app, *.usesignals.app, cdn.playwright.dev, playwright.download.prss.microsoft.com, *.polymarket.com),
+and the Claude GitHub app installed on this repo so agents can push their results.
