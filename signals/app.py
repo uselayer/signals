@@ -919,7 +919,7 @@ def evaluate_record(item: dict[str, Any]) -> str:
 def _record_trades(got: list[Any]) -> list[tuple[Any, ...]]:
     """Trades as the quick check reads them (time, bought, market, dollars), with each one's price and outcome after
     for the record's average price paid (``records._paid``)."""
-    return [(t.at.timestamp(), t.action == "buy", t.market.partition(":")[0], t.usd, t.price, t.market) for t in got]
+    return [records.trade_row(t) for t in got]
 
 
 PACK_PAUSE_S = 0.2  # between batches of ``_pack_positions_loop``, so pages and the background get the store too
