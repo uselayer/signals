@@ -2,18 +2,21 @@
 
 Start: `node bb.mjs start breakdowns-sample` then `go https://usesignals.app/breakdowns/?sample`
 
-Sample mode shows finished breakdowns without signing in or spending anything.
+Sample mode (`?sample` in the URL) plays a breakdown recorded from a real run, with no sign-in and nothing spent: the
+page has no service behind it. It opens on the question form with the sample's question filled in.
 
 Try:
-- The sample opens: header with the trader's name and pill, an answer card on top, findings, and the window chart.
-- Market pickers (BTC 15-minute, BTC monthly, BTC yearly, politics, soccer and any others shown): each switches the
-  view, or says plainly that there's no sample for it.
-- The wallet / trader picker and the Breakdowns list (filter by market): rows open the right breakdown.
+- **Only while the URL has `?sample`:** press "Break it down" and watch the recording play. It should plan, read
+  and chart the trades, then show an answer card, findings and the window chart. Allow up to ~60 s.
+- The answer card, findings and tiles: plain words, answer first, and numbers that agree with each other. No "edge",
+  "alpha", "smart money", "bet" or advice.
 - The window chart: hover over it (the readout should follow the mouse) and click a fill dot. The popover should open
-  and close with Close. Don't press "Why here?".
-- Text: answer first, plain words, no "edge", "alpha", "smart money", "bet" or advice. Numbers in the answer should
-  match the tiles and findings.
+  and close with Close.
+- The sample's end asks the visitor to sign in to run their own. That should read clearly, never as an error.
+- Long text: the question box and finding cards shouldn't cut words off or overlap.
 - Visit `https://usesignals.app/breakdowns/` without `?sample`. A signed-out visitor should get a clear way in, never
   an error.
 
-Never press Start, "Break it down", Ask, "Why here?" or "Ask about this moment" (they start paid runs), and never sign in.
+Never press "Break it down", Start, Ask, "Why here?" or "Ask about this moment" on a page without `?sample` in the
+URL (those start paid runs), and never sign in. In the sample, a follow-up's Start only asks you to sign in: don't
+sign in.

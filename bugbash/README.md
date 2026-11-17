@@ -29,7 +29,8 @@ the next step: the agent judges what it sees, it doesn't follow a fixed script.
 
 - Signed out only, unless a brief says otherwise. Never sign up, sign in or enter anyone's details.
 - Never spend: never press Copy, Start, "Break it down", Ask, "Why here?" or anything that starts a paid run or an
-  order. If unsure what a button does, don't press it; note it in the report instead.
+  order. The one exception is "Break it down" on a page whose URL has `?sample`: it replays a recording with no
+  service behind it. If unsure what a button does, don't press it; note it in the report instead.
 - A bug is something a user would notice: wrong or missing numbers, broken layout, dead buttons, errors, text that
   contradicts itself, slow loads (> 8 s). Console/HTTP errors count when they break something visible.
 - Keep each video under about 6 minutes: short captions, no idle waits.
