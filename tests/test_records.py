@@ -160,6 +160,54 @@ def test_a_big_order_filled_in_hundreds_of_pieces_is_one_order_not_a_bot() -> No
     assert records._orders([one, (NOW - 10_000 + records.ORDER_GAP_S + 1, True, "0xm", 8.0, 0.6, "0xm:t")]) == 2
 
 
+def test_a_bot_that_stopped_trading_is_still_a_bot() -> None:
+    """17 Nov, UpTheBlues: ~900 orders a day until 2 Nov, then nothing. Their 500 latest fills (30 minutes, 14 days
+    ago) were spread over the 14 days since, 24 orders a day, so they showed as Human. The span ends at their newest
+    trade, not now."""
+    cap, last = records.QUICK_TRADES, NOW - 14 * DAY
+    fills = [(last - 1800 * i / cap, True, f"0xm{i % 300}", 20.0, 0.5, f"0xm{i % 300}:t") for i in range(cap)]
+    assert records.build(ProfitHistory([]), positions([]), fills, NOW)["bot"] == 1
+
+
+def test_a_busy_wallets_read_reaches_back_a_day_so_a_bot_isnt_counted_as_one_busy_hour() -> None:
+    """17 Nov, JabJabich: 500 latest fills in 6 hours (52 orders), counted as a day: 52 a day, Human, against 222 over
+    two days. A cut read covering less than a day reads that day too (trades_between); one covering a day doesn't."""
+    cap = records.QUICK_TRADES
+    latest = [(NOW - 6 * 3600 * i / cap, True, f"0xa{i % 50}", 20.0, 0.5, f"0xa{i % 50}:t") for i in range(cap)]
+    earlier = [SimpleNamespace(at=datetime.fromtimestamp(NOW - 7 * 3600 - 60 * i, UTC), action="buy", market=f"0xb{i}:t",
+               usd=20.0, price=0.4) for i in range(120)]  # fmt: skip
+    asked: list[Any] = []
+
+    class Sdk:
+        def profit_history(self, w: str) -> ProfitHistory:
+            return ProfitHistory([])
+
+        def completed_positions(self, w: str, **k: Any) -> Any:
+            return positions([])
+
+        def trades_between(self, w: str, start: int, end: int, *, limit: int) -> list[Any]:
+            asked.append((start, end, limit))
+            return [t for t in earlier if start <= t.at.timestamp() <= end]
+
+    assert records.build(ProfitHistory([]), positions([]), latest, NOW)["bot"] == 0  # the 6 hours alone: 50 a day
+    rec, _ = records.read(Sdk(), AMY, latest, None, NOW)  # type: ignore[arg-type]
+    assert asked == [(int(NOW - DAY), int(min(t[0] for t in latest)), records.DAY_TRADES)]
+    assert rec["bot"] == 1  # 50 + 120 orders over the day
+    asked.clear()
+    spread = [(NOW - 2 * DAY * i / cap, True, f"0xa{i}", 20.0, 0.5, f"0xa{i}:t") for i in range(cap)]
+    records.read(Sdk(), AMY, spread, None, NOW)  # type: ignore[arg-type]
+    records.read(Sdk(), AMY, latest[:100], None, NOW)  # type: ignore[arg-type]
+    assert asked == []  # 500 covering two days, or every trade read: nothing more
+
+
+def test_a_record_keeps_profit_from_parlays_for_each_period() -> None:
+    h = ProfitHistory([{"timestamp": int(NOW - (100 - i) * DAY), "realized_pnl": 10.0 * i, "unrealized_pnl": 0.0,
+                        "volume_usdc": 1000.0 * i, "realized_combo_pnl": -2.0 * i} for i in range(101)])  # fmt: skip
+    p = records.build(h, positions([]), [], NOW)["periods"]
+    assert p["7d"]["parlays"] == -14 and p["30d"]["parlays"] == -60 and p["30d"]["realized"] == 300
+    assert records.build(history(100, 1.0), positions([]), [], NOW)["periods"]["30d"]["parlays"] is None  # unread
+
+
 def test_a_record_read_takes_the_profit_history_and_the_completed_positions() -> None:
     asked: list[Any] = []
 

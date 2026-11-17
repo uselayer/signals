@@ -39,6 +39,7 @@ HELD_PAGES = 20
 KEEP_DAYS = 95  # positions kept per wallet: the longest period (90 days) and a little more
 FIRST_PAGES = 20  # closed positions on a wallet's first read with nothing kept: up to 1,000, to start further back
 MAX_PAGES = 40  # never more than 2,000 closed positions in one read
+DAY_TRADES = 2000  # a busy wallet's trades read when its QUICK_TRADES latest cover less than a day (_a_day_at_least)
 QUICK_TRADES = 500  # the latest trades a quick check reads: one read (Polymarket's most a page), so a few markets traded
 #                     heavily still reach back past the 30 days instead of cutting the read short
 # Bot-like: 100 or more orders a day, the SDK's score's "bot" tag (whale_scores: orders over the 30 days read), worked
@@ -240,9 +241,41 @@ def _bot(trades: list[tuple[Any, ...]], now: float) -> int:
     month = now - 30 * DAY
     recent = [t for t in trades if t[0] >= month]
     oldest = min((t[0] for t in recent), default=month)
+    newest = max((t[0] for t in recent), default=now)
     cut = len(trades) >= QUICK_TRADES and oldest > month
-    days = max((now - oldest) / DAY, 1.0) if cut else 30.0
+    # to their newest trade, not now: a bot that stopped two weeks ago isn't 14 days slower (UpTheBlues, 17 Nov:
+    # ~900 orders a day read as 24)
+    days = max((newest - oldest) / DAY, 1.0) if cut else 30.0
     return int(_orders(recent) / days >= BOT_ORDERS_A_DAY)
+
+
+def _parlays(p: dict[str, Any]) -> float | None:
+    """A profit history point's realized profit from parlays (Polymarket's ``realized_combo_pnl``), None unread."""
+    v = p.get("realized_combo_pnl")
+    return None if v is None else float(v)
+
+
+def trade_row(t: Any) -> tuple[Any, ...]:
+    """An SDK trade as a record reads it: (time, bought, market, dollars, price, outcome)."""
+    return (t.at.timestamp(), t.action == "buy", t.market.partition(":")[0], t.usd, t.price, t.market)
+
+
+def _a_day_at_least(whales: Whales, wallet: str, trades: list[tuple[Any, ...]], now: float) -> list[tuple[Any, ...]]:
+    """``trades`` reaching back a day at least. A read cut at QUICK_TRADES that covers less than a day would be
+    counted as a whole day (``_bot``), so a bot's 500 latest fills in 6 hours read as 52 orders a day against 222
+    over two days (JabJabich, 17 Nov). Reads the day before their newest trade, up to DAY_TRADES (a few reads, only
+    for the busiest wallets), and adds what's older than ``trades``; as it was when that read fails."""
+    if len(trades) < QUICK_TRADES:
+        return trades
+    times = [t[0] for t in trades]
+    oldest, newest = min(times), max(times)
+    if newest - oldest >= DAY or newest < now - 30 * DAY:
+        return trades
+    try:
+        more = whales.trades_between(wallet, int(newest - DAY), int(oldest), limit=DAY_TRADES)
+    except Exception:  # VenueError mostly: the bot tag goes on from what was read
+        return trades
+    return trades + [r for r in map(trade_row, more) if r[0] < oldest]
 
 
 def _style(trades: list[tuple[Any, ...]], now: float) -> dict[str, Any]:
@@ -284,6 +317,8 @@ def build(history: ProfitHistory, positions: Any, trades: list[tuple[Any, ...]],
         periods[f"{d}d"] = {
             "trading_pnl": p.get("trading_pnl"),
             "realized": p.get("realized"),  # profit taken: a trader's page's headline
+            # of which from parlays: in ``realized``, but never in the win rate (Polymarket lists no parlay positions)
+            "parlays": history.change(end - d * DAY, end, _parlays),
             "volume": p.get("volume"),
             "return_per_dollar": p.get("return_per_dollar"),
             "won": None if won is None else won[0],
@@ -316,6 +351,7 @@ def read(whales: Whales, wallet: str, trades: list[tuple[Any, ...]], kept: Posit
     read; the completed positions may fail on their own (Polymarket's firewall, a list that slipped), leaving the
     win rate unknown rather than the whole record, and what's kept as it was."""
     now = datetime.now(UTC).timestamp() if now is None else now
+    trades = _a_day_at_least(whales, wallet, trades, now)
     history = whales.profit_history(wallet)
     pages = pages_for(kept, now)
     try:

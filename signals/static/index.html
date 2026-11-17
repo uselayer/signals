@@ -2793,7 +2793,8 @@ function profileNumbers(s, d, acct, n) {
     periods: periodRows(s),
     // under the 7/30/90 table: after fees, all time, and when a period reaches back before their first trade
     periodsNote: `After fees${allRealized != null ? ` · ${usd(allRealized, true)} taken all time` : loading ? " · all time …" : ""}${
-      s.pnl_since && Date.now() - new Date(s.pnl_since) < PERIOD_DAYS["90d"] * 864e5 ? ` · first trade ${ago(s.pnl_since)}` : ""}`,
+      s.pnl_since && Date.now() - new Date(s.pnl_since) < PERIOD_DAYS["90d"] * 864e5 ? ` · first trade ${ago(s.pnl_since)}` : ""}${
+      hasParlays(s) ? " · Parlays count in profit, not in win rate" : ""}`,
     summary: [
       { k: "Open P&L", v: loading ? "…" : openPnl != null ? money(openPnl) ?? usd(0) : null,
         sub: loading ? "reading their positions" : !held ? "their positions couldn't be read just now"
@@ -2841,20 +2842,29 @@ function profileNumbers(s, d, acct, n) {
 // Their numbers over 7, 30 and 90 days side by side (5 Nov: a user switched 7D/30D/90D ~34 times to compare a
 // trader's week with their month and quarter). Each row is { k, cells: one per period, html or null }; a row with
 // nothing in any period isn't drawn. A cell that wasn't read says so faintly, never 0. Win rate needs WIN_MIN closed
-// positions in that period, else "too few".
+// positions in that period, else "too few"; only that period's own count, never a shorter one's under its heading
+// (17 Nov: UpTheBlues showed their 7 days' "38 of 46" under 30 and 90 days too). A period with no trades says so.
+// Parlays: their profit taken from parlays, a row only for a trader who has some (it's in Profit taken, never in the
+// win rate: Polymarket lists no parlay positions).
 const hasPeriods = (s) => !!s.periods && Object.keys(PF_PERIOD).some((n) => s.periods[n]);
+const NO_TRADES = '<span class="lb-none">no trades</span>';
+const hasParlays = (s) => !!s.periods && Object.keys(PF_PERIOD).some((n) => s.periods[n]?.parlays);
 function periodRows(s) {
   if (!hasPeriods(s)) return null;
   const P = Object.keys(PF_PERIOD), at = (n) => s.periods[n] || {};
   const money = (x) => x == null ? null : pl(x, usd(x, true));
   const realized = (n) => at(n).realized ?? (n === "30d" ? s.realized_window : null) ?? null;
-  const win = (n) => { const w = s.win?.[n]; return !w || !w.closed ? null : w.closed < WIN_MIN ? `<span class="lb-none">too few</span><small>${w.closed} closed</small>`
+  const win = (n) => { const w = s.win?.[n];
+    if (!w || (w.days != null && w.days !== PERIOD_DAYS[n])) return s.positions_complete === false ? '<span class="lb-none">too many to count</span>' : null;
+    return !w.closed ? null : w.closed < WIN_MIN ? `<span class="lb-none">too few</span><small>${w.closed} closed</small>`
     : `${Math.round((100 * w.won) / w.closed)}%<small>${w.won} of ${w.closed}</small>`; };
+  const perDollar = (n) => at(n).return_per_dollar != null ? pl(at(n).return_per_dollar, lbPct(at(n).return_per_dollar)) : at(n).volume === 0 ? NO_TRADES : null;
   return [
     { k: "Profit taken", lead: true, cells: P.map((n) => money(realized(n))) },
-    { k: "Per $ traded", cells: P.map((n) => at(n).return_per_dollar != null ? pl(at(n).return_per_dollar, lbPct(at(n).return_per_dollar)) : null) },
+    ...(hasParlays(s) ? [{ k: "From parlays", cells: P.map((n) => money(at(n).parlays)) }] : []),
+    { k: "Per $ traded", cells: P.map(perDollar) },
     { k: WIN_LABEL, cells: P.map(win) },
-  ].filter((r) => r.cells.some((c) => c != null));
+  ].filter((r) => r.cells.some((c) => c != null && c !== NO_TRADES));
 }
 function periodTable(nums) {
   const P = Object.keys(PF_PERIOD);

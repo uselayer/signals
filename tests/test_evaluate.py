@@ -164,7 +164,7 @@ def test_the_profile_card_and_the_price_check_have_the_new_lines(api: TestClient
 
 
 NUMBERS = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "lbPct", "readDays", "readPeriod", "weeksUp",
-           "weeksOf", "weekStreak", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "worstDrop", "WIN_LABEL", "WIN_MIN", "hasPeriods", "periodRows", "profileNumbers")  # fmt: skip
+           "weeksOf", "weekStreak", "PERIOD_DAYS", "PF_PERIOD", "SETTLED", "POSITIONS_READ", "pf", "pfChart", "boardText", "boardShort", "boardsRow", "worstDrop", "WIN_LABEL", "WIN_MIN", "hasPeriods", "NO_TRADES", "hasParlays", "periodRows", "profileNumbers")  # fmt: skip
 
 
 def test_their_numbers_show_7_30_and_90_days_side_by_side(run_js: Any) -> None:
@@ -188,6 +188,29 @@ def test_their_numbers_show_7_30_and_90_days_side_by_side(run_js: Any) -> None:
     assert [r["k"] for r in only_profit] == ["Profit taken"]  # nothing in any period: no row
     assert run_js(NUMBERS, "periodRows({})") is None
     assert run_js(NUMBERS, "(() => { pf.account = {}; return profileNumbers({}, null, {}, '30d').periods; })()") is None
+
+
+def test_a_period_shows_only_its_own_win_rate_says_no_trades_and_parlays_get_a_row(run_js: Any) -> None:
+    """17 Nov, UpTheBlues: a busy trader's 30 and 90 days weren't read in full, so ``win`` fell back to the 7 days'
+    "38 of 46" (days: 7) and the table showed it under all three. A period's cell is its own count only ("too many to
+    count" when their positions were too many to read). No trades in a period is "no trades", not "not read". Profit
+    from parlays gets a row, only for a trader who has some."""
+    s = {"positions_complete": False,
+         "periods": {"7d": {"realized": 2726, "volume": 0, "parlays": 0}, "30d": {"realized": 1219409, "return_per_dollar": 0.026, "volume": 4.7e7, "parlays": -95351},
+                     "90d": {"realized": 1147316, "return_per_dollar": 0.007, "volume": 1.6e8, "parlays": -1}},
+         "win": {"7d": {"won": 38, "closed": 46, "days": 7}, "30d": {"won": 38, "closed": 46, "days": 7}, "90d": {"won": 38, "closed": 46, "days": 7}}}  # fmt: skip
+    rows = {r["k"]: r["cells"] for r in run_js(NUMBERS, f"periodRows({json.dumps(s)})")}
+    assert list(rows) == ["Profit taken", "From parlays", "Per $ traded", "Win rate"]
+    assert "38 of 46" in rows["Win rate"][0] and all("too many to count" in c for c in rows["Win rate"][1:])
+    assert "no trades" in rows["Per $ traded"][0]
+    assert "95.4K" in rows["From parlays"][1] and "loss" in rows["From parlays"][1]
+    s["positions_complete"] = True  # a period not reached for another reason: not read, never another period's count
+    assert run_js(NUMBERS, f"periodRows({json.dumps(s)})")[-1]["cells"][1:] == [None, None]
+    for p in s["periods"].values():
+        p["parlays"] = 0
+    assert "From parlays" not in [r["k"] for r in run_js(NUMBERS, f"periodRows({json.dumps(s)})")]
+    note = run_js(NUMBERS, f"(() => {{ pf.account = {{}}; return profileNumbers({json.dumps(s | {'periods': {'30d': {'realized': 1, 'parlays': -5}}})}, null, {{}}, '30d').periodsNote; }})()")
+    assert "Parlays count in profit, not in win rate" in note
 
 
 def test_their_numbers_lead_with_realized_and_open_pnl_wallet_and_the_win_rate_slot(run_js: Any) -> None:
@@ -452,7 +475,7 @@ def test_picked_the_winner_comes_with_what_the_prices_they_paid_implied(run_js: 
 
 PROFILE = ("usd", "pl", "esc", "cents", "centsSigned", "ago", "plural", "readDays", "readPeriod", "weeksUp", "weeksOf",
            "weekStreak", "PF_PERIOD", "PERIOD_DAYS", "SETTLED", "POSITIONS_READ", "pf", "boardText", "boardShort", "boardsRow", "worstDrop", "lbPct",
-           "WIN_LABEL", "WIN_MIN", "hasPeriods", "periodRows", "profileNumbers")
+           "WIN_LABEL", "WIN_MIN", "hasPeriods", "NO_TRADES", "hasParlays", "periodRows", "profileNumbers")
 
 
 def test_the_profile_shows_best_and_worst_week_and_where_the_test_holds_on_its_own(run_js: Any) -> None:
