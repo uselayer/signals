@@ -26,7 +26,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from signals.research import auth, markets
+from signals.research import analytics, auth, markets
 from signals.research.store import Store
 
 HOSTED = os.environ.get("RESEARCH_HOSTED") == "1"
@@ -145,11 +145,13 @@ def health() -> dict[str, Any]:
 @app.get("/api/research/config")
 def config() -> dict[str, Any]:
     """What the research page needs before it draws: Clerk's publishable key (the engine's, same domain), the
-    event version it speaks and the market types a breakdown can study (the ask box's Market choice)."""
+    event version it speaks, the market types a breakdown can study (the ask box's Market choice) and PostHog's
+    project key (write-only; the page's analytics are off without it)."""
     from signals.research import markets
     from signals.research.agent import EVENT_VERSION
 
-    return {"clerk_key": auth.CLERK_KEY or None, "event_version": EVENT_VERSION, "market_types": markets.described()}
+    return {"clerk_key": auth.CLERK_KEY or None, "event_version": EVENT_VERSION, "market_types": markets.described(),
+            "posthog_key": analytics.KEY or None}  # fmt: skip
 
 
 @app.get("/api/research/suggestions")
@@ -311,6 +313,20 @@ def tell_ready(sid: str, user: str) -> bool:
         return False
 
 
+def tell_finished(sid: str, user: str, kind: str) -> None:
+    """``breakdown finished`` in PostHog (README, "Analytics"): the run that just ended, from what the service wrote
+    (``analytics.finished_facts``), sent in the person's name (their Clerk id). Only the service knows the real cost
+    and any error, and a tab closed mid-run would lose it. Never in the way."""
+    try:
+        scope = store.scope(sid)
+        mt = markets.of_scope(scope) if scope else None
+        facts = analytics.finished_facts(store.last_run(sid), store.events(sid), mt.id if mt else None)
+        if facts is not None:
+            analytics.ph("breakdown finished", user, {"breakdown_id": sid, "run": kind, **facts})
+    except Exception as e:  # noqa: BLE001 - analytics never stops a run ending
+        print(f"research: finished event for {sid} not sent: {type(e).__name__}", flush=True)
+
+
 def _busy(user: str) -> bool:
     """Whether ``user`` has a breakdown working (not just drafting a plan). Call with ``_lock`` held."""
     return any(u == user and s not in _planning for s, u in _running.items())
@@ -346,6 +362,7 @@ def start_run(sid: str, user: str, text: str, *, context: dict[str, Any] | None 
         try:
             a.ask(sid, user, text, emit, context=context, facts=facts, origin=origin)
         finally:
+            tell_finished(sid, user, analytics.run_kind(context, planning))
             with _lock:
                 _running.pop(sid, None)
                 _planning.discard(sid)

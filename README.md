@@ -294,6 +294,31 @@ whale, cap) and `wallet`.
 - `telegram stop tapped` ("Stop alerts from …", with the trader), `telegram alerts stopped` (`/stop`, with `follows`),
   `telegram list opened` (`/list`), `telegram alert voted` (`useful`), `telegram chat lost` (blocked or deleted).
 
+Breakdowns (`/breakdowns`, the research service) since 17 Nov: the same PostHog setup (`signals/research/static/js/analytics.js`:
+through `/lyr`, identified by Clerk user id, masked replays), on when the research service has `SIGNALS_POSTHOG_KEY`
+too (it hands the page the key in `/api/research/config`). The person's question never leaves: not in an event, the
+`?q=` from the ask bar is taken out of the address before PostHog starts, the tab's title is dropped from every event,
+and replays mask the text that shows a question (`ph-sensitive`) and block the rows, switcher and asked line whose
+tooltips carry one. Every event has `breakdown_id` (the breakdown's random id) except the first.
+
+- `breakdown sample opened`: the recorded sample opened (`?sample`; signed out it's "Watch a sample breakdown").
+- `breakdown asked`: a new breakdown's question sent, before its plan: `market`, `range_hours`, `start` (how it began:
+  `example_1`–`example_3`, `pick_for_me`, `wallet_question` (a listed wallet's filled-in question), `ask_bar`, `own`)
+  and `wallet_from` (`sample`, `picked`, `list`, `trader_page`, `typed`, `none`).
+- `breakdown plan shown`: a plan arriving live (not read back from history): `plan_id`, `estimate_usd` (the server's
+  cost line, null until there are enough Starts), `steps`, `market`, `first` (the breakdown's first plan).
+- `breakdown started`: Start (or Queue it) pressed: the plan's facts, `queued`, `options` (scope options ticked).
+- `breakdown finished`: sent by the research service as each run ends (`signals/research/analytics.py`), so a closed
+  tab never loses it: `run` (`plan`, `start`, `plan change`, `next step`, `follow-up`), `seconds`, `cost_usd`,
+  `findings` (that count, added by this run), `market`, and `error` when it stopped (`over_budget`, `over_time`, or
+  an error's class name, never its message). `source: "server"`, `service: "research"`.
+- `breakdown follow-up asked`: a question after the first: `from` (`typed`, `why_here`, `suggested`, `pointed`: typed
+  about something pointed at, `next_step`: the agent's suggestion accepted, `fix`: Fix on a flagged number), and
+  `pointed_at` (`burst`, `moment`).
+- `breakdown opened`: a saved breakdown opened (not the one just asked): `age_days`, `from` (`list` or `link`, e.g.
+  Telegram's "ready" message), `running`.
+- `breakdown deleted`: Delete in Your breakdowns (`market`, `age_days`); its Undo sends it again with `undo: true`.
+
 Counting (above) stays the record of alerts and follows; nothing here changes it.
 
 ## Research agent
@@ -350,7 +375,7 @@ Settings: `ANTHROPIC_API_KEY` (off without it), `CLERK_PUBLISHABLE_KEY` (require
 `RESEARCH_MAX_USD` per question (3), `RESEARCH_USER_DAILY_USD` (10), `RESEARCH_DAILY_USD` for everyone (30),
 `RESEARCH_AT_ONCE` (2), `RESEARCH_MAX_ROUNDS` (40), `RESEARCH_MAX_SECONDS` per question (600, a wall clock: a
 watchdog ends the run at the limit even while a request is blocked, and frees its slot by the limit plus 30 s whatever it's blocked on; at 80% the agent is told to answer), `RESEARCH_EFFORT` (high), `SIGNALS_ENGINE_URL`,
-`RESEARCH_METRICS_KEY`, `RESEARCH_NOTIFY_KEY` (the same value on the engine: a Started plan that runs to its end
+`RESEARCH_METRICS_KEY`, `SIGNALS_POSTHOG_KEY` (the engine's: Breakdowns' analytics, README "Analytics"; off without it), `RESEARCH_NOTIFY_KEY` (the same value on the engine: a Started plan that runs to its end
 asks the engine, `POST /api/research-ready`, to send "Your breakdown is ready" to the account's Telegram chat, if
 connected; off without it), and for Layer's recorded windows a read-only R2 token on `layer-history`: `R2_ACCOUNT_ID`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` (`R2_BUCKET`, default layer-history).

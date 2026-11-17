@@ -87,6 +87,9 @@ behind Vercel (see README, "Hosting").
   through `track` (README lists them) and say where on the page (`from`) and, since 7 Nov (the owner: a trader's
   page link carried the wallet anyway), which trader: `traderFacts` (wallet, the name Signals shows, main category,
   categories), only from what the page has read, never made up. Still never anything about the person.
+  Breakdowns (since 17 Nov) use the same setup (`signals/research/static/js/analytics.js`, key from the research
+  service's config) plus `breakdown finished` from the service (`signals/research/analytics.py`); the person's
+  question is never sent: not in an event, the address (`?q=` is removed), the title, or a replay's text.
 - Signals is a consumer website (usesignals.app); running it locally is for development. It places an order only
   when the user taps "Copy" under an alert (one-tap copy, owner 11 Nov 2026: "Copying a trade" below), from their
   own wallet: no automatic copying, no other in-app trading, and it never holds anyone's funds or their wallet's

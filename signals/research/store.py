@@ -330,5 +330,10 @@ class Store:
             return None
         return round(statistics.median(float(r["s"]) for r in rows))
 
+    def last_run(self, sid: str) -> dict[str, Any] | None:
+        """The breakdown's latest run (its row: started, ended, cost_usd, error…), or None."""
+        rows = self._q("SELECT * FROM runs WHERE session = ? ORDER BY id DESC LIMIT 1", (sid,))
+        return dict(rows[0]) if rows else None
+
     def runs(self, limit: int = 100) -> list[dict[str, Any]]:
         return [dict(r) for r in self._q("SELECT * FROM runs ORDER BY id DESC LIMIT ?", (limit,))]

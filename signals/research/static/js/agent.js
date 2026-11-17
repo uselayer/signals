@@ -49,7 +49,7 @@ export function AgentColumn({ inv, ui, act, fixtures }) {
       ${inv.feed.length === 0 && html`<div class="note"><span class="dot"></span><p class="muted">The plan appears in the workspace first. Nothing runs until you press Start.</p></div>`}
       ${many && rs.slice(0, -1).map((r, i) => html`<div class="runfold-wrap" key=${'r' + i}>
         <button class="runfold" aria-expanded=${openRuns.has(i) ? 'true' : 'false'} onClick=${() => flip(i)}>
-          <span><b>Earlier question</b> · ${shortWallets(runTitle(inv, r, i))}${runCards(inv, r) ? ` · ${runCards(inv, r)} finding${runCards(inv, r) === 1 ? '' : 's'}` : ''}</span>
+          <span class="ph-sensitive"><b>Earlier question</b> · ${shortWallets(runTitle(inv, r, i))}${runCards(inv, r) ? ` · ${runCards(inv, r)} finding${runCards(inv, r) === 1 ? '' : 's'}` : ''}</span>
           <span class="muted">${openRuns.has(i) ? 'Hide' : 'Open'}</span></button>
         ${openRuns.has(i) && html`<div class="runpast">${showGroups(r.groups, false)}</div>`}</div>`)}
       ${many && html`<div class="rundiv">New question${cur.groups[0].ask && cur.groups[0].ask.at ? ` · started ${new Date(cur.groups[0].ask.at * 1000).toISOString().slice(11, 16)} UTC` : ''}</div>`}
@@ -75,7 +75,7 @@ function Group({ g, inv, act, open, toggle, think, lit, light }) {
     .filter(p => !(g.ask && same(p.title, g.ask.text))); // a plan named as the question was asked isn't said twice
   const rest = g.items.filter(x => x.type !== 'answer' && x.type !== 'finding' && x.type !== 'proposal' && !(x.type === 'plan' && startedPlan(inv.plans[x.plan_id])));
   return html`<section class="group">
-    ${(g.ask || started.length > 0) && html`<p class="asked" title=${[g.ask && g.ask.text, ...started.map(p => p.title)].filter(Boolean).join('\n')}>
+    ${(g.ask || started.length > 0) && html`<p class="asked ph-sensitive" title=${[g.ask && g.ask.text, ...started.map(p => p.title)].filter(Boolean).join('\n')}>
       ${g.ask && html`<span class="clamp"><span class="muted">${g.ask.proposal ? 'You said yes to' : html`You asked${g.ask.ctx ? html` about <span class="ctx">${g.ask.ctx}</span>` : ''}`}:</span> ${g.ask.text}</span>`}
       ${started.map(p => html`<span class="clamp" key=${p.plan_id}><span class="muted">${g.ask ? 'Plan' : 'You started'}:</span> ${p.title}</span>`)}</p>`}
     ${answers.map((a, i) => html`<${Answer} key=${i} a=${a} inv=${inv} act=${act} />`)}
