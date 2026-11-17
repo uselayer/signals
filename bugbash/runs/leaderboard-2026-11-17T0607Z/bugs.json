@@ -1,0 +1,70 @@
+{
+  "feature": "leaderboard",
+  "mode": "desk",
+  "bugs": [
+    {
+      "t": 52.75,
+      "at": "00:52",
+      "title": "Usual trade text cut off",
+      "details": "On market chip All, 90D, row 3 (ZhangMuZhi..) the Usual trade cell reads 'fewer than one market a' and is clipped at the column edge.",
+      "url": "https://usesignals.app/#/traders",
+      "screenshot": "09-bug-1.png"
+    },
+    {
+      "t": 144.446,
+      "at": "02:24",
+      "title": "No way to reverse a sort",
+      "details": "Clicked the Win rate column header twice and the sort stays the same; only the dropdown sorts, highest first, so the brief's 'both directions' can't be done (may be by design).",
+      "url": "https://usesignals.app/#/traders",
+      "screenshot": "20-bug-2.png"
+    },
+    {
+      "t": 259.754,
+      "at": "04:19",
+      "title": "Back link and Traders tab do nothing on a trader page",
+      "details": "Opened gettingdrained from the Leaderboard, then clicked '← Traders', the Traders tab and Alt+Left: the URL and page stayed on the trader page each time (3 tries), so Back-to-list state could not be checked.",
+      "url": "https://usesignals.app/#/worth/0x9f300e1b1b086290fa04c4c8f40cb6a10e95bb5a",
+      "screenshot": "33-bug-3.png"
+    }
+  ],
+  "passed": [
+    {
+      "t": 8.286,
+      "what": "List loads fast with all columns on top rows; Bot/Human pills match icons"
+    },
+    {
+      "t": 22.231,
+      "what": "Foot explains the count and says how many wait; 50 rows with Show 50 more"
+    },
+    {
+      "t": 35.874,
+      "what": "7D period re-sorts the list and changes profit figures"
+    },
+    {
+      "t": 77.268,
+      "what": "Every market chip and period gives a different, sensibly ordered list"
+    },
+    {
+      "t": 171.241,
+      "what": "Search by name finds the trader"
+    },
+    {
+      "t": 188.909,
+      "what": "Nonsense search says No trader matches, clearly"
+    },
+    {
+      "t": 213.613,
+      "what": "Trader page 90-day profit (+$336) matches the list row"
+    },
+    {
+      "t": 274.085,
+      "what": "No 'recommended', tier or advice wording anywhere on the Leaderboard"
+    }
+  ],
+  "errors": [
+    {
+      "t": 2.35,
+      "e": "console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED"
+    }
+  ]
+}
