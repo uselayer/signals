@@ -4,6 +4,7 @@
 // prefills a question (the main site's ask bar sends it).
 import { html, render, useState, useEffect, useRef, useMemo } from '../vendor/htm-preact-3.1.1.module.js';
 import { live, startAuth, openSignIn, mountUser, copyTradingOn } from './api.js';
+import { startAnalytics, accountIs, track } from './analytics.js';
 import { fixtureApi } from './fixtures.js';
 import { emptyInv, emptyUi, apply, planProgress, rowProgress, rowState, yesText, groups, runs, runTitle, currentPlan, runSummaries, borrowedWindows, planOfRun, RANGES, defaultRange, askScope, pickOrder } from './store.js';
 import { prep, autoSteps, agentSteps, burstText, posText } from './windowdata.js';
@@ -18,6 +19,17 @@ const LOGO = html`<svg width="16" height="16" viewBox="0 0 20 20" fill="currentC
 const params = new URLSearchParams(location.search);
 const SAMPLE = params.has('sample'), FIXTURES = SAMPLE || params.has('fixtures');
 const route = () => { const m = /^#\/i\/([\w-]+)/.exec(location.hash); return m ? { inv: m[1] } : { home: true }; };
+// ?q= is the person's question from the main site's ask bar: read once (params, above), then out of the address so it
+// never reaches analytics or a replay (analytics.js). A reload keeps the wallet and market, not the question.
+if (params.has('q')) {
+  const u = new URL(location.href); u.searchParams.delete('q');
+  try { history.replaceState(history.state, '', u.pathname + u.search + u.hash); } catch {}
+}
+// For "breakdown opened" (analytics.js): the breakdowns this page just asked (their opening isn't a reopen), and the
+// one a click in Your breakdowns is opening.
+const justAsked = new Set();
+let openingFromList = null;
+const ageDays = created => (created ? Math.round((Date.now() / 1000 - created) / 864) / 100 : null);
 
 // The main site's tabs, the same order; Copy trading only for an account with copying on (as the main site's header).
 function Top({ fixtures, copyTrading }) {
@@ -39,7 +51,15 @@ function App() {
       const cfg = await a.config();
       if (cfg.event_version > 2) setErr('This page is older than the research service. Reload to get the new one.');
       setTypes(cfg.market_types && cfg.market_types.length ? cfg.market_types : null);
+      // PostHog (analytics.js): the live service's key, the sample's too (its page plays recorded data, not the
+      // service); not in fixtures mode
+      startAnalytics(SAMPLE ? await live.config().then(c => c.posthog_key, () => null) : FIXTURES ? null : cfg.posthog_key);
+      if (SAMPLE) track('breakdown sample opened');
       const au = FIXTURES ? { signedIn: true } : await startAuth(cfg.clerk_key);
+      if (!FIXTURES && !au.local && window.Clerk) {
+        const uid = () => (window.Clerk.user ? window.Clerk.user.id : null);
+        accountIs(uid()); window.Clerk.addListener(() => accountIs(uid()));
+      }
       if (!au.signedIn) { setGate('signin'); if (params.has('signin')) openSignIn(); window.Clerk && window.Clerk.addListener(() => { if (window.Clerk.isSignedIn) { setGate(null); copyTradingOn().then(setCopyTrading); } }); }
       else if (!FIXTURES) copyTradingOn().then(setCopyTrading);
       setApi(a);
@@ -153,11 +173,12 @@ function Breakdowns({ api, list, setList, types }) {
   const remove = async s => {
     setMenu(null); setErr(null); setList(l => l.filter(x => x.id !== s.id));
     try { await api.remove(s.id); } catch (e) { setErr(e.message); reload(); return; }
+    track('breakdown deleted', { breakdown_id: s.id, market: s.market || null, age_days: ageDays(s.created) });
     clearTimeout(timer.current); setUndo(s); timer.current = setTimeout(() => setUndo(null), 6000);
   };
   const restore = async () => {
     const s = undo; clearTimeout(timer.current); setUndo(null);
-    try { await api.restore(s.id); } catch (e) { setErr(e.message); }
+    try { await api.restore(s.id); track('breakdown deleted', { breakdown_id: s.id, undo: true }); } catch (e) { setErr(e.message); }
     reload();
   };
   const shown = list.filter(s => market === 'all' || s.market === market || (s.market === 'btc-long' && (market === 'btc-monthly' || market === 'btc-yearly')));
@@ -173,7 +194,7 @@ function Breakdowns({ api, list, setList, types }) {
   const row = s => {
     const can = !s.running && !s.queued && !s.sample, open = menu === s.id;
     return html`<div class="brow">
-      <a href=${`#/i/${s.id}`} title=${shortWallets(s.title) || 'Untitled breakdown'}><span class="t">${shortWallets(s.title) || 'Untitled breakdown'}</span>
+      <a class="ph-sensitive" href=${`#/i/${s.id}`} title=${shortWallets(s.title) || 'Untitled breakdown'} onClick=${() => { openingFromList = s.id; }}><span class="t">${shortWallets(s.title) || 'Untitled breakdown'}</span>
         <span class="s">${s.sample ? 'Sample, from recorded data · ' : ''}${market === 'all' && label(s.market) ? `${label(s.market)} · ` : ''}${ago(s.created)}</span></a>
       ${rowLabel(s)}
       ${can ? html`<button type="button" class="more" aria-label="More for this breakdown" aria-haspopup="menu" aria-expanded=${open ? 'true' : 'false'} onClick=${() => setMenu(open ? null : s.id)}>${DOTS}</button>` : html`<span class="more-gap"></span>`}
@@ -349,6 +370,14 @@ function Home({ api, types }) {
       w = first.wallet; named = first.name; origin = 'picked for you';
     } else if (listed) { w = listed.wallet; named = listed.name; origin = linkedOk && listed.wallet === linked ? 'trader page' : 'wallet list'; }
     else if (linkedOk && w === linked) origin = 'trader page';
+    // for "breakdown asked": how it began (an example card, Pick one for me, a wallet's suggested question, the main
+    // site's ask bar, or the person's own words) and where the wallet came from; never the question itself
+    const card = EXAMPLES.findIndex(([, , question], j) => question(whoOf(typed, j)) === q);
+    const began = chosen && chosen.pick && q === pickQuestion(type) ? 'pick_for_me' : card >= 0 ? `example_${card + 1}`
+      : listed && q === `How does ${traderName(listed)} make money on ${marketWords(type)} markets?` ? 'wallet_question'
+        : params.get('q') && q === params.get('q') ? 'ask_bar' : 'own';
+    const walletFrom = picked ? 'picked' : !w ? 'none' : SAMPLE_TRADERS.some(t => t.wallet === w.toLowerCase()) ? 'sample'
+      : origin === 'trader page' ? 'trader_page' : listed ? 'list' : 'typed';
     setBusy(true); setErr(null);
     try {
       const text = picked ? q.trim().replace(/\bthis wallet\b/, traderName(picked)) : q.trim();
@@ -358,6 +387,7 @@ function Home({ api, types }) {
       const id = await api.create(text.length <= 120 ? text : text.slice(0, 119).replace(/\s+\S*$/, '').replace(/[\s,;:(\-'"]+$/, '') + '…');
       if (picked) savePick(id, picked);
       await api.ask(id, question, null, origin);
+      if (!FIXTURES) { justAsked.add(id); track('breakdown asked', { breakdown_id: id, market: type.id, range_hours: h, start: began, wallet_from: walletFrom }); }
       location.hash = `#/i/${id}`;
     } catch (e) { setErr(e.message); setBusy(false); }
   };
@@ -411,7 +441,17 @@ function Investigation({ api, id }) {
     document.addEventListener('visibilitychange', onVis);
     return () => { document.removeEventListener('visibilitychange', onVis); document.title = PAGE_TITLE; };
   }, [id]);
-  const onEvent = e => { apply(inv, e, ui); setTitle(); if (e.type === 'view.focus' && e.window_id) loadWin(e.window_id); redraw(); };
+  const onEvent = e => {
+    apply(inv, e, ui); setTitle();
+    // a plan arriving live (not one read back from history): its cost line is on screen now
+    if (e.type === 'plan.proposed' && !api.fixtures) track('breakdown plan shown', planFacts(e.plan_id));
+    if (e.type === 'view.focus' && e.window_id) loadWin(e.window_id);
+    redraw();
+  };
+  // what "breakdown plan shown" and "breakdown started" say about a plan: its server-side cost estimate, steps, market,
+  // and whether it's the breakdown's first
+  const planFacts = pid => { const p = inv.plans[pid] || {};
+    return { breakdown_id: id, plan_id: pid, estimate_usd: p.estimate_usd ?? null, steps: (p.steps || []).length, market: (p.market && p.market.id) || null, first: inv.planOrder[0] === pid }; };
   const startFollow = () => {
     if (follow.current) return;
     const ac = new AbortController(); follow.current = ac;
@@ -421,6 +461,8 @@ function Investigation({ api, id }) {
     (async () => {
       try {
         const s = await api.session(id);
+        if (!api.fixtures && !justAsked.has(id)) track('breakdown opened', { breakdown_id: id, age_days: ageDays(s.created), from: openingFromList === id ? 'list' : 'link', running: !!s.running });
+        justAsked.delete(id); openingFromList = null;
         for (const e of s.events) apply(inv, e, ui);
         if (!inv.title) inv.title = s.title || '';
         setTitle();
@@ -469,6 +511,9 @@ function Investigation({ api, id }) {
   const sending = (text, extra) => { if (text != null) inv.feed.push({ type: 'ask', text, pending: true, ...extra }); inv.starting = true; ui.tab = 'findings'; };
   // A new run (an accepted next step, a plan's Start): the workspace moves to its plan, not the last run's chart.
   const toPlan = () => { ui.stage = 'plan'; ui.followAgent = true; ui.hl = null; ui.runView = null; };
+  // "breakdown follow-up asked": a question after the first, by how it was asked (typed; Why here? on a fill; a
+  // suggested one; typed about something pointed at; the agent's next step accepted; Fix on a flagged number)
+  const followUp = (from, about) => { if (!api.fixtures) track('breakdown follow-up asked', { breakdown_id: id, from, pointed_at: about || null }); };
   const act = {
     scopeOpts: st.current.scope,
     other: st.current.other || null,
@@ -477,7 +522,9 @@ function Investigation({ api, id }) {
       // The sample's recording ends at its first plan: a follow-up's Start asks the visitor to sign in and run it
       // (owner, 11 Nov: "There are no more recorded windows" was a dead end), nothing is played
       if (SAMPLE && pid !== inv.planOrder[0] && inv.plans[pid]) { inv.plans[pid].status = 'signin'; toPlan(); redraw(); return; }
-      sending(null); toPlan(); redraw(); runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])); },
+      sending(null);
+      if (!api.fixtures) track('breakdown started', { ...planFacts(pid), queued: !!st.current.other, options: st.current.scope.size });
+      toPlan(); redraw(); runCall(api.plan(id, pid, 'approve', null, [...st.current.scope])); },
     // "Pick one for me" chose a wallet: study another instead, as a change to the plan (nothing runs until Start)
     swapWallet: (pid, o) => {
       const p = pickOf(id);
@@ -489,12 +536,13 @@ function Investigation({ api, id }) {
     composed: () => { ui.composeFocus = false; ui.composeText = null; },
     proposal: (it, yes) => {
       it.state = yes ? 'accepted' : 'declined';
-      if (yes) { sending(yesText(it.text), { proposal: true }); inv.runPlan = null; toPlan(); }
+      if (yes) { sending(yesText(it.text), { proposal: true }); inv.runPlan = null; toPlan(); followUp('next_step'); }
       redraw(); runCall(api.proposal(id, it.proposal_id, yes ? 'accept' : 'decline'));
     },
     ask: q => {
       if (ui.editing && /^Change the plan:/.test(q)) { const pid = ui.editing; ui.editing = null; sending(null); redraw(); return runCall(api.plan(id, pid, 'edit', q.replace(/^Change the plan:\s*/, ''))); }
       const c = ui.ctx; ui.ctx = null; ui.pin = null;
+      followUp(c && q === 'Why here?' ? 'why_here' : c && q === 'What happened here?' ? 'suggested' : c ? 'pointed' : 'typed', c ? c.kind : null);
       let context = null;
       if (c) context = api.fixtures ? { ...c.context, answer: localAnswer(c, q) } : c.context;
       sending(q, { ctx: c ? c.label : null });
@@ -504,7 +552,7 @@ function Investigation({ api, id }) {
       ui.extraAnn = [{ window_id: w.id, kind: 'point', t0: b.t0, label: 'this fill' }]; act.ask('Why here?'); },
     // a burst of fills in a market's replay (fills within an hour): its date, not a time in a window
     askMarketBurst: (w, b) => { ui.pop = null; ui.ctx = { kind: 'burst', label: `${shares(b.shares)} ${b.side} on ${dateTime(b.t0)}`, w, b, context: { trade_ids: b.fills.slice(0, 50).map(x => x.trade_id) } }; act.ask('Why here?'); },
-    askFix: f => runCall(api.ask(id, 'Fix the number that didn\'t match the data in this finding.', { finding_id: f.finding_id })),
+    askFix: f => (followUp('fix'), runCall(api.ask(id, 'Fix the number that didn\'t match the data in this finding.', { finding_id: f.finding_id }))),
     pinMoment: (w, t) => { ui.pin = { window_id: w.id, t }; ui.pop = null; ui.ctx = { kind: 'moment', label: `${mmss(t)} in the ${clock(w.start).slice(0, 5)} window`, w, t, context: { window_id: w.id, t: w.start + t } }; ui.composeFocus = true; redraw(); },
     clearCtx: () => { ui.ctx = null; ui.pin = null; redraw(); },
     pop: bid => { ui.pop = bid; redraw(); },
@@ -564,11 +612,11 @@ function Investigation({ api, id }) {
     <section class="main" aria-label="Workspace">
       <div class="head">
         <div class="muted small"><a href="#/">Breakdowns</a> /</div>
-        <h1>${shortWallets(inv.title) || 'Breakdown'}</h1>
+        <h1 class="ph-sensitive">${shortWallets(inv.title) || 'Breakdown'}</h1>
         ${many && html`<div class="qruns" role="group" aria-label="Your questions"><span class="lbl">Your questions</span>
           ${rs.map((r, i) => { const last = i === rs.length - 1;
             const stt = !last ? 'done' : inv.running || inv.starting ? 'working' : runWaits === 'queued' ? 'queued' : runWaits ? 'waiting for Start' : cp && cp.status === 'signin' ? 'sign in to run' : 'done';
-            return html`<button class="qrun" key=${i} aria-pressed=${i === idx ? 'true' : 'false'} title=${runTitle(inv, r, i)} onClick=${() => act.viewRun(i, rs.length)}>
+            return html`<button class="qrun ph-sensitive" key=${i} aria-pressed=${i === idx ? 'true' : 'false'} title=${runTitle(inv, r, i)} onClick=${() => act.viewRun(i, rs.length)}>
               <span class="qt">${shortWallets(runTitle(inv, r, i))}</span><span class=${'st' + (stt === 'working' ? ' live' : '')}>${stt}</span></button>`; })}</div>`}
         ${past && html`<div class="banner"><span>You're looking at an earlier question. It's finished and won't change.</span><button class="link" onClick=${() => act.viewRun(rs.length - 1, rs.length)}>Back to the new question →</button></div>`}
         <div class="meta">${inv.subject && html`<span class="chip">${traderName(inv.subject)}</span>`}${isBot(rec) ? html`<span class="who-tag bot" title="100 or more orders a day, from its Signals record">${BOT_ICON}Bot</span>`
