@@ -20,6 +20,30 @@ export const day = unix => { const d = new Date(unix * 1000); return d.getUTCDat
 export const windowLabel = (start, end) => `${day(start)}, ${hm(start)}–${hm(end)} UTC`;
 
 export const traderName = s => (s && s.name) ? s.name : s && s.wallet ? `Trader ${s.wallet.slice(0, 4)}…${s.wallet.slice(-2)}` : 'this wallet';
+// The wallet pills in "Your breakdowns" (owner, 16 Nov: a colour per wallet, so the groups read apart). Eight hues,
+// no red or green (those mean losses and gains here). A wallet's hue comes from its address (the main app's avatar
+// hash), so it stays the same visit to visit; one too close to the group above jumps four places, so two groups
+// next to each other never look alike.
+export const PILL_HUES = [45, 185, 205, 228, 250, 275, 300, 325];
+const hash32 = s => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return h >>> 0;
+};
+// wallets in the order shown → their hues (null for a group with no wallet: a grey pill, and no neighbour to avoid)
+export const pillHues = wallets => {
+  const n = PILL_HUES.length;
+  let prev = null;
+  return wallets.map(w => {
+    if (!w) { prev = null; return null; }
+    let slot = hash32(String(w).toLowerCase()) % n;
+    const near = prev !== null && Math.min((slot - prev + n) % n, (prev - slot + n) % n) < 2;
+    if (near) slot = (slot + 4) % n;
+    prev = slot;
+    return PILL_HUES[slot];
+  });
+};
 export const plural = (n, one, many) => `${count(n)} ${n === 1 ? one : (many || one + 's')}`;
 export const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
